@@ -13,7 +13,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Shell.** `!cmd` runs a command and adds its output to the context. `!!cmd` runs it without adding output to the context.
 - **Images.** Paste, drag and drop, or use the image button.
 - **Sessions.** Start a new session, resume one from the history picker, `/fork`, `/clone`, `/name`, `/compact`, and `/export`. The sidebar reopens the last session of the workspace.
-- **Model and thinking level.** Chips in the input toolbar open pickers. The toolbar also shows context use and cost.
+- **Model and effort picker.** Click the model chip in the toolbar to open a picker above the input. It has a search field, a list of recent models, and details for each model (context size, reasoning, cost). A slider at the bottom sets the effort (thinking level). Use ↑/↓ and Enter to select a model. Use ←/→ or Tab to change the effort. `/model [query]` also opens the picker. The toolbar also shows context use and cost.
 - **Editor integration.** *Pi: Add Selection to Chat* (<kbd>⌘⌥L</kbd>) inserts `@file:10-20`. Right-click a file in the Explorer and select *Pi: Add File to Chat*. Click a file path in a tool card or inline code to open it.
 - **More sessions.** *Pi: Open in New Tab* opens another chat panel with its own pi process.
 

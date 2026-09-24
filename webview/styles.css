@@ -51,7 +51,8 @@ kbd {
 .scroll { flex: 1; overflow-y: auto; padding: 12px 12px 8px; }
 .messages { display: flex; flex-direction: column; }
 .empty { text-align: center; color: var(--muted); margin-top: 18vh; line-height: 1.7; }
-.empty .logo { font-size: 42px; font-family: Georgia, serif; color: var(--vscode-foreground); opacity: .8; }
+.empty .logo { width: 64px; height: 64px; display: block; margin: 0 auto 10px; }
+.header-logo { width: 16px; height: 16px; flex: none; margin-right: 4px; }
 .empty .hint { font-size: 0.9em; margin-top: 6px; }
 
 .user-msg {
@@ -246,3 +247,54 @@ kbd {
 .statusline { display: flex; flex-wrap: wrap; gap: 10px; padding: 5px 4px 0; font-size: 0.85em; color: var(--muted); }
 .statusline:empty { display: none; }
 .status-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* ---------------------------------------------------------------- model chip + picker */
+.chip { background: var(--vscode-badge-background); }
+.chip.active { outline: 1px solid var(--accent); }
+.chip-level { color: var(--muted); margin-left: 5px; }
+.chip-level:empty { display: none; }
+
+.model-picker {
+  position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px; z-index: 20;
+  display: flex; flex-direction: column; max-height: min(520px, 70vh);
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
+  overflow: hidden;
+}
+.mp-title { color: var(--muted); padding: 10px 14px 4px; }
+.mp-search {
+  margin: 4px 10px 6px; padding: 5px 8px; border-radius: 6px; font: inherit; outline: none;
+  background: var(--input-bg); color: var(--vscode-input-foreground); border: 1px solid var(--border);
+}
+.mp-search:focus { border-color: var(--accent); }
+.mp-list { overflow-y: auto; padding: 0 6px 6px; flex: 1; min-height: 60px; outline: none; }
+.mp-section {
+  font-size: 0.78em; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+  padding: 8px 10px 3px;
+}
+.mp-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+.mp-item.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+.mp-text { flex: 1; min-width: 0; }
+.mp-name { font-size: 1.05em; }
+.mp-detail { color: var(--muted); font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mp-item.active .mp-detail { color: inherit; opacity: .8; }
+.mp-check { font-size: 1.15em; flex: none; }
+.mp-empty { color: var(--muted); padding: 12px 10px; }
+
+.mp-effort { display: flex; align-items: center; gap: 12px; padding: 10px 14px 12px; border-top: 1px solid var(--border); }
+.mp-effort-label { flex: 1; font-size: 1.05em; }
+.mp-effort-label .dim { color: var(--muted); }
+.slider {
+  position: relative; width: 150px; height: 20px; border-radius: 10px; cursor: pointer; flex: none;
+  background: var(--vscode-input-background); border: 1px solid var(--border);
+}
+.slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 10px; background: var(--vscode-button-background); }
+.slider-dot {
+  position: absolute; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%;
+  background: var(--muted); opacity: .7;
+}
+.slider-dot.on { background: var(--vscode-button-foreground); opacity: .7; }
+.slider-knob {
+  position: absolute; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%;
+  background: #e8e8e8; box-shadow: 0 1px 3px rgba(0, 0, 0, .4); transition: left .12s ease;
+}
