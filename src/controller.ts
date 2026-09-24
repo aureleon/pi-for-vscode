@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import { PiProcess, type RpcRecord } from "./piProcess";
 import { defaultSessionDir, listSessions, relativeTime } from "./sessions";
 import { getShellEnv } from "./shellEnv";
+import { agentDir, scopeModels } from "./modelScope";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
 const RECENT_MODELS_KEY = "pi.recentModels";
@@ -27,6 +28,8 @@ export class PiController implements vscode.Disposable {
   private outbox: any[] = [];
   private statusItem: vscode.StatusBarItem;
   private starting?: Promise<void>;
+  private env: NodeJS.ProcessEnv = process.env;
+  private args: string[] = [];
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -61,6 +64,7 @@ export class PiController implements vscode.Disposable {
     const cfg = vscode.workspace.getConfiguration("pi");
     const env = await getShellEnv(cfg.get<boolean>("useLoginShellEnv", true));
     env.PI_VSCODE = "1";
+    this.env = env;
     const command = cfg.get<string>("path")?.trim() || "pi";
     const args = [...(cfg.get<string[]>("args") ?? [])];
 
@@ -73,6 +77,7 @@ export class PiController implements vscode.Disposable {
       args.push("--session", resume);
     }
 
+    this.args = args;
     this.output.appendLine(`[pi] starting: ${command} --mode rpc ${args.join(" ")} (cwd ${this.cwd})`);
     const pi = new PiProcess(command, args, this.cwd, env);
     this.pi = pi;
@@ -246,6 +251,9 @@ export class PiController implements vscode.Disposable {
           break;
         case "setModel":
           await this.setModel(m.provider, m.id);
+          break;
+        case "editEnabledModels":
+          await this.editEnabledModels();
           break;
         case "setThinking":
           await this.setThinking(m.level);
@@ -451,7 +459,9 @@ export class PiController implements vscode.Disposable {
   async pickThinking(arg = "") {
     const { levels } = await this.req({ type: "get_available_thinking_levels" });
     if (levels.includes(arg)) return this.setThinking(arg);
-    await this.pickModel();
+    this.host.reveal();
+    await this.sendModels();
+    this.post({ type: "openEffortPicker" });
   }
 
   private modelsCache?: any[];
@@ -471,12 +481,39 @@ export class PiController implements vscode.Disposable {
       }));
     }
     const { levels } = await this.req({ type: "get_available_thinking_levels" }).catch(() => ({ levels: ["off"] }));
+    // Re-read enabledModels every time so edits to settings.json apply immediately.
+    const scope = scopeModels(this.cwd, this.args, this.modelsCache!, this.env);
     this.post({
       type: "models",
       models: this.modelsCache,
+      enabled: scope.models?.map((m: any) => `${m.provider}/${m.id}`),
+      scopeSource: scope.source,
+      unmatched: scope.unmatched,
       levels,
       recent: this.context.globalState.get<string[]>(RECENT_MODELS_KEY, []),
     });
+  }
+
+  /** Open the settings.json that controls `enabledModels` (project if it defines it, else global). */
+  private async editEnabledModels() {
+    const project = path.join(this.cwd, ".pi", "settings.json");
+    const global = path.join(agentDir(this.env), "settings.json");
+    let file = global;
+    try {
+      if (Array.isArray(JSON.parse(fs.readFileSync(project, "utf8")).enabledModels)) file = project;
+    } catch {}
+    if (!fs.existsSync(file)) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ enabledModels: [] }, null, 2) + "\n");
+    }
+    const doc = await vscode.workspace.openTextDocument(file);
+    const editor = await vscode.window.showTextDocument(doc, { preview: false, viewColumn: vscode.ViewColumn.One });
+    const idx = doc.getText().indexOf('"enabledModels"');
+    if (idx >= 0) {
+      const pos = doc.positionAt(idx);
+      editor.selection = new vscode.Selection(pos, pos);
+      editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+    }
   }
 
   async setModel(provider: string, id: string) {

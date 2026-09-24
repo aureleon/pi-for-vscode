@@ -60,12 +60,14 @@ app.innerHTML = `
     <div class="composer" id="composer">
       <div id="popup" class="popup hidden"></div>
       <div id="model-picker" class="model-picker hidden"></div>
+      <div id="effort-picker" class="effort-picker hidden"></div>
       <div id="attachments" class="attachments hidden"></div>
       <textarea id="input" rows="1" placeholder="Ask Pi…  (/ commands, @ files, ! shell)"></textarea>
       <div class="toolbar">
         <button class="icon-btn" id="btn-image" title="Attach image">${I.image}</button>
         <button class="icon-btn" id="btn-slash" title="Commands">${I.slash}</button>
-        <button class="chip" id="btn-model" title="Select model and effort"><span id="model-name">…</span><span class="chip-level" id="thinking-level"></span></button>
+        <button class="chip" id="btn-model" title="Select model"><span id="model-name">…</span></button>
+        <button class="chip dim" id="btn-effort" title="Select effort (thinking level)">${I.brain}<span id="thinking-level"></span></button>
         <span class="spacer"></span>
         <span class="ctx" id="ctx" title="Context usage"></span>
         <button class="send" id="btn-send" title="Send (Enter)">${I.send}</button>
@@ -784,10 +786,13 @@ function levelLabel(l?: string): string {
 function updateModel() {
   const m = state.model;
   $("model-name").textContent = m ? (m.name ?? m.id) : "Select model";
-  $("btn-model").title = m ? `${m.provider}/${m.id} — click to change model or effort` : "Select model";
-  const lvl = state.thinkingLevel;
-  $("thinking-level").textContent = m?.reasoning && lvl && lvl !== "off" ? levelLabel(lvl) : "";
+  $("btn-model").title = m ? `${m.provider}/${m.id} — click to change model` : "Select model";
+  const lvl = state.thinkingLevel ?? "off";
+  $("thinking-level").textContent = levelLabel(lvl);
+  $("btn-effort").classList.toggle("hidden", !m?.reasoning);
+  $("btn-effort").title = `Effort: ${levelLabel(lvl)} — click to change thinking level`;
   if (picker.open) picker.render();
+  if (effortPicker.open) effortPicker.render();
 }
 function updateStats(s: any) {
   const ctx = $("ctx");
@@ -1092,6 +1097,10 @@ $("btn-model").addEventListener("click", (e) => {
   e.stopPropagation();
   picker.toggle();
 });
+$("btn-effort").addEventListener("click", (e) => {
+  e.stopPropagation();
+  effortPicker.toggle();
+});
 $("btn-image").addEventListener("click", () => post({ type: "pickImage" }));
 $("btn-slash").addEventListener("click", () => {
   if (!input.value.startsWith("/")) input.value = "/" + input.value;
@@ -1110,14 +1119,16 @@ class ModelPicker {
   open = false;
   private root = $("model-picker");
   private models: ModelInfo[] = [];
-  private levels: string[] = ["off"];
   private recent: string[] = [];
+  private enabled?: string[];
+  private scopeSource?: string;
+  private unmatched: string[] = [];
+  private showAll = false;
   private query = "";
   private sel = 0;
   private flat: ModelInfo[] = [];
   private search!: HTMLInputElement;
   private list!: HTMLElement;
-  private effort!: HTMLElement;
   private loaded = false;
 
   constructor() {
@@ -1125,10 +1136,9 @@ class ModelPicker {
       <div class="mp-title">Select a model</div>
       <input class="mp-search" placeholder="Search models…" spellcheck="false">
       <div class="mp-list" tabindex="-1"></div>
-      <div class="mp-effort"></div>`;
+      <div class="mp-scope"></div>`;
     this.search = this.root.querySelector(".mp-search")!;
     this.list = this.root.querySelector(".mp-list")!;
-    this.effort = this.root.querySelector(".mp-effort")!;
     this.search.addEventListener("input", () => {
       this.query = this.search.value;
       this.sel = 0;
@@ -1141,9 +1151,13 @@ class ModelPicker {
     });
   }
 
-  setData(models: ModelInfo[], levels: string[], recent: string[]) {
+  setData(models: ModelInfo[], levels: string[], recent: string[], enabled?: string[], scopeSource?: string, unmatched?: string[]) {
+    this.enabled = enabled;
+    this.scopeSource = scopeSource;
+    this.unmatched = unmatched ?? [];
     this.models = models ?? [];
-    this.levels = levels?.length ? levels : ["off"];
+    thinkingLevels = levels?.length ? levels : ["off"];
+    if (effortPicker.open) effortPicker.render();
     this.recent = recent ?? [];
     this.loaded = true;
     if (this.open) this.render();
@@ -1155,10 +1169,12 @@ class ModelPicker {
 
   show(query: string) {
     hidePopup();
+    effortPicker.hide(false);
     this.open = true;
     this.query = query;
     this.search.value = query;
     this.sel = -1; // select the current model on first render
+    this.showAll = false;
     this.root.classList.remove("hidden");
     $("btn-model").classList.add("active");
     if (!this.loaded) this.list.innerHTML = `<div class="mp-empty">Loading models…</div>`;
@@ -1167,16 +1183,16 @@ class ModelPicker {
     this.search.focus();
   }
 
-  hide() {
+  hide(focusInput = true) {
+    if (!this.open) return;
     this.open = false;
     this.root.classList.add("hidden");
     $("btn-model").classList.remove("active");
-    input.focus();
+    if (focusInput) input.focus();
   }
 
   render() {
     this.renderList();
-    this.renderEffort();
   }
 
   private isCurrent(m: ModelInfo) {
@@ -1204,22 +1220,41 @@ class ModelPicker {
     const byKey = new Map(this.models.map((m) => [key(m), m]));
     const sections: { title?: string; items: ModelInfo[] }[] = [];
     const multiProvider = new Set(this.models.map((m) => m.provider)).size > 1;
+    const enabled = this.enabled?.map((k) => byKey.get(k)).filter((m): m is ModelInfo => !!m);
+    const scoped = !!enabled?.length && !this.showAll;
+    const cur = this.models.find((m) => this.isCurrent(m));
 
-    if (!q) {
-      const cur = this.models.find((m) => this.isCurrent(m));
-      const recent = [cur, ...this.recent.map((k) => byKey.get(k))]
-        .filter((m): m is ModelInfo => !!m)
-        .filter((m, i, a) => a.findIndex((x) => key(x) === key(m)) === i);
-      if (recent.length) sections.push({ title: "Recent", items: recent });
-    }
-    const all = this.models.filter((m) => this.matches(m, q));
-    if (multiProvider) {
-      const groups = new Map<string, ModelInfo[]>();
-      for (const m of all) groups.set(m.provider, [...(groups.get(m.provider) ?? []), m]);
-      for (const [p, items] of groups) sections.push({ title: p, items });
+    const grouped = (items: ModelInfo[], fallbackTitle?: string) => {
+      if (multiProvider) {
+        const groups = new Map<string, ModelInfo[]>();
+        for (const m of items) groups.set(m.provider, [...(groups.get(m.provider) ?? []), m]);
+        for (const [p, list] of groups) sections.push({ title: p, items: list });
+      } else sections.push({ title: fallbackTitle ?? items[0]?.provider, items });
+    };
+
+    if (scoped) {
+      // enabledModels configured: show exactly that list (in pattern order).
+      if (!q) {
+        if (cur && !enabled!.some((m) => key(m) === key(cur))) sections.push({ title: "Current", items: [cur] });
+        sections.push({ title: "Enabled models", items: enabled! });
+      } else {
+        const hits = enabled!.filter((m) => this.matches(m, q));
+        if (hits.length) sections.push({ title: "Enabled models", items: hits });
+        const enabledKeys = new Set(enabled!.map(key));
+        const others = this.models.filter((m) => !enabledKeys.has(key(m)) && this.matches(m, q));
+        if (others.length) sections.push({ title: "Other models", items: others });
+      }
     } else {
-      sections.push({ title: q ? undefined : all[0]?.provider ?? "All models", items: all });
+      if (!q) {
+        const recent = [cur, ...this.recent.map((k) => byKey.get(k))]
+          .filter((m): m is ModelInfo => !!m)
+          .filter((m, i, a) => a.findIndex((x) => key(x) === key(m)) === i);
+        if (recent.length) sections.push({ title: "Recent", items: recent });
+      }
+      const all = this.models.filter((m) => this.matches(m, q));
+      grouped(all, q ? undefined : all[0]?.provider ?? "All models");
     }
+    this.renderScope(enabled);
 
     this.flat = sections.flatMap((s) => s.items);
     if (this.sel < 0) this.sel = Math.max(0, this.flat.findIndex((m) => this.isCurrent(m)));
@@ -1250,55 +1285,40 @@ class ModelPicker {
     this.scrollToSel();
   }
 
+  private renderScope(enabled?: ModelInfo[]) {
+    const box = this.root.querySelector(".mp-scope") as HTMLElement;
+    const src = this.scopeSource ? shortPath(this.scopeSource).replace(/^\/Users\/[^/]+/, "~") : "settings.json";
+    let text: string;
+    if (enabled?.length) {
+      text = this.showAll
+        ? `Showing all ${this.models.length} models`
+        : `${enabled.length} enabled model${enabled.length === 1 ? "" : "s"} from <span class="mono" title="${escapeHtml(this.scopeSource ?? "")}">${escapeHtml(src)}</span>`;
+    } else {
+      text = `All ${this.models.length} models · no <span class="mono">enabledModels</span> set`;
+    }
+    const warn = this.unmatched.length ? ` · <span class="warn" title="${escapeHtml(this.unmatched.join("\n"))}">${this.unmatched.length} pattern${this.unmatched.length === 1 ? "" : "s"} unmatched</span>` : "";
+    box.innerHTML = `<span class="mp-scope-text">${text}${warn}</span>`;
+    if (enabled?.length) {
+      const t = el("button", "link", this.showAll ? "Enabled only" : "Show all");
+      t.addEventListener("click", () => {
+        this.showAll = !this.showAll;
+        this.sel = -1;
+        this.renderList();
+        this.search.focus();
+      });
+      box.appendChild(t);
+    }
+    const edit = el("button", "link", "Edit");
+    edit.title = "Edit enabledModels in settings.json";
+    edit.addEventListener("click", () => {
+      post({ type: "editEnabledModels" });
+      this.hide();
+    });
+    box.appendChild(edit);
+  }
+
   private scrollToSel() {
     (this.list.querySelectorAll(".mp-item")[this.sel] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
-  }
-
-  private renderEffort() {
-    const levels = this.levels;
-    const cur = state.thinkingLevel ?? "off";
-    const reasoning = !!state.model?.reasoning && levels.length > 1;
-    this.effort.classList.toggle("hidden", !reasoning);
-    if (!reasoning) return;
-    const idx = Math.max(0, levels.indexOf(cur));
-    const pct = levels.length > 1 ? (idx / (levels.length - 1)) * 100 : 0;
-    this.effort.innerHTML = `
-      <div class="mp-effort-label">Effort <span class="dim">(${escapeHtml(levelLabel(cur))})</span></div>
-      <div class="slider" role="slider" aria-valuemin="0" aria-valuemax="${levels.length - 1}" aria-valuenow="${idx}" title="←/→ to adjust">
-        <div class="slider-fill" style="width:calc(20px + (100% - 20px) * ${pct / 100})"></div>
-        ${levels.map((l, i) => `<div class="slider-dot${i <= idx ? " on" : ""}" data-level="${l}" title="${escapeHtml(levelLabel(l))}" style="left:calc(10px + (100% - 20px) * ${levels.length > 1 ? i / (levels.length - 1) : 0})"></div>`).join("")}
-        <div class="slider-knob" style="left:calc(10px + (100% - 20px) * ${pct / 100})"></div>
-      </div>`;
-    const slider = this.effort.querySelector(".slider") as HTMLElement;
-    const pick = (clientX: number) => {
-      const r = slider.getBoundingClientRect();
-      const f = Math.min(1, Math.max(0, (clientX - r.left - 10) / (r.width - 20)));
-      this.setLevel(levels[Math.round(f * (levels.length - 1))]);
-    };
-    slider.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      pick(e.clientX);
-      const move = (ev: MouseEvent) => pick(ev.clientX);
-      const up = () => {
-        document.removeEventListener("mousemove", move);
-        document.removeEventListener("mouseup", up);
-        this.search.focus();
-      };
-      document.addEventListener("mousemove", move);
-      document.addEventListener("mouseup", up);
-    });
-  }
-
-  private setLevel(level: string | undefined) {
-    if (!level || level === state.thinkingLevel) return;
-    state.thinkingLevel = level; // optimistic
-    updateModel();
-    post({ type: "setThinking", level });
-  }
-
-  private stepLevel(d: number) {
-    const i = Math.max(0, this.levels.indexOf(state.thinkingLevel ?? "off"));
-    this.setLevel(this.levels[Math.min(this.levels.length - 1, Math.max(0, i + d))]);
   }
 
   private choose(m: ModelInfo) {
@@ -1315,13 +1335,131 @@ class ModelPicker {
     else if (e.key === "ArrowUp") { this.sel = (this.sel - 1 + n) % n; this.renderList(); e.preventDefault(); }
     else if (e.key === "Enter") { const m = this.flat[this.sel]; if (m) this.choose(m); e.preventDefault(); }
     else if (e.key === "Escape") { this.hide(); e.preventDefault(); e.stopPropagation(); }
-    else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && (!this.search.value || e.altKey)) {
-      this.stepLevel(e.key === "ArrowLeft" ? -1 : 1);
-      e.preventDefault();
-    } else if (e.key === "Tab") { this.stepLevel(e.shiftKey ? -1 : 1); e.preventDefault(); }
   }
 }
 const picker = new ModelPicker();
+
+// ------------------------------------------------------------------ effort picker
+
+let thinkingLevels: string[] = ["off"];
+const LEVEL_INFO: Record<string, string> = {
+  off: "No extended thinking",
+  minimal: "Very brief reasoning",
+  low: "Light reasoning, faster",
+  medium: "Balanced depth and speed",
+  high: "Deep reasoning",
+  xhigh: "Extra deep reasoning",
+  max: "Maximum reasoning budget",
+};
+
+class EffortPicker {
+  open = false;
+  private root = $("effort-picker");
+  private loaded = false;
+
+  constructor() {
+    this.root.tabIndex = -1;
+    this.root.addEventListener("mousedown", (e) => e.stopPropagation());
+    this.root.addEventListener("keydown", (e) => this.onKey(e));
+    document.addEventListener("mousedown", (e) => {
+      if (this.open && !(e.target as HTMLElement).closest("#btn-effort")) this.hide();
+    });
+  }
+
+  toggle() {
+    this.open ? this.hide() : this.show();
+  }
+
+  show() {
+    hidePopup();
+    picker.hide(false);
+    this.open = true;
+    this.root.classList.remove("hidden");
+    $("btn-effort").classList.add("active");
+    // Anchor under the chip horizontally.
+    const chip = $("btn-effort");
+    const composerRect = $("composer").getBoundingClientRect();
+    const left = Math.max(0, Math.min(chip.getBoundingClientRect().left - composerRect.left, composerRect.width - 280));
+    this.root.style.left = `${left}px`;
+    if (!this.loaded) post({ type: "getModels" }); // also returns thinking levels for the current model
+    this.loaded = true;
+    this.render();
+    this.root.focus();
+  }
+
+  hide(focusInput = true) {
+    if (!this.open) return;
+    this.open = false;
+    this.root.classList.add("hidden");
+    $("btn-effort").classList.remove("active");
+    if (focusInput) input.focus();
+  }
+
+  render() {
+    const levels = thinkingLevels;
+    const cur = state.thinkingLevel ?? "off";
+    const idx = Math.max(0, levels.indexOf(cur));
+    const pct = levels.length > 1 ? idx / (levels.length - 1) : 0;
+    this.root.innerHTML = `
+      <div class="ep-head">
+        <div class="ep-title">Effort <span class="dim">(${escapeHtml(levelLabel(cur))})</span></div>
+        <div class="slider" role="slider" aria-valuemin="0" aria-valuemax="${levels.length - 1}" aria-valuenow="${idx}" title="←/→ to adjust">
+          <div class="slider-fill" style="width:calc(20px + (100% - 20px) * ${pct})"></div>
+          ${levels.map((l, i) => `<div class="slider-dot${i <= idx ? " on" : ""}" style="left:calc(10px + (100% - 20px) * ${levels.length > 1 ? i / (levels.length - 1) : 0})"></div>`).join("")}
+          <div class="slider-knob" style="left:calc(10px + (100% - 20px) * ${pct})"></div>
+        </div>
+      </div>
+      <div class="ep-list"></div>`;
+    const list = this.root.querySelector(".ep-list")!;
+    levels.forEach((l) => {
+      const row = el("div", `ep-item${l === cur ? " active" : ""}`);
+      row.innerHTML = `<div class="mp-text"><div class="mp-name">${escapeHtml(levelLabel(l))}</div><div class="mp-detail">${escapeHtml(LEVEL_INFO[l] ?? "")}</div></div>${l === cur ? `<span class="mp-check">✓</span>` : ""}`;
+      row.addEventListener("click", () => {
+        this.set(l);
+        this.hide();
+      });
+      list.appendChild(row);
+    });
+    const slider = this.root.querySelector(".slider") as HTMLElement;
+    const pick = (clientX: number) => {
+      const r = slider.getBoundingClientRect();
+      const f = Math.min(1, Math.max(0, (clientX - r.left - 10) / (r.width - 20)));
+      this.set(levels[Math.round(f * (levels.length - 1))]);
+    };
+    slider.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      pick(e.clientX);
+      const move = (ev: MouseEvent) => pick(ev.clientX);
+      const up = () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        this.root.focus();
+      };
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    });
+  }
+
+  set(level: string | undefined) {
+    if (!level || level === state.thinkingLevel) return;
+    state.thinkingLevel = level; // optimistic; host confirms via state
+    updateModel();
+    post({ type: "setThinking", level });
+  }
+
+  private step(d: number) {
+    const i = Math.max(0, thinkingLevels.indexOf(state.thinkingLevel ?? "off"));
+    this.set(thinkingLevels[Math.min(thinkingLevels.length - 1, Math.max(0, i + d))]);
+  }
+
+  private onKey(e: KeyboardEvent) {
+    if (e.key === "ArrowLeft" || e.key === "ArrowUp") { this.step(-1); e.preventDefault(); }
+    else if (e.key === "ArrowRight" || e.key === "ArrowDown") { this.step(1); e.preventDefault(); }
+    else if (e.key === "Enter" || e.key === "Escape") { this.hide(); e.preventDefault(); e.stopPropagation(); }
+    else if (/^[0-9]$/.test(e.key) && thinkingLevels[Number(e.key)]) { this.set(thinkingLevels[Number(e.key)]); }
+  }
+}
+const effortPicker = new EffortPicker();
 
 // ------------------------------------------------------------------ banner
 
@@ -1401,10 +1539,13 @@ window.addEventListener("message", (ev) => {
       if (m.text) insertText(m.text, !input.value.trim());
       break;
     case "models":
-      picker.setData(m.models, m.levels, m.recent);
+      picker.setData(m.models, m.levels, m.recent, m.enabled, m.scopeSource, m.unmatched);
       break;
     case "openModelPicker":
       picker.show(m.query ?? "");
+      break;
+    case "openEffortPicker":
+      effortPicker.show();
       break;
     case "fileResults":
       onFileResults(m.requestId, m.files);
