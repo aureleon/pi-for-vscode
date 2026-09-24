@@ -61,7 +61,7 @@
       },
       {
         "command": "pi.selectThinking",
-        "title": "Pi: Select Thinking Level"
+        "title": "Pi: Select Thinking Level (Effort)"
       },
       {
         "command": "pi.abort",
@@ -177,5 +177,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/dhguz/pi-for-vscode"
-  }
+  },
+  "icon": "media/icon.png"
 }

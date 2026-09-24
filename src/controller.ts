@@ -7,6 +7,7 @@ import { defaultSessionDir, listSessions, relativeTime } from "./sessions";
 import { getShellEnv } from "./shellEnv";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
+const RECENT_MODELS_KEY = "pi.recentModels";
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g;
 export const stripAnsi = (s: string) => (s ?? "").replace(ANSI_RE, "");
 
@@ -240,6 +241,15 @@ export class PiController implements vscode.Disposable {
         case "restart":
           await this.restart();
           break;
+        case "getModels":
+          await this.sendModels(m.refresh);
+          break;
+        case "setModel":
+          await this.setModel(m.provider, m.id);
+          break;
+        case "setThinking":
+          await this.setThinking(m.level);
+          break;
         case "pickImage":
           await this.pickImage();
           break;
@@ -431,52 +441,55 @@ export class PiController implements vscode.Disposable {
     if (!r?.cancelled) await this.sendInit("reset");
   }
 
+  /** Open the inline model picker in the webview. */
   async pickModel(query = "") {
-    const { models } = await this.req({ type: "get_available_models" });
-    const current = this.state.model;
-    const byProvider = new Map<string, any[]>();
-    for (const m of models) byProvider.set(m.provider, [...(byProvider.get(m.provider) ?? []), m]);
-    const items: any[] = [];
-    for (const [provider, list] of byProvider) {
-      items.push({ label: provider, kind: vscode.QuickPickItemKind.Separator });
-      for (const m of list) {
-        const isCur = current && m.id === current.id && m.provider === current.provider;
-        items.push({
-          label: `${isCur ? "$(check) " : ""}${m.name ?? m.id}`,
-          description: m.id,
-          detail: [m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k ctx` : "", m.reasoning ? "reasoning" : "", m.cost ? `$${m.cost.input}/$${m.cost.output} per M` : ""].filter(Boolean).join(" · "),
-          model: m,
-        });
-      }
-    }
-    const qp = vscode.window.createQuickPick<any>();
-    qp.items = items;
-    qp.value = query;
-    qp.placeholder = "Select a model";
-    qp.matchOnDescription = true;
-    const picked = await new Promise<any>((resolve) => {
-      qp.onDidAccept(() => resolve(qp.selectedItems[0]));
-      qp.onDidHide(() => resolve(undefined));
-      qp.show();
-    });
-    qp.dispose();
-    if (!picked?.model) return;
-    await this.req({ type: "set_model", provider: picked.model.provider, modelId: picked.model.id });
-    await this.refreshState();
-    this.refreshStats();
+    this.host.reveal();
+    await this.sendModels();
+    this.post({ type: "openModelPicker", query });
   }
 
   async pickThinking(arg = "") {
     const { levels } = await this.req({ type: "get_available_thinking_levels" });
-    let level = levels.includes(arg) ? arg : undefined;
-    if (!level) {
-      const pick = await vscode.window.showQuickPick(
-        levels.map((l: string) => ({ label: `${l === this.state.thinkingLevel ? "$(check) " : ""}${l}`, level: l })),
-        { placeHolder: "Thinking level" },
-      );
-      level = (pick as any)?.level;
+    if (levels.includes(arg)) return this.setThinking(arg);
+    await this.pickModel();
+  }
+
+  private modelsCache?: any[];
+
+  /** Send slim model list + thinking levels + recents to the webview. */
+  async sendModels(refresh = false) {
+    if (!this.modelsCache || refresh) {
+      const { models } = await this.req({ type: "get_available_models" });
+      this.modelsCache = models.map((m: any) => ({
+        provider: m.provider,
+        id: m.id,
+        name: m.name ?? m.id,
+        reasoning: !!m.reasoning,
+        contextWindow: m.contextWindow,
+        cost: m.cost ? { input: m.cost.input, output: m.cost.output } : undefined,
+        images: Array.isArray(m.input) && m.input.includes("image"),
+      }));
     }
-    if (!level) return;
+    const { levels } = await this.req({ type: "get_available_thinking_levels" }).catch(() => ({ levels: ["off"] }));
+    this.post({
+      type: "models",
+      models: this.modelsCache,
+      levels,
+      recent: this.context.globalState.get<string[]>(RECENT_MODELS_KEY, []),
+    });
+  }
+
+  async setModel(provider: string, id: string) {
+    await this.req({ type: "set_model", provider, modelId: id });
+    const key = `${provider}/${id}`;
+    const recent = [key, ...this.context.globalState.get<string[]>(RECENT_MODELS_KEY, []).filter((k) => k !== key)].slice(0, 5);
+    await this.context.globalState.update(RECENT_MODELS_KEY, recent);
+    await this.refreshState();
+    await this.sendModels();
+    this.refreshStats();
+  }
+
+  async setThinking(level: string) {
     await this.req({ type: "set_thinking_level", level });
     await this.refreshState();
   }

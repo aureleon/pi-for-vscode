@@ -38,6 +38,7 @@ const I = {
 const app = document.getElementById("app")!;
 app.innerHTML = `
   <header class="header">
+    <img class="header-logo" id="header-logo" alt="">
     <div class="title" id="title">New session</div>
     <button class="icon-btn" id="btn-history" title="Resume session (/resume)">${I.history}</button>
     <button class="icon-btn" id="btn-new" title="New session (/new)">${I.newChat}</button>
@@ -46,7 +47,7 @@ app.innerHTML = `
   <main id="scroll" class="scroll">
     <div id="messages" class="messages"></div>
     <div id="empty" class="empty">
-      <div class="logo">π</div>
+      <img class="logo" id="empty-logo" alt="pi">
       <div>Ask Pi anything about your code.</div>
       <div class="hint">Type <kbd>/</kbd> for commands, <kbd>@</kbd> to mention files, <kbd>!</kbd> to run a shell command.</div>
     </div>
@@ -58,13 +59,13 @@ app.innerHTML = `
     <div id="queue" class="queue hidden"></div>
     <div class="composer" id="composer">
       <div id="popup" class="popup hidden"></div>
+      <div id="model-picker" class="model-picker hidden"></div>
       <div id="attachments" class="attachments hidden"></div>
       <textarea id="input" rows="1" placeholder="Ask Pi…  (/ commands, @ files, ! shell)"></textarea>
       <div class="toolbar">
         <button class="icon-btn" id="btn-image" title="Attach image">${I.image}</button>
         <button class="icon-btn" id="btn-slash" title="Commands">${I.slash}</button>
-        <button class="chip" id="btn-model" title="Select model"><span id="model-name">…</span></button>
-        <button class="chip dim" id="btn-thinking" title="Thinking level">${I.brain}<span id="thinking-level"></span></button>
+        <button class="chip" id="btn-model" title="Select model and effort"><span id="model-name">…</span><span class="chip-level" id="thinking-level"></span></button>
         <span class="spacer"></span>
         <span class="ctx" id="ctx" title="Context usage"></span>
         <button class="send" id="btn-send" title="Send (Enter)">${I.send}</button>
@@ -76,6 +77,9 @@ app.innerHTML = `
 `;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+const LOGO = document.body.dataset.logo ?? "";
+$<HTMLImageElement>("empty-logo").src = LOGO;
+$<HTMLImageElement>("header-logo").src = LOGO;
 const scrollEl = $("scroll");
 const messagesEl = $("messages");
 const input = $<HTMLTextAreaElement>("input");
@@ -773,13 +777,17 @@ function updateTitle() {
   $("title").textContent = t;
   $("title").title = t;
 }
+function levelLabel(l?: string): string {
+  if (!l) return "";
+  return l === "xhigh" ? "X-High" : l[0].toUpperCase() + l.slice(1);
+}
 function updateModel() {
   const m = state.model;
-  $("model-name").textContent = m ? (m.name ?? m.id) : "No model";
-  $("btn-model").title = m ? `${m.provider}/${m.id}` : "Select model";
+  $("model-name").textContent = m ? (m.name ?? m.id) : "Select model";
+  $("btn-model").title = m ? `${m.provider}/${m.id} — click to change model or effort` : "Select model";
   const lvl = state.thinkingLevel;
-  $("thinking-level").textContent = lvl ?? "";
-  $("btn-thinking").classList.toggle("hidden", !m?.reasoning);
+  $("thinking-level").textContent = m?.reasoning && lvl && lvl !== "off" ? levelLabel(lvl) : "";
+  if (picker.open) picker.render();
 }
 function updateStats(s: any) {
   const ctx = $("ctx");
@@ -1080,8 +1088,10 @@ function insertText(text: string, replace = false) {
 sendBtn.addEventListener("click", () => (sendBtn.classList.contains("stop") ? post({ type: "abort" }) : submit("steer")));
 $("btn-new").addEventListener("click", () => post({ type: "builtin", name: "new" }));
 $("btn-history").addEventListener("click", () => post({ type: "builtin", name: "resume" }));
-$("btn-model").addEventListener("click", () => post({ type: "builtin", name: "model" }));
-$("btn-thinking").addEventListener("click", () => post({ type: "builtin", name: "thinking" }));
+$("btn-model").addEventListener("click", (e) => {
+  e.stopPropagation();
+  picker.toggle();
+});
 $("btn-image").addEventListener("click", () => post({ type: "pickImage" }));
 $("btn-slash").addEventListener("click", () => {
   if (!input.value.startsWith("/")) input.value = "/" + input.value;
@@ -1091,6 +1101,227 @@ $("btn-slash").addEventListener("click", () => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && running && document.activeElement !== input && !$("dialogs").childElementCount) post({ type: "abort" });
 });
+
+// ------------------------------------------------------------------ model picker
+
+interface ModelInfo { provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number; cost?: { input: number; output: number }; images?: boolean }
+
+class ModelPicker {
+  open = false;
+  private root = $("model-picker");
+  private models: ModelInfo[] = [];
+  private levels: string[] = ["off"];
+  private recent: string[] = [];
+  private query = "";
+  private sel = 0;
+  private flat: ModelInfo[] = [];
+  private search!: HTMLInputElement;
+  private list!: HTMLElement;
+  private effort!: HTMLElement;
+  private loaded = false;
+
+  constructor() {
+    this.root.innerHTML = `
+      <div class="mp-title">Select a model</div>
+      <input class="mp-search" placeholder="Search models…" spellcheck="false">
+      <div class="mp-list" tabindex="-1"></div>
+      <div class="mp-effort"></div>`;
+    this.search = this.root.querySelector(".mp-search")!;
+    this.list = this.root.querySelector(".mp-list")!;
+    this.effort = this.root.querySelector(".mp-effort")!;
+    this.search.addEventListener("input", () => {
+      this.query = this.search.value;
+      this.sel = 0;
+      this.renderList();
+    });
+    this.search.addEventListener("keydown", (e) => this.onKey(e));
+    this.root.addEventListener("mousedown", (e) => e.stopPropagation());
+    document.addEventListener("mousedown", (e) => {
+      if (this.open && !(e.target as HTMLElement).closest("#btn-model")) this.hide();
+    });
+  }
+
+  setData(models: ModelInfo[], levels: string[], recent: string[]) {
+    this.models = models ?? [];
+    this.levels = levels?.length ? levels : ["off"];
+    this.recent = recent ?? [];
+    this.loaded = true;
+    if (this.open) this.render();
+  }
+
+  toggle() {
+    this.open ? this.hide() : this.show("");
+  }
+
+  show(query: string) {
+    hidePopup();
+    this.open = true;
+    this.query = query;
+    this.search.value = query;
+    this.sel = -1; // select the current model on first render
+    this.root.classList.remove("hidden");
+    $("btn-model").classList.add("active");
+    if (!this.loaded) this.list.innerHTML = `<div class="mp-empty">Loading models…</div>`;
+    post({ type: "getModels" });
+    this.render();
+    this.search.focus();
+  }
+
+  hide() {
+    this.open = false;
+    this.root.classList.add("hidden");
+    $("btn-model").classList.remove("active");
+    input.focus();
+  }
+
+  render() {
+    this.renderList();
+    this.renderEffort();
+  }
+
+  private isCurrent(m: ModelInfo) {
+    return state.model && state.model.id === m.id && state.model.provider === m.provider;
+  }
+
+  private matches(m: ModelInfo, q: string) {
+    if (!q) return true;
+    const hay = `${m.name} ${m.id} ${m.provider}`.toLowerCase();
+    return q.toLowerCase().split(/\s+/).every((t) => hay.includes(t));
+  }
+
+  private detail(m: ModelInfo) {
+    const parts = [m.id];
+    if (m.contextWindow) parts.push(m.contextWindow >= 1_000_000 ? `${m.contextWindow / 1_000_000}M context` : `${Math.round(m.contextWindow / 1000)}k context`);
+    if (m.reasoning) parts.push("reasoning");
+    if (m.cost && (m.cost.input || m.cost.output)) parts.push(`$${m.cost.input}/$${m.cost.output}`);
+    return parts.join(" · ");
+  }
+
+  private renderList() {
+    if (!this.loaded) return;
+    const q = this.query.trim();
+    const key = (m: ModelInfo) => `${m.provider}/${m.id}`;
+    const byKey = new Map(this.models.map((m) => [key(m), m]));
+    const sections: { title?: string; items: ModelInfo[] }[] = [];
+    const multiProvider = new Set(this.models.map((m) => m.provider)).size > 1;
+
+    if (!q) {
+      const cur = this.models.find((m) => this.isCurrent(m));
+      const recent = [cur, ...this.recent.map((k) => byKey.get(k))]
+        .filter((m): m is ModelInfo => !!m)
+        .filter((m, i, a) => a.findIndex((x) => key(x) === key(m)) === i);
+      if (recent.length) sections.push({ title: "Recent", items: recent });
+    }
+    const all = this.models.filter((m) => this.matches(m, q));
+    if (multiProvider) {
+      const groups = new Map<string, ModelInfo[]>();
+      for (const m of all) groups.set(m.provider, [...(groups.get(m.provider) ?? []), m]);
+      for (const [p, items] of groups) sections.push({ title: p, items });
+    } else {
+      sections.push({ title: q ? undefined : all[0]?.provider ?? "All models", items: all });
+    }
+
+    this.flat = sections.flatMap((s) => s.items);
+    if (this.sel < 0) this.sel = Math.max(0, this.flat.findIndex((m) => this.isCurrent(m)));
+    this.sel = Math.min(this.sel, this.flat.length - 1);
+
+    this.list.innerHTML = "";
+    if (!this.flat.length) {
+      this.list.innerHTML = `<div class="mp-empty">No models match “${escapeHtml(q)}”</div>`;
+      return;
+    }
+    let idx = 0;
+    for (const s of sections) {
+      if (!s.items.length) continue;
+      if (s.title) this.list.appendChild(el("div", "mp-section", escapeHtml(s.title)));
+      for (const m of s.items) {
+        const i = idx++;
+        const row = el("div", `mp-item${i === this.sel ? " active" : ""}${this.isCurrent(m) ? " current" : ""}`);
+        row.innerHTML = `<div class="mp-text"><div class="mp-name">${escapeHtml(m.name)}</div><div class="mp-detail">${escapeHtml(this.detail(m))}</div></div>${this.isCurrent(m) ? `<span class="mp-check">✓</span>` : ""}`;
+        row.addEventListener("mousemove", () => {
+          if (this.sel === i) return;
+          this.sel = i;
+          this.list.querySelectorAll(".mp-item").forEach((r, j) => r.classList.toggle("active", j === i));
+        });
+        row.addEventListener("click", () => this.choose(m));
+        this.list.appendChild(row);
+      }
+    }
+    this.scrollToSel();
+  }
+
+  private scrollToSel() {
+    (this.list.querySelectorAll(".mp-item")[this.sel] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
+  }
+
+  private renderEffort() {
+    const levels = this.levels;
+    const cur = state.thinkingLevel ?? "off";
+    const reasoning = !!state.model?.reasoning && levels.length > 1;
+    this.effort.classList.toggle("hidden", !reasoning);
+    if (!reasoning) return;
+    const idx = Math.max(0, levels.indexOf(cur));
+    const pct = levels.length > 1 ? (idx / (levels.length - 1)) * 100 : 0;
+    this.effort.innerHTML = `
+      <div class="mp-effort-label">Effort <span class="dim">(${escapeHtml(levelLabel(cur))})</span></div>
+      <div class="slider" role="slider" aria-valuemin="0" aria-valuemax="${levels.length - 1}" aria-valuenow="${idx}" title="←/→ to adjust">
+        <div class="slider-fill" style="width:calc(20px + (100% - 20px) * ${pct / 100})"></div>
+        ${levels.map((l, i) => `<div class="slider-dot${i <= idx ? " on" : ""}" data-level="${l}" title="${escapeHtml(levelLabel(l))}" style="left:calc(10px + (100% - 20px) * ${levels.length > 1 ? i / (levels.length - 1) : 0})"></div>`).join("")}
+        <div class="slider-knob" style="left:calc(10px + (100% - 20px) * ${pct / 100})"></div>
+      </div>`;
+    const slider = this.effort.querySelector(".slider") as HTMLElement;
+    const pick = (clientX: number) => {
+      const r = slider.getBoundingClientRect();
+      const f = Math.min(1, Math.max(0, (clientX - r.left - 10) / (r.width - 20)));
+      this.setLevel(levels[Math.round(f * (levels.length - 1))]);
+    };
+    slider.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      pick(e.clientX);
+      const move = (ev: MouseEvent) => pick(ev.clientX);
+      const up = () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        this.search.focus();
+      };
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    });
+  }
+
+  private setLevel(level: string | undefined) {
+    if (!level || level === state.thinkingLevel) return;
+    state.thinkingLevel = level; // optimistic
+    updateModel();
+    post({ type: "setThinking", level });
+  }
+
+  private stepLevel(d: number) {
+    const i = Math.max(0, this.levels.indexOf(state.thinkingLevel ?? "off"));
+    this.setLevel(this.levels[Math.min(this.levels.length - 1, Math.max(0, i + d))]);
+  }
+
+  private choose(m: ModelInfo) {
+    if (!this.isCurrent(m)) {
+      state.model = { ...state.model, ...m }; // optimistic; host sends full state
+      post({ type: "setModel", provider: m.provider, id: m.id });
+    }
+    this.hide();
+  }
+
+  private onKey(e: KeyboardEvent) {
+    const n = this.flat.length;
+    if (e.key === "ArrowDown") { this.sel = (this.sel + 1) % n; this.renderList(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { this.sel = (this.sel - 1 + n) % n; this.renderList(); e.preventDefault(); }
+    else if (e.key === "Enter") { const m = this.flat[this.sel]; if (m) this.choose(m); e.preventDefault(); }
+    else if (e.key === "Escape") { this.hide(); e.preventDefault(); e.stopPropagation(); }
+    else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && (!this.search.value || e.altKey)) {
+      this.stepLevel(e.key === "ArrowLeft" ? -1 : 1);
+      e.preventDefault();
+    } else if (e.key === "Tab") { this.stepLevel(e.shiftKey ? -1 : 1); e.preventDefault(); }
+  }
+}
+const picker = new ModelPicker();
 
 // ------------------------------------------------------------------ banner
 
@@ -1168,6 +1399,12 @@ window.addEventListener("message", (ev) => {
       break;
     case "restoreQueue":
       if (m.text) insertText(m.text, !input.value.trim());
+      break;
+    case "models":
+      picker.setData(m.models, m.levels, m.recent);
+      break;
+    case "openModelPicker":
+      picker.show(m.query ?? "");
       break;
     case "fileResults":
       onFileResults(m.requestId, m.files);
