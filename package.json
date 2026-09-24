@@ -1,0 +1,181 @@
+{
+  "name": "pi-for-vscode",
+  "displayName": "Pi Coding Agent",
+  "description": "Use the Pi coding agent (with all your Pi extensions, skills and prompts) from the VS Code sidebar.",
+  "version": "0.1.0",
+  "publisher": "dhguz",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pi",
+          "title": "Pi",
+          "icon": "media/pi.svg"
+        }
+      ]
+    },
+    "views": {
+      "pi": [
+        {
+          "type": "webview",
+          "id": "pi.chat",
+          "name": "Pi",
+          "icon": "media/pi.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "pi.newSession",
+        "title": "Pi: New Session",
+        "icon": "$(add)"
+      },
+      {
+        "command": "pi.history",
+        "title": "Pi: Resume Session…",
+        "icon": "$(history)"
+      },
+      {
+        "command": "pi.openInTab",
+        "title": "Pi: Open in New Tab",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "pi.restart",
+        "title": "Pi: Restart Agent Process",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "pi.selectModel",
+        "title": "Pi: Select Model"
+      },
+      {
+        "command": "pi.selectThinking",
+        "title": "Pi: Select Thinking Level"
+      },
+      {
+        "command": "pi.abort",
+        "title": "Pi: Stop"
+      },
+      {
+        "command": "pi.focus",
+        "title": "Pi: Focus Chat"
+      },
+      {
+        "command": "pi.addSelection",
+        "title": "Pi: Add Selection to Chat"
+      },
+      {
+        "command": "pi.addFile",
+        "title": "Pi: Add File to Chat"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "pi.newSession",
+          "when": "view == pi.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "pi.history",
+          "when": "view == pi.chat",
+          "group": "navigation@2"
+        },
+        {
+          "command": "pi.openInTab",
+          "when": "view == pi.chat",
+          "group": "navigation@3"
+        },
+        {
+          "command": "pi.restart",
+          "when": "view == pi.chat",
+          "group": "overflow"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "pi.addSelection",
+          "when": "editorHasSelection",
+          "group": "pi@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "pi.addFile",
+          "when": "!explorerResourceIsFolder",
+          "group": "pi@1"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "pi.focus",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p"
+      },
+      {
+        "command": "pi.addSelection",
+        "key": "ctrl+alt+l",
+        "mac": "cmd+alt+l",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "Pi",
+      "properties": {
+        "pi.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the pi executable. Leave empty to resolve `pi` from your login shell PATH."
+        },
+        "pi.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra CLI arguments passed to `pi --mode rpc` (e.g. [\"--model\", \"sonnet\"])."
+        },
+        "pi.resumeLastSession": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reopen the last session of this workspace when the sidebar starts."
+        },
+        "pi.useLoginShellEnv": {
+          "type": "boolean",
+          "default": true,
+          "description": "Load environment variables (PATH, API keys, …) from your login shell before starting pi."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.24.0",
+    "marked": "^14.1.0",
+    "typescript": "^5.6.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dhguz/pi-for-vscode"
+  }
+}
