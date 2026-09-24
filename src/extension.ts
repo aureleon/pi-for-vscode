@@ -12,6 +12,7 @@ function html(webview: vscode.Webview, extUri: vscode.Uri): string {
   const nonce = crypto.randomBytes(16).toString("base64");
   const script = webview.asWebviewUri(vscode.Uri.joinPath(extUri, "dist", "webview.js"));
   const style = webview.asWebviewUri(vscode.Uri.joinPath(extUri, "webview", "styles.css"));
+  const logo = webview.asWebviewUri(vscode.Uri.joinPath(extUri, "media", "pi-logo.svg"));
   const csp = [
     "default-src 'none'",
     `img-src ${webview.cspSource} data: https:`,
@@ -28,7 +29,7 @@ function html(webview: vscode.Webview, extUri: vscode.Uri): string {
 <link rel="stylesheet" href="${style}">
 <title>Pi</title>
 </head>
-<body>
+<body data-logo="${logo}">
 <div id="app"></div>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
@@ -74,7 +75,7 @@ function openPanel(context: vscode.ExtensionContext, sessionFile?: string) {
     ...webviewOptions(context.extensionUri),
     retainContextWhenHidden: true,
   });
-  panel.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "pi.svg");
+  panel.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "pi-logo.svg");
   const host: ChatHost = {
     webview: panel.webview,
     setTitle: (t) => (panel.title = t ? `Pi · ${t}` : "Pi"),
