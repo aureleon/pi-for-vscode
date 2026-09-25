@@ -12,6 +12,17 @@ const RECENT_MODELS_KEY = "pi.recentModels";
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g;
 export const stripAnsi = (s: string) => (s ?? "").replace(ANSI_RE, "");
 
+/**
+ * Extensions that open a composer/overlay in the TUI usually refuse in RPC
+ * mode with a notice like "/btw cannot open its composer outside Pi's TUI".
+ * The webview reacts to these by opening its side panel instead, so the
+ * host must not also show them as toasts.
+ */
+export const COMPOSER_REFUSAL_RE = /(composer|overlay|modal|editor)[^.]*outside (of )?pi'?s? tui|requires (pi'?s? )?(the )?tui|only (available|works) in (the )?tui|pass the (question|prompt|text) inline/i;
+
+/** Custom-entry prefixes whose entries are forwarded to the webview side panel on init. */
+const SIDE_ENTRY_PREFIXES = ["btw-"];
+
 /** Anything that can host the chat webview (sidebar view or editor panel). */
 export interface ChatHost {
   webview: vscode.Webview;
@@ -30,6 +41,8 @@ export class PiController implements vscode.Disposable {
   private starting?: Promise<void>;
   private env: NodeJS.ProcessEnv = process.env;
   private args: string[] = [];
+  /** Number of in-flight prompts issued from the side panel; notices are routed there meanwhile. */
+  private sidePending = 0;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -127,20 +140,48 @@ export class PiController implements vscode.Disposable {
   /** Send full snapshot (state, commands, transcript) to the webview. */
   private async sendInit(kind: "init" | "reset") {
     try {
-      const [state, commands, messages] = await Promise.all([
+      const [state, commands, messages, sideEntries] = await Promise.all([
         this.req({ type: "get_state" }),
         this.req({ type: "get_commands" }).catch(() => ({ commands: [] })),
         this.req({ type: "get_messages" }).catch(() => ({ messages: [] })),
+        this.getSideEntries(),
       ]);
       this.state = state;
       if (state.sessionFile && this.options.primary) {
         this.context.workspaceState.update(LAST_SESSION_KEY, state.sessionFile);
       }
-      this.post({ type: kind, state, commands: commands.commands, messages: messages.messages, cwd: this.cwd });
+      this.post({
+        type: kind,
+        state,
+        commands: commands.commands,
+        messages: messages.messages,
+        sideEntries,
+        sideCommands: vscode.workspace.getConfiguration("pi").get("sidePanelCommands", {}),
+        cwd: this.cwd,
+      });
       this.updateTitle();
       this.refreshStats();
     } catch (err: any) {
       this.output.appendLine(`[pi] init failed: ${err.message}`);
+    }
+  }
+
+  /**
+   * Custom entries on the active branch that belong to side-conversation
+   * extensions (e.g. pi-btw's thread entries), oldest first, so the side
+   * panel can restore its thread after a reload or session switch.
+   */
+  private async getSideEntries(): Promise<any[]> {
+    try {
+      const { entries, leafId } = await this.req({ type: "get_entries" });
+      const byId = new Map<string, any>(entries.map((e: any) => [e.id, e]));
+      const branch: any[] = [];
+      for (let id = leafId; id && byId.has(id); id = byId.get(id).parentId) branch.push(byId.get(id));
+      return branch
+        .reverse()
+        .filter((e) => e.type === "custom" && SIDE_ENTRY_PREFIXES.some((p) => String(e.customType).startsWith(p)));
+    } catch {
+      return [];
     }
   }
 
@@ -185,6 +226,8 @@ export class PiController implements vscode.Disposable {
     switch (e.method) {
       case "notify": {
         const msg = stripAnsi(e.message);
+        // Side-panel requests show their notices inline; composer refusals open the panel.
+        if (this.sidePending > 0 || COMPOSER_REFUSAL_RE.test(msg)) break;
         const fn = e.notifyType === "error"
           ? vscode.window.showErrorMessage
           : e.notifyType === "warning"
@@ -252,6 +295,12 @@ export class PiController implements vscode.Disposable {
         case "setModel":
           await this.setModel(m.provider, m.id);
           break;
+        case "listPick":
+          await this.onListPick(m.kind, m.id);
+          break;
+        case "sidePrompt":
+          await this.sidePrompt(m.text, m.requestId);
+          break;
         case "editEnabledModels":
           await this.editEnabledModels();
           break;
@@ -279,6 +328,25 @@ export class PiController implements vscode.Disposable {
     if (this.state.isStreaming) cmd.streamingBehavior = mode ?? "steer";
     const res = await this.req(cmd);
     if (res?.disposition === "handled") this.sendCommandsSoon();
+  }
+
+  /**
+   * Run a slash command on behalf of the side panel. Extension commands run
+   * to completion before pi responds, so the response marks the end of the
+   * side request (pi-btw resolves only after its side answer is ready).
+   */
+  private async sidePrompt(text: string, requestId: number) {
+    this.sidePending++;
+    try {
+      if (!this.pi?.running) await this.start();
+      const res = await this.req({ type: "prompt", message: text });
+      this.post({ type: "sideDone", requestId, disposition: res?.disposition });
+    } catch (err: any) {
+      this.post({ type: "sideDone", requestId, error: err.message ?? String(err) });
+    } finally {
+      // Late notices from the same command can trail the response slightly.
+      setTimeout(() => this.sidePending--, 250);
+    }
   }
 
   private sendCommandsSoon() {
@@ -347,6 +415,11 @@ export class PiController implements vscode.Disposable {
     }
   }
 
+  toggleSidePanel() {
+    this.host.reveal();
+    this.post({ type: "toggleSide" });
+  }
+
   insertText(text: string) {
     this.host.reveal();
     this.post({ type: "insertText", text });
@@ -390,17 +463,18 @@ export class PiController implements vscode.Disposable {
       }
       case "fork": {
         const { messages } = await this.req({ type: "get_fork_messages" });
-        if (!messages?.length) return void vscode.window.showInformationMessage("Pi: nothing to fork from yet.");
-        const pick = await vscode.window.showQuickPick(
-          [...messages].reverse().map((m: any) => ({ label: m.text.split("\n")[0].slice(0, 120), detail: m.text.slice(0, 300), entryId: m.entryId, text: m.text })),
-          { placeHolder: "Fork a new session from a previous message" },
-        );
-        if (!pick) return;
-        const r = await this.req({ type: "fork", entryId: pick.entryId });
-        if (!r?.cancelled) {
-          await this.sendInit("reset");
-          this.post({ type: "insertText", text: r.text ?? pick.text, replace: true });
-        }
+        this.host.reveal();
+        this.post({
+          type: "openList",
+          kind: "fork",
+          placeholder: "Fork from a previous message",
+          empty: "No messages to fork from",
+          items: [...(messages ?? [])].reverse().map((m: any) => ({
+            id: m.entryId,
+            label: m.text.split("\n")[0].slice(0, 200),
+            search: m.text.slice(0, 2000),
+          })),
+        });
         break;
       }
       case "clone": {
@@ -434,19 +508,35 @@ export class PiController implements vscode.Disposable {
   async pickSession() {
     const dir = this.state.sessionFile ? path.dirname(this.state.sessionFile) : defaultSessionDir(this.cwd);
     const sessions = (await listSessions(dir)).filter((s) => s.messageCount > 0 || s.file === this.state.sessionFile);
-    if (!sessions.length) return void vscode.window.showInformationMessage("Pi: no previous sessions for this folder.");
-    const pick = await vscode.window.showQuickPick(
-      sessions.map((s) => ({
-        label: (s.file === this.state.sessionFile ? "$(circle-filled) " : "") + (s.name || s.firstMessage?.split("\n")[0].slice(0, 100) || "(empty session)"),
-        description: `${relativeTime(s.mtime)} · ${s.messageCount} msgs`,
-        detail: s.name && s.firstMessage ? s.firstMessage.slice(0, 160) : undefined,
-        file: s.file,
+    this.host.reveal();
+    this.post({
+      type: "openList",
+      kind: "session",
+      placeholder: "Resume a Pi session",
+      empty: "No previous sessions for this folder",
+      items: sessions.map((s) => ({
+        id: s.file,
+        label: s.name || s.firstMessage?.split("\n")[0].slice(0, 200) || "(empty session)",
+        meta: `${relativeTime(s.mtime)} · ${s.messageCount} msgs`,
+        search: [s.name, s.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
+        current: s.file === this.state.sessionFile,
       })),
-      { placeHolder: "Resume a Pi session", matchOnDescription: true, matchOnDetail: true },
-    );
-    if (!pick || pick.file === this.state.sessionFile) return;
-    const r = await this.req({ type: "switch_session", sessionPath: pick.file });
-    if (!r?.cancelled) await this.sendInit("reset");
+    });
+  }
+
+  /** The user picked an entry in a webview dropdown list. */
+  private async onListPick(kind: string, id: string) {
+    if (kind === "session") {
+      if (id === this.state.sessionFile) return;
+      const r = await this.req({ type: "switch_session", sessionPath: id });
+      if (!r?.cancelled) await this.sendInit("reset");
+    } else if (kind === "fork") {
+      const r = await this.req({ type: "fork", entryId: id });
+      if (!r?.cancelled) {
+        await this.sendInit("reset");
+        if (r?.text) this.post({ type: "insertText", text: r.text, replace: true });
+      }
+    }
   }
 
   /** Open the inline model picker in the webview. */

@@ -78,6 +78,10 @@
       {
         "command": "pi.addFile",
         "title": "Pi: Add File to Chat"
+      },
+      {
+        "command": "pi.toggleSidePanel",
+        "title": "Pi: Toggle Side Panel (BTW)"
       }
     ],
     "menus": {
@@ -156,6 +160,45 @@
           "type": "boolean",
           "default": true,
           "description": "Load environment variables (PATH, API keys, …) from your login shell before starting pi."
+        },
+        "pi.sidePanelCommands": {
+          "type": "object",
+          "default": {
+            "btw": {
+              "followUp": "btw",
+              "title": "BTW"
+            },
+            "side": {
+              "followUp": "btw",
+              "title": "BTW"
+            },
+            "btw:new": {
+              "followUp": "btw",
+              "title": "BTW"
+            },
+            "btw:tangent": {
+              "followUp": "btw:tangent",
+              "title": "BTW · tangent"
+            },
+            "btw:ask": {
+              "followUp": "btw:ask",
+              "title": "BTW · read-only"
+            }
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "followUp": {
+                "type": "string",
+                "description": "Command used for follow-up messages typed in the side panel (without the leading /). Defaults to the command itself."
+              },
+              "title": {
+                "type": "string",
+                "description": "Side panel title."
+              }
+            }
+          },
+          "markdownDescription": "Slash commands that open the **side panel** instead of running in the main chat. A bare `/cmd` opens the panel composer. `/cmd text` opens the panel and sends the text. Follow-ups typed in the panel are sent as `/<followUp> text`. Commands that reply *\"cannot open its composer outside Pi's TUI\"* are detected and added automatically."
         }
       }
     }

@@ -12,7 +12,15 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Autocomplete.** Type `/` for commands (extension commands, prompt templates, skills, and built-ins) and `@` to mention workspace files.
 - **Shell.** `!cmd` runs a command and adds its output to the context. `!!cmd` runs it without adding output to the context.
 - **Images.** Paste, drag and drop, or use the image button.
-- **Sessions.** Start a new session, resume one from the history picker, `/fork`, `/clone`, `/name`, `/compact`, and `/export`. The sidebar reopens the last session of the workspace.
+- **Sessions.** Start a new session, `/clone`, `/name`, `/compact`, and `/export`. To resume a session (the history button or `/resume`) or to `/fork` from an earlier message, pick it from a searchable dropdown under the header. The extension does not use VS Code's global QuickPick. The sidebar reopens the last session of the workspace.
+- **Side panel for side conversations (`/btw`, and composer extensions).**
+  - In the pi TUI, extensions such as [pi-btw](https://github.com/dbachelder/pi-btw) open an overlay composer. In RPC mode they refuse to do so. The extension opens a side panel for them instead. It slides over the chat in a narrow view and docks next to the chat in a wide view.
+  - A bare `/btw` opens the panel's composer. `/btw question` opens the panel and sends the question. You type follow-ups in the panel, and the thread continues. The mode stays the same (`/btw:tangent` threads continue as tangents and `/btw:ask` threads as read-only).
+  - pi-btw's thread entries fill the panel as soon as each answer is ready, even while the main agent is working. After a reload or a session switch, the panel restores the thread from the session.
+  - The panel has **Inject**, **Summarize**, **New** and **Clear** buttons. For Inject and Summarize, text in the panel box becomes the instructions.
+  - In the main chat, pi-btw notes show only as a compact `BTW` link that opens the panel.
+  - Any other extension that answers a bare command with *"cannot open its composer outside Pi's TUI"* is detected. The panel then opens for that command, and the next bare use opens it directly.
+  - To route more commands to the panel, use `pi.sidePanelCommands`. To open the panel from the command palette, use *Pi: Toggle Side Panel*.
 - **Model picker.** Click the model chip in the toolbar to open a model list above the input.
   - The list follows Pi's `enabledModels` setting. It uses the same rules as the pi CLI: exact IDs, `provider/id`, fuzzy names, globs, and `:thinking` suffixes. The order follows your patterns.
   - The setting comes from `--models` in `pi.args`, then `<workspace>/.pi/settings.json`, then `~/.pi/agent/settings.json`. If `enabledModels` is empty, the list shows all models, with your recent models first.
@@ -47,6 +55,7 @@ VS Code apps opened from the Dock often do not get your shell `PATH`. For this r
 | `pi.args` | `[]` | More CLI arguments, for example `["--model", "sonnet"]`. |
 | `pi.resumeLastSession` | `true` | Reopen the last session of the workspace. |
 | `pi.useLoginShellEnv` | `true` | Load the environment of your login shell. |
+| `pi.sidePanelCommands` | pi-btw commands | Slash commands that run in the side panel, with an optional `followUp` command and a `title`. |
 
 Extensions can check `process.env.PI_VSCODE === "1"` to know that they run inside VS Code.
 

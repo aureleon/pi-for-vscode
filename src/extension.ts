@@ -124,6 +124,7 @@ export function activate(context: vscode.ExtensionContext) {
   cmd("pi.selectModel", async () => (await target())?.runBuiltin("model", ""));
   cmd("pi.selectThinking", async () => (await target())?.runBuiltin("thinking", ""));
   cmd("pi.abort", async () => (await target())?.abort());
+  cmd("pi.toggleSidePanel", async () => (await target())?.toggleSidePanel());
 
   cmd("pi.addSelection", async () => {
     const ed = vscode.window.activeTextEditor;
