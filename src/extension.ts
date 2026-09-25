@@ -124,6 +124,21 @@ export function activate(context: vscode.ExtensionContext) {
   cmd("pi.openInTab", () => openPanel(context));
   cmd("pi.newSession", async () => (await target())?.runBuiltin("new", ""));
   cmd("pi.history", async () => (await target())?.runBuiltin("resume", ""));
+  cmd("pi.tree", async () => (await target())?.runBuiltin("tree", ""));
+  cmd("pi.openInTerminal", async () => (await target())?.openInTerminal());
+  // Plain TUI in a terminal, with no chat attached (e.g. from the command palette with no Pi view open).
+  cmd("pi.newTerminal", async () => {
+    const cfg = vscode.workspace.getConfiguration("pi");
+    const t = vscode.window.createTerminal({
+      name: "Pi",
+      cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      iconPath: vscode.Uri.joinPath(context.extensionUri, "media", "pi-logo.svg"),
+      env: { PI_VSCODE: "1", PI_VSCODE_TERMINAL: "1" },
+      location: cfg.get<string>("terminalLocation", "editor") === "panel" ? vscode.TerminalLocation.Panel : { viewColumn: vscode.ViewColumn.Active },
+    });
+    t.sendText([cfg.get<string>("path")?.trim() || "pi", ...(cfg.get<string[]>("args") ?? [])].join(" "), true);
+    t.show();
+  });
   cmd("pi.restart", async () => (await target())?.restart());
   cmd("pi.selectModel", async () => (await target())?.runBuiltin("model", ""));
   cmd("pi.selectThinking", async () => (await target())?.runBuiltin("thinking", ""));
