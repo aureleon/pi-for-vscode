@@ -43,6 +43,7 @@ app.innerHTML = `
     <button class="icon-btn" id="btn-history" title="Resume session (/resume)">${I.history}</button>
     <button class="icon-btn" id="btn-new" title="New session (/new)">${I.newChat}</button>
   </header>
+  <div id="list-menu" class="list-menu hidden"></div>
   <div id="banner" class="banner hidden"></div>
   <main id="scroll" class="scroll">
     <div id="messages" class="messages"></div>
@@ -1092,7 +1093,7 @@ function insertText(text: string, replace = false) {
 
 sendBtn.addEventListener("click", () => (sendBtn.classList.contains("stop") ? post({ type: "abort" }) : submit("steer")));
 $("btn-new").addEventListener("click", () => post({ type: "builtin", name: "new" }));
-$("btn-history").addEventListener("click", () => post({ type: "builtin", name: "resume" }));
+$("btn-history").addEventListener("click", () => (listMenu.open ? listMenu.hide() : post({ type: "builtin", name: "resume" })));
 $("btn-model").addEventListener("click", (e) => {
   e.stopPropagation();
   picker.toggle();
@@ -1133,8 +1134,7 @@ class ModelPicker {
 
   constructor() {
     this.root.innerHTML = `
-      <div class="mp-title">Select a model</div>
-      <input class="mp-search" placeholder="Search models…" spellcheck="false">
+      <input class="mp-search" placeholder="Select a model" spellcheck="false" aria-label="Search models">
       <div class="mp-list" tabindex="-1"></div>
       <div class="mp-scope"></div>`;
     this.search = this.root.querySelector(".mp-search")!;
@@ -1205,12 +1205,23 @@ class ModelPicker {
     return q.toLowerCase().split(/\s+/).every((t) => hay.includes(t));
   }
 
+  private ctx(m: ModelInfo) {
+    if (!m.contextWindow) return "";
+    return m.contextWindow >= 1_000_000 ? `${+(m.contextWindow / 1_000_000).toFixed(1)}M context` : `${Math.round(m.contextWindow / 1000)}k context`;
+  }
+
+  /** One short muted line, like Claude Code's menu. */
   private detail(m: ModelInfo) {
-    const parts = [m.id];
-    if (m.contextWindow) parts.push(m.contextWindow >= 1_000_000 ? `${m.contextWindow / 1_000_000}M context` : `${Math.round(m.contextWindow / 1000)}k context`);
-    if (m.reasoning) parts.push("reasoning");
-    if (m.cost && (m.cost.input || m.cost.output)) parts.push(`$${m.cost.input}/$${m.cost.output}`);
-    return parts.join(" · ");
+    return [this.ctx(m), m.reasoning ? "" : "no reasoning"].filter(Boolean).join(" · ");
+  }
+
+  /** Everything else goes into the tooltip. */
+  private tooltip(m: ModelInfo) {
+    const lines = [`${m.provider}/${m.id}`];
+    if (m.contextWindow) lines.push(this.ctx(m));
+    if (m.reasoning) lines.push("Supports reasoning");
+    if (m.cost && (m.cost.input || m.cost.output)) lines.push(`$${m.cost.input} in / $${m.cost.output} out per 1M tokens`);
+    return lines.join("\n");
   }
 
   private renderList() {
@@ -1266,13 +1277,16 @@ class ModelPicker {
       return;
     }
     let idx = 0;
+    const showHeaders = sections.filter((x) => x.items.length).length > 1;
     for (const s of sections) {
       if (!s.items.length) continue;
-      if (s.title) this.list.appendChild(el("div", "mp-section", escapeHtml(s.title)));
+      if (s.title && showHeaders) this.list.appendChild(el("div", "mp-section", escapeHtml(s.title)));
       for (const m of s.items) {
         const i = idx++;
         const row = el("div", `mp-item${i === this.sel ? " active" : ""}${this.isCurrent(m) ? " current" : ""}`);
-        row.innerHTML = `<div class="mp-text"><div class="mp-name">${escapeHtml(m.name)}</div><div class="mp-detail">${escapeHtml(this.detail(m))}</div></div>${this.isCurrent(m) ? `<span class="mp-check">✓</span>` : ""}`;
+        const detail = this.detail(m);
+        row.title = this.tooltip(m);
+        row.innerHTML = `<div class="mp-text"><div class="mp-name">${escapeHtml(m.name)}</div>${detail ? `<div class="mp-detail">${escapeHtml(detail)}</div>` : ""}</div>${this.isCurrent(m) ? `<span class="mp-check">✓</span>` : ""}`;
         row.addEventListener("mousemove", () => {
           if (this.sel === i) return;
           this.sel = i;
@@ -1288,16 +1302,10 @@ class ModelPicker {
   private renderScope(enabled?: ModelInfo[]) {
     const box = this.root.querySelector(".mp-scope") as HTMLElement;
     const src = this.scopeSource ? shortPath(this.scopeSource).replace(/^\/Users\/[^/]+/, "~") : "settings.json";
-    let text: string;
-    if (enabled?.length) {
-      text = this.showAll
-        ? `Showing all ${this.models.length} models`
-        : `${enabled.length} enabled model${enabled.length === 1 ? "" : "s"} from <span class="mono" title="${escapeHtml(this.scopeSource ?? "")}">${escapeHtml(src)}</span>`;
-    } else {
-      text = `All ${this.models.length} models · no <span class="mono">enabledModels</span> set`;
-    }
-    const warn = this.unmatched.length ? ` · <span class="warn" title="${escapeHtml(this.unmatched.join("\n"))}">${this.unmatched.length} pattern${this.unmatched.length === 1 ? "" : "s"} unmatched</span>` : "";
-    box.innerHTML = `<span class="mp-scope-text">${text}${warn}</span>`;
+    const text = enabled?.length && !this.showAll ? `${enabled.length} enabled` : `${this.models.length} models`;
+    const tip = enabled?.length ? `enabledModels from ${src}` : `No enabledModels set in ${src}`;
+    const warn = this.unmatched.length ? ` <span class="warn" title="Unmatched patterns:\n${escapeHtml(this.unmatched.join("\n"))}">⚠ ${this.unmatched.length}</span>` : "";
+    box.innerHTML = `<span class="mp-scope-text" title="${escapeHtml(tip)}">${text}${warn}</span>`;
     if (enabled?.length) {
       const t = el("button", "link", this.showAll ? "Enabled only" : "Show all");
       t.addEventListener("click", () => {
@@ -1343,13 +1351,13 @@ const picker = new ModelPicker();
 
 let thinkingLevels: string[] = ["off"];
 const LEVEL_INFO: Record<string, string> = {
-  off: "No extended thinking",
-  minimal: "Very brief reasoning",
-  low: "Light reasoning, faster",
-  medium: "Balanced depth and speed",
-  high: "Deep reasoning",
-  xhigh: "Extra deep reasoning",
-  max: "Maximum reasoning budget",
+  off: "No thinking",
+  minimal: "Fastest",
+  low: "Faster",
+  medium: "Balanced",
+  high: "Thorough",
+  xhigh: "More thorough",
+  max: "Most thorough",
 };
 
 class EffortPicker {
@@ -1379,7 +1387,7 @@ class EffortPicker {
     // Anchor under the chip horizontally.
     const chip = $("btn-effort");
     const composerRect = $("composer").getBoundingClientRect();
-    const left = Math.max(0, Math.min(chip.getBoundingClientRect().left - composerRect.left, composerRect.width - 280));
+    const left = Math.max(0, Math.min(chip.getBoundingClientRect().left - composerRect.left, composerRect.width - 220));
     this.root.style.left = `${left}px`;
     if (!this.loaded) post({ type: "getModels" }); // also returns thinking levels for the current model
     this.loaded = true;
@@ -1413,7 +1421,7 @@ class EffortPicker {
     const list = this.root.querySelector(".ep-list")!;
     levels.forEach((l) => {
       const row = el("div", `ep-item${l === cur ? " active" : ""}`);
-      row.innerHTML = `<div class="mp-text"><div class="mp-name">${escapeHtml(levelLabel(l))}</div><div class="mp-detail">${escapeHtml(LEVEL_INFO[l] ?? "")}</div></div>${l === cur ? `<span class="mp-check">✓</span>` : ""}`;
+      row.innerHTML = `<div class="mp-text ep-row"><span class="mp-name">${escapeHtml(levelLabel(l))}</span><span class="mp-detail">${escapeHtml(LEVEL_INFO[l] ?? "")}</span></div>${l === cur ? `<span class="mp-check">✓</span>` : ""}`;
       row.addEventListener("click", () => {
         this.set(l);
         this.hide();
@@ -1460,6 +1468,103 @@ class EffortPicker {
   }
 }
 const effortPicker = new EffortPicker();
+
+// ------------------------------------------------------------------ dropdown list (sessions, fork)
+
+interface ListItem { id: string; label: string; meta?: string; search?: string; current?: boolean }
+
+/** Header-anchored dropdown styled like the model menu; replaces VS Code's global QuickPick. */
+class ListMenu {
+  open = false;
+  private root = $("list-menu");
+  private search!: HTMLInputElement;
+  private list!: HTMLElement;
+  private kind = "";
+  private items: ListItem[] = [];
+  private flat: ListItem[] = [];
+  private sel = 0;
+  private emptyText = "";
+
+  constructor() {
+    this.root.innerHTML = `<input class="mp-search" spellcheck="false"><div class="mp-list"></div>`;
+    this.search = this.root.querySelector(".mp-search")!;
+    this.list = this.root.querySelector(".mp-list")!;
+    this.search.addEventListener("input", () => {
+      this.sel = 0;
+      this.render();
+    });
+    this.search.addEventListener("keydown", (e) => {
+      const n = this.flat.length;
+      if (e.key === "ArrowDown" && n) { this.sel = (this.sel + 1) % n; this.render(); e.preventDefault(); }
+      else if (e.key === "ArrowUp" && n) { this.sel = (this.sel - 1 + n) % n; this.render(); e.preventDefault(); }
+      else if (e.key === "Enter") { const it = this.flat[this.sel]; if (it) this.choose(it); e.preventDefault(); }
+      else if (e.key === "Escape") { this.hide(); e.preventDefault(); e.stopPropagation(); }
+    });
+    this.root.addEventListener("mousedown", (e) => e.stopPropagation());
+    document.addEventListener("mousedown", (e) => {
+      if (this.open && !(e.target as HTMLElement).closest("#btn-history")) this.hide();
+    });
+  }
+
+  show(kind: string, placeholder: string, items: ListItem[], empty = "Nothing here") {
+    picker.hide(false);
+    effortPicker.hide(false);
+    hidePopup();
+    this.kind = kind;
+    this.items = items;
+    this.emptyText = empty;
+    this.search.value = "";
+    this.search.placeholder = placeholder;
+    this.sel = 0;
+    this.open = true;
+    this.root.classList.remove("hidden");
+    $("btn-history").classList.toggle("active", kind === "session");
+    this.render();
+    this.search.focus();
+  }
+
+  hide() {
+    if (!this.open) return;
+    this.open = false;
+    this.root.classList.add("hidden");
+    $("btn-history").classList.remove("active");
+    input.focus();
+  }
+
+  private render() {
+    const q = this.search.value.trim().toLowerCase();
+    const words = q.split(/\s+/).filter(Boolean);
+    this.flat = this.items.filter((it) => {
+      const hay = `${it.label} ${it.search ?? ""} ${it.meta ?? ""}`.toLowerCase();
+      return words.every((w) => hay.includes(w));
+    });
+    this.sel = Math.min(this.sel, Math.max(0, this.flat.length - 1));
+    this.list.innerHTML = "";
+    if (!this.flat.length) {
+      this.list.innerHTML = `<div class="mp-empty">${escapeHtml(q ? `No matches for “${q}”` : this.emptyText)}</div>`;
+      return;
+    }
+    this.flat.forEach((it, i) => {
+      const row = el("div", `mp-item lm-item${i === this.sel ? " active" : ""}${it.current ? " current" : ""}`);
+      row.title = it.search || it.label;
+      row.innerHTML = `${it.current ? `<span class="lm-dot" title="Current session">●</span>` : ""}<span class="lm-label">${escapeHtml(it.label)}</span>${it.meta ? `<span class="lm-meta">${escapeHtml(it.meta)}</span>` : ""}`;
+      row.addEventListener("mousemove", () => {
+        if (this.sel === i) return;
+        this.sel = i;
+        this.list.querySelectorAll(".mp-item").forEach((r, j) => r.classList.toggle("active", j === i));
+      });
+      row.addEventListener("click", () => this.choose(it));
+      this.list.appendChild(row);
+    });
+    (this.list.children[this.sel] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
+  }
+
+  private choose(it: ListItem) {
+    this.hide();
+    post({ type: "listPick", kind: this.kind, id: it.id });
+  }
+}
+const listMenu = new ListMenu();
 
 // ------------------------------------------------------------------ banner
 
@@ -1543,6 +1648,9 @@ window.addEventListener("message", (ev) => {
       break;
     case "openModelPicker":
       picker.show(m.query ?? "");
+      break;
+    case "openList":
+      listMenu.show(m.kind, m.placeholder, m.items ?? [], m.empty);
       break;
     case "openEffortPicker":
       effortPicker.show();
