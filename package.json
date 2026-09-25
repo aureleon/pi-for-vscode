@@ -42,7 +42,7 @@
       },
       {
         "command": "pi.history",
-        "title": "Pi: Resume Session…",
+        "title": "Pi: Resume Session\u2026",
         "icon": "$(history)"
       },
       {
@@ -83,24 +83,24 @@
     "menus": {
       "view/title": [
         {
-          "command": "pi.newSession",
-          "when": "view == pi.chat",
-          "group": "navigation@1"
-        },
-        {
           "command": "pi.history",
           "when": "view == pi.chat",
           "group": "navigation@2"
         },
         {
-          "command": "pi.openInTab",
+          "command": "pi.newSession",
           "when": "view == pi.chat",
           "group": "navigation@3"
         },
         {
+          "command": "pi.openInTab",
+          "when": "view == pi.chat",
+          "group": "overflow@1"
+        },
+        {
           "command": "pi.restart",
           "when": "view == pi.chat",
-          "group": "overflow"
+          "group": "overflow@2"
         }
       ],
       "editor/context": [
@@ -115,6 +115,23 @@
           "command": "pi.addFile",
           "when": "!explorerResourceIsFolder",
           "group": "pi@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "pi.history",
+          "when": "activeWebviewPanelId == 'pi.panel'",
+          "group": "navigation@2"
+        },
+        {
+          "command": "pi.newSession",
+          "when": "activeWebviewPanelId == 'pi.panel'",
+          "group": "navigation@3"
+        },
+        {
+          "command": "pi.restart",
+          "when": "activeWebviewPanelId == 'pi.panel'",
+          "group": "overflow@1"
         }
       ]
     },
@@ -155,7 +172,7 @@
         "pi.useLoginShellEnv": {
           "type": "boolean",
           "default": true,
-          "description": "Load environment variables (PATH, API keys, …) from your login shell before starting pi."
+          "description": "Load environment variables (PATH, API keys, \u2026) from your login shell before starting pi."
         }
       }
     }

@@ -78,7 +78,7 @@ function openPanel(context: vscode.ExtensionContext, sessionFile?: string) {
   panel.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "pi-logo.svg");
   const host: ChatHost = {
     webview: panel.webview,
-    setTitle: (t) => (panel.title = t ? `Pi · ${t}` : "Pi"),
+    setTitle: (t) => (panel.title = t ?? "Pi"),
     reveal: () => panel.reveal(),
   };
   const c = new PiController(context, host, output, { primary: false, sessionFile });

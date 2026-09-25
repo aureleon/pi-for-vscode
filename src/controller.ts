@@ -150,8 +150,11 @@ export class PiController implements vscode.Disposable {
     }
   }
 
+  /** Title reported by the webview (session name, else first prompt). */
+  private webTitle?: string;
+
   private updateTitle() {
-    this.host.setTitle(this.state.sessionName);
+    this.host.setTitle(this.state.sessionName || this.webTitle);
   }
 
   // ---------------------------------------------------------------- pi -> ui
@@ -257,6 +260,10 @@ export class PiController implements vscode.Disposable {
           break;
         case "setModel":
           await this.setModel(m.provider, m.id);
+          break;
+        case "title":
+          this.webTitle = m.title;
+          this.updateTitle();
           break;
         case "listPick":
           await this.onListPick(m.kind, m.id);

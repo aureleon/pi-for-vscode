@@ -20,7 +20,8 @@ body {
   background: var(--vscode-sideBar-background, var(--vscode-editor-background));
   overflow: hidden;
 }
-#app { display: flex; flex-direction: column; height: 100vh; }
+body { display: flex; flex-direction: column; height: 100vh; }
+#app { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; position: relative; }
 .hidden { display: none !important; }
 button { font: inherit; color: inherit; }
 svg { width: 16px; height: 16px; display: block; }
@@ -29,12 +30,7 @@ kbd {
   border: 1px solid var(--border); background: var(--vscode-keybindingLabel-background);
 }
 
-/* ---------------------------------------------------------------- header */
-.header {
-  display: flex; align-items: center; gap: 4px;
-  padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--border); flex: none;
-}
-.title { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ---------------------------------------------------------------- buttons */
 .icon-btn {
   background: none; border: none; padding: 4px; border-radius: 4px; cursor: pointer; color: var(--vscode-icon-foreground, inherit);
   display: inline-flex; align-items: center; justify-content: center;
@@ -52,7 +48,6 @@ kbd {
 .messages { display: flex; flex-direction: column; }
 .empty { text-align: center; color: var(--muted); margin-top: 18vh; line-height: 1.7; }
 .empty .logo { width: 64px; height: 64px; display: block; margin: 0 auto 10px; }
-.header-logo { width: 16px; height: 16px; flex: none; margin-right: 4px; }
 .empty .hint { font-size: 0.9em; margin-top: 6px; }
 
 .user-msg {
@@ -309,7 +304,7 @@ kbd {
 
 /* ---------------------------------------------------------------- header dropdown (sessions, fork) */
 .list-menu {
-  position: absolute; top: 38px; left: 8px; right: 8px; z-index: 30;
+  position: absolute; top: 6px; left: 8px; right: 8px; z-index: 30;
   display: flex; flex-direction: column; max-height: min(460px, 70vh); overflow: hidden; font-size: 12px;
   background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
   border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
