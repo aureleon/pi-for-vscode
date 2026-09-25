@@ -19,9 +19,11 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
   - The search also finds models that are not enabled. It lists them under "Other models".
   - The footer tells you where the list comes from and how many patterns match no model. Click *Show all* to see all models. Click *Edit* to open the settings file at `enabledModels`. The picker reads the file again each time it opens.
   - `/model [query]` also opens the picker.
-- **Effort picker.** The effort chip is next to the model chip. It shows the thinking level of the current model and only appears for reasoning models.
-  - Click it to open a popover. It has a slider and a list of the levels that the model supports. Use the arrow keys or the number keys to change the level. Press Enter or Esc to close it.
-  - `/thinking [level]` also opens it, or sets the level directly.
+- **Effort (thinking level).** The last row of the model menu shows the effort label on the left and a stepped slider on the right. The slider has a fixed width and position, so it does not move when the label changes. It only appears for reasoning models.
+  - Click or drag anywhere on or near the slider to set the level. You can also use ←/→ (when the search box is empty) or Tab/Shift+Tab. The level is sent to pi when you release the slider.
+  - The model chip shows the current effort, for example "Claude Opus 5.5 (Global)  Medium".
+  - `/thinking [level]` sets the level directly. Without a level, it opens the menu with the slider focused.
+  - Each model row shows its context size, price per million tokens, and capabilities. The tooltip shows the full `provider/id`.
   - The toolbar also shows context use and cost.
 - **Editor integration.** *Pi: Add Selection to Chat* (<kbd>⌘⌥L</kbd>) inserts `@file:10-20`. Right-click a file in the Explorer and select *Pi: Add File to Chat*. Click a file path in a tool card or inline code to open it.
 - **More sessions.** *Pi: Open in New Tab* opens another chat panel with its own pi process.
