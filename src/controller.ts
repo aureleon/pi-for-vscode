@@ -12,6 +12,17 @@ const RECENT_MODELS_KEY = "pi.recentModels";
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g;
 export const stripAnsi = (s: string) => (s ?? "").replace(ANSI_RE, "");
 
+/** Bucket a timestamp into Today / Yesterday / This week / Older for list grouping. */
+function dayGroup(ms: number): string {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const day = 86_400_000;
+  if (ms >= startOfToday.getTime()) return "Today";
+  if (ms >= startOfToday.getTime() - day) return "Yesterday";
+  if (ms >= startOfToday.getTime() - 6 * day) return "This week";
+  return "Older";
+}
+
 /** Anything that can host the chat webview (sidebar view or editor panel). */
 export interface ChatHost {
   webview: vscode.Webview;
@@ -460,7 +471,8 @@ export class PiController implements vscode.Disposable {
       items: sessions.map((s) => ({
         id: s.file,
         label: s.name || s.firstMessage?.split("\n")[0].slice(0, 200) || "(empty session)",
-        meta: `${relativeTime(s.mtime)} · ${s.messageCount} msgs`,
+        cols: [relativeTime(s.mtime), `${s.messageCount} msg${s.messageCount === 1 ? "" : "s"}`],
+        group: dayGroup(s.mtime),
         search: [s.name, s.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
         current: s.file === this.state.sessionFile,
       })),
