@@ -6,6 +6,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 
 ## Features
 
+- **One native header.** The standard VS Code view header shows "PI" and the session name (the name you set, else the first prompt). It also has the Resume and New session buttons, with *Open in New Tab* and *Restart* in the ••• menu. Chats in editor tabs show the same buttons in the editor title bar. The webview does not add its own header.
 - **Chat in the sidebar.** Text, thinking, and tool calls stream live and show as a timeline. Tool cards show `IN`/`OUT` for bash, read, write, and grep. Edits show an inline diff.
 - **Pi extensions.** Commands from `pi.registerCommand` show in `/` autocomplete. `ctx.ui.select/confirm/input/editor` show as inline dialogs, with timeout support. `notify` shows as a VS Code notification. `setStatus` shows in the status line and `setWidget` shows above or below the input, both with ANSI colors. `set_editor_text` fills the input.
 - **Prompting while Pi works.** <kbd>Enter</kbd> steers, <kbd>⌥ Enter</kbd> queues a follow-up, and <kbd>Esc</kbd> or the red button stops. When you stop, queued messages go back into the input.
