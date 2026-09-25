@@ -284,29 +284,27 @@ kbd {
 .mp-scope .link { font-size: 11px; flex: none; padding: 0; opacity: .85; }
 .mp-scope .link:hover { opacity: 1; }
 
+/* Effort row: label left-justified, slider right-justified at a fixed width so nothing shifts. */
+.mp-effort { display: flex; align-items: center; gap: 12px; padding: 6px 8px 8px 12px; border-top: 1px solid var(--border); }
+.mp-effort-label { flex: 1; min-width: 0; white-space: nowrap; }
+.mp-effort-label .dim { color: var(--muted); display: inline-block; min-width: 7ch; }
+.slider-hit { flex: none; padding: 7px 6px; margin: -7px -2px; cursor: pointer; border-radius: 10px; outline: none; touch-action: none; }
+.slider-hit:focus-visible .slider { box-shadow: 0 0 0 1px var(--accent); }
 .slider {
-  position: relative; width: 110px; height: 16px; border-radius: 8px; cursor: pointer; flex: none;
-  background: var(--vscode-input-background); border: 1px solid var(--border);
+  --p: 0; position: relative; width: 112px; height: 16px; border-radius: 8px;
+  background: var(--vscode-input-background); border: 1px solid var(--border); pointer-events: none;
 }
-.slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 8px; background: var(--vscode-button-background); }
-.slider-dot { position: absolute; top: 50%; width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; border-radius: 50%; background: var(--muted); opacity: .7; }
-.slider-dot.on { background: var(--vscode-button-foreground); }
+.slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 8px; width: calc(16px + (100% - 16px) * var(--p)); background: var(--vscode-button-background); transition: width .1s ease; }
+.slider-dots i {
+  position: absolute; top: 50%; left: calc(8px + (100% - 16px) * var(--p)); width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%; background: var(--muted); opacity: .7;
+}
+.slider-dots i.on { background: var(--vscode-button-foreground); }
 .slider-knob {
-  position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
-  background: #e8e8e8; box-shadow: 0 1px 2px rgba(0, 0, 0, .4); transition: left .12s ease;
+  position: absolute; top: 50%; left: calc(8px + (100% - 16px) * var(--p)); width: 12px; height: 12px; margin: -6px 0 0 -6px;
+  border-radius: 50%; background: #e8e8e8; box-shadow: 0 1px 2px rgba(0, 0, 0, .4); transition: left .1s ease;
 }
-
-/* ---------------------------------------------------------------- effort picker */
-.effort-picker { position: absolute; bottom: 100%; margin-bottom: 6px; z-index: 20; width: 220px; max-width: 100%; outline: none; overflow: hidden; }
-.ep-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px 4px; }
-.ep-title { flex: 1; white-space: nowrap; }
-.ep-title .dim { color: var(--muted); }
-.ep-list { padding: 2px 4px 4px; max-height: 280px; overflow-y: auto; }
-.ep-item { display: flex; align-items: center; gap: 8px; padding: 3px 8px; border-radius: 5px; cursor: pointer; }
-.ep-item:hover { background: var(--vscode-list-hoverBackground); }
-.ep-item.active { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
-.ep-item.active .mp-detail { color: inherit; opacity: .7; }
-#btn-effort.active { outline: 1px solid var(--accent); }
+.mp-effort.dragging .slider-knob, .mp-effort.dragging .slider-fill { transition: none; }
 
 /* ---------------------------------------------------------------- side panel (BTW & composer extensions) */
 .side-toggle { position: relative; }
@@ -370,7 +368,6 @@ kbd {
 .btw-tag { font-size: .75em; font-weight: 600; letter-spacing: .04em; padding: 0 5px; border-radius: 3px; background: var(--vscode-charts-purple, #a371f7); color: #fff; flex: none; }
 .btw-q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item.btw-link:hover .btw-q { text-decoration: underline; }
-.ep-row { display: flex; align-items: baseline; gap: 8px; }
 
 /* ---------------------------------------------------------------- header dropdown (sessions, fork) */
 .list-menu {
@@ -390,3 +387,5 @@ kbd {
 .lm-dot { flex: none; font-size: 9px; color: var(--muted); }
 .mp-item.current:not(.active) { background: var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,.12)); }
 #btn-history.active { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
+.chip-level { color: var(--muted); margin-left: 5px; }
+.chip-level:empty { display: none; }
