@@ -331,3 +331,53 @@ kbd {
 #btn-history.active { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
 .chip-level { color: var(--muted); margin-left: 5px; }
 .chip-level:empty { display: none; }
+
+/* ---------------------------------------------------------------- session tree (/tree) */
+.tree-menu { max-height: calc(100vh - 150px); }
+.tm-list { font-size: 12px; }
+.tm-item {
+  display: grid; grid-template-columns: auto 14px minmax(0, 1fr) auto; column-gap: 6px; align-items: center;
+  padding: 2px 10px 2px 8px; line-height: 18px;
+}
+.tm-guide { font-family: var(--mono); font-size: 11px; white-space: pre; color: var(--muted); opacity: .6; }
+.tm-mark { text-align: center; color: var(--muted); font-size: 11px; }
+.tm-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm-meta { color: var(--muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; opacity: .8; }
+.tm-item.off-path .tm-text, .tm-item.off-path .tm-mark { opacity: .55; }
+.tm-item.kind-user .tm-mark { color: var(--vscode-textLink-foreground); }
+.tm-item.kind-summary .tm-mark, .tm-item.kind-compaction .tm-mark { color: var(--vscode-charts-purple, #a371f7); }
+.tm-item.kind-assistant .tm-text { color: var(--muted); }
+.tm-item.on-path.kind-assistant .tm-text { color: var(--vscode-foreground); opacity: .85; }
+.tm-item.active .tm-text, .tm-item.active .tm-mark, .tm-item.active .tm-meta { color: inherit; opacity: 1; }
+.tm-current { color: var(--vscode-textLink-foreground); font-weight: 600; }
+.tm-item.active .tm-current { color: inherit; }
+.tm-label {
+  font-size: 10px; padding: 0 5px; margin-right: 6px; border-radius: 3px;
+  background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
+}
+.tm-footer {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 10px 8px;
+  border-top: 1px solid var(--border); font-size: 11px;
+}
+.tm-hint { flex: 1 1 100%; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.tm-actions { display: flex; gap: 4px; }
+.tm-toggle { margin-left: auto; font-size: 11px; }
+/* Small text buttons in menus and navigators. */
+.sp-btn {
+  background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);
+  border: none; border-radius: 4px; padding: 2px 8px; font-size: .85em; cursor: pointer;
+}
+.sp-btn:hover:not([disabled]) { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground)); filter: brightness(1.15); }
+.sp-btn[disabled] { opacity: .45; cursor: default; }
+.sp-btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.tm-edit { flex: 1 1 100%; }
+.tm-input {
+  width: 100%; padding: 4px 8px; border-radius: 5px; font: inherit; font-size: 12px; outline: none;
+  background: var(--input-bg); color: var(--vscode-input-foreground); border: 1px solid var(--accent);
+}
+
+/* ---------------------------------------------------------------- session handed to the terminal */
+.banner.info { background: var(--vscode-inputValidation-infoBackground, rgba(0,122,204,.12)); border: 1px solid var(--vscode-inputValidation-infoBorder, var(--accent)); }
+.banner .dim { color: var(--muted); margin-top: 3px; font-size: .92em; }
+body.in-terminal .composer { opacity: .5; pointer-events: none; }
+body.in-terminal #empty { display: none; }

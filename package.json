@@ -78,19 +78,44 @@
       {
         "command": "pi.addFile",
         "title": "Pi: Add File to Chat"
+      },
+      {
+        "command": "pi.tree",
+        "title": "Pi: Session Tree (/tree)",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "pi.openInTerminal",
+        "title": "Pi: Open Session in Terminal",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "pi.newTerminal",
+        "title": "Pi: New Pi Terminal (TUI)",
+        "icon": "$(terminal)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "pi.history",
+          "command": "pi.tree",
           "when": "view == pi.chat",
           "group": "navigation@2"
         },
         {
-          "command": "pi.newSession",
+          "command": "pi.history",
           "when": "view == pi.chat",
           "group": "navigation@3"
+        },
+        {
+          "command": "pi.newSession",
+          "when": "view == pi.chat",
+          "group": "navigation@4"
+        },
+        {
+          "command": "pi.openInTerminal",
+          "when": "view == pi.chat",
+          "group": "navigation@5"
         },
         {
           "command": "pi.openInTab",
@@ -119,14 +144,24 @@
       ],
       "editor/title": [
         {
-          "command": "pi.history",
+          "command": "pi.tree",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@2"
         },
         {
-          "command": "pi.newSession",
+          "command": "pi.history",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@3"
+        },
+        {
+          "command": "pi.newSession",
+          "when": "activeWebviewPanelId == 'pi.panel'",
+          "group": "navigation@4"
+        },
+        {
+          "command": "pi.openInTerminal",
+          "when": "activeWebviewPanelId == 'pi.panel'",
+          "group": "navigation@5"
         },
         {
           "command": "pi.restart",
@@ -173,6 +208,19 @@
           "type": "boolean",
           "default": true,
           "description": "Load environment variables (PATH, API keys, \u2026) from your login shell before starting pi."
+        },
+        "pi.terminalLocation": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "panel"
+          ],
+          "default": "editor",
+          "enumDescriptions": [
+            "Open the pi TUI as an editor tab (like Claude Code)",
+            "Open the pi TUI in the terminal panel"
+          ],
+          "description": "Where \"Pi: Open Session in Terminal\" opens the pi TUI."
         }
       }
     }
