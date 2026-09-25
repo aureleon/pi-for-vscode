@@ -51,6 +51,10 @@ class SidebarProvider implements vscode.WebviewViewProvider {
     const host: ChatHost = {
       webview: view.webview,
       setTitle: (t) => (view.description = t),
+      setSideState: (open, count) => {
+        // Unread side-thread turns show as a badge on the Pi view while the panel is closed.
+        view.badge = !open && count ? { value: count, tooltip: `${count} BTW side-thread message${count === 1 ? "" : "s"}` } : undefined;
+      },
       reveal: () => view.show(true),
     };
     // A re-resolved view (e.g. moved to another container) gets a fresh controller
@@ -78,7 +82,7 @@ function openPanel(context: vscode.ExtensionContext, sessionFile?: string) {
   panel.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "pi-logo.svg");
   const host: ChatHost = {
     webview: panel.webview,
-    setTitle: (t) => (panel.title = t ? `Pi · ${t}` : "Pi"),
+    setTitle: (t) => (panel.title = t ?? "Pi"),
     reveal: () => panel.reveal(),
   };
   const c = new PiController(context, host, output, { primary: false, sessionFile });

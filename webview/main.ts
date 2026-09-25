@@ -39,13 +39,6 @@ const I = {
 
 const app = document.getElementById("app")!;
 app.innerHTML = `
-  <header class="header">
-    <img class="header-logo" id="header-logo" alt="">
-    <div class="title" id="title">New session</div>
-    <button class="icon-btn side-toggle" id="btn-side" title="Side conversation (/btw)">${I.side}<span class="badge hidden" id="side-badge"></span></button>
-    <button class="icon-btn" id="btn-history" title="Resume session (/resume)">${I.history}</button>
-    <button class="icon-btn" id="btn-new" title="New session (/new)">${I.newChat}</button>
-  </header>
   <div id="list-menu" class="list-menu hidden"></div>
   <div id="banner" class="banner hidden"></div>
   <main id="scroll" class="scroll">
@@ -83,7 +76,6 @@ app.innerHTML = `
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const LOGO = document.body.dataset.logo ?? "";
 $<HTMLImageElement>("empty-logo").src = LOGO;
-$<HTMLImageElement>("header-logo").src = LOGO;
 const scrollEl = $("scroll");
 const messagesEl = $("messages");
 const input = $<HTMLTextAreaElement>("input");
@@ -803,10 +795,13 @@ function showDialog(r: any) {
 
 // ------------------------------------------------------------------ header / footer
 
+/** The native VS Code view header shows the title; the webview only reports it. */
+let lastTitle: string | undefined;
 function updateTitle() {
-  const t = state.sessionName || firstUserText.split("\n")[0] || "New session";
-  $("title").textContent = t;
-  $("title").title = t;
+  const t = state.sessionName || firstUserText.split("\n")[0].slice(0, 80) || undefined;
+  if (t === lastTitle) return;
+  lastTitle = t;
+  post({ type: "title", title: t });
 }
 function levelLabel(l?: string): string {
   if (!l) return "";
@@ -878,24 +873,22 @@ const COMPOSER_REFUSAL_RE = /(composer|overlay|modal|editor)[^.]*outside (of )?p
 let lastBare: { cmd: string; t: number } | undefined;
 const side = new SidePanel({
   post,
+  initialSize: vscode.getState()?.sideSize,
+  saveSize: (size) => vscode.setState({ ...(vscode.getState() ?? {}), sideSize: size }),
   md,
   escapeHtml,
   linkify,
   onOpenChange: (open) => {
     document.body.classList.toggle("side-open", open);
-    $("btn-side").classList.toggle("active", open);
     if (!open) input.focus();
     updateSideBadge();
   },
 });
 side.learned = (vscode.getState()?.learnedSide as any) ?? {};
+/** Tell the host how many side-thread turns exist, for the native toggle's tooltip/badge. */
 function updateSideBadge() {
-  const b = $("side-badge");
-  const n = side.count;
-  b.textContent = String(n);
-  b.classList.toggle("hidden", !n || side.open);
+  post({ type: "sideState", open: side.open, count: side.count });
 }
-$("btn-side").addEventListener("click", () => side.toggle());
 
 // ------------------------------------------------------------------ composer
 
@@ -1149,8 +1142,6 @@ function insertText(text: string, replace = false) {
 }
 
 sendBtn.addEventListener("click", () => (sendBtn.classList.contains("stop") ? post({ type: "abort" }) : submit("steer")));
-$("btn-new").addEventListener("click", () => post({ type: "builtin", name: "new" }));
-$("btn-history").addEventListener("click", () => (listMenu.open ? listMenu.hide() : post({ type: "builtin", name: "resume" })));
 $("btn-model").addEventListener("click", (e) => {
   e.stopPropagation();
   picker.toggle();
@@ -1530,6 +1521,9 @@ class ListMenu {
   private search!: HTMLInputElement;
   private list!: HTMLElement;
   private kind = "";
+  get kindOpen() {
+    return this.open ? this.kind : "";
+  }
   private items: ListItem[] = [];
   private flat: ListItem[] = [];
   private sel = 0;
@@ -1552,7 +1546,7 @@ class ListMenu {
     });
     this.root.addEventListener("mousedown", (e) => e.stopPropagation());
     document.addEventListener("mousedown", (e) => {
-      if (this.open && !(e.target as HTMLElement).closest("#btn-history")) this.hide();
+      if (this.open) this.hide();
     });
   }
 
@@ -1567,7 +1561,6 @@ class ListMenu {
     this.sel = 0;
     this.open = true;
     this.root.classList.remove("hidden");
-    $("btn-history").classList.toggle("active", kind === "session");
     this.render();
     this.search.focus();
   }
@@ -1576,7 +1569,6 @@ class ListMenu {
     if (!this.open) return;
     this.open = false;
     this.root.classList.add("hidden");
-    $("btn-history").classList.remove("active");
     input.focus();
   }
 
@@ -1702,7 +1694,8 @@ window.addEventListener("message", (ev) => {
       picker.show(m.query ?? "");
       break;
     case "openList":
-      listMenu.show(m.kind, m.placeholder, m.items ?? [], m.empty);
+      if (listMenu.open && m.kind === listMenu.kindOpen) listMenu.hide();
+      else listMenu.show(m.kind, m.placeholder, m.items ?? [], m.empty);
       break;
     case "sideDone":
       side.onDone(m.requestId, m.error, m.disposition);
@@ -1710,6 +1703,7 @@ window.addEventListener("message", (ev) => {
       break;
     case "toggleSide":
       side.toggle();
+      updateSideBadge();
       break;
     case "openEffortPicker":
       picker.show("", true);

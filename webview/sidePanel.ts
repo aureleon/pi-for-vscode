@@ -24,6 +24,9 @@ export interface SideDeps {
   escapeHtml(s: string): string;
   linkify(el: HTMLElement): void;
   onOpenChange(open: boolean): void;
+  /** Persisted split sizes ({ row: px width, col: px height }). */
+  initialSize?: { row?: number; col?: number };
+  saveSize(size: { row?: number; col?: number }): void;
 }
 
 interface Turn {
@@ -66,7 +69,19 @@ export class SidePanel {
   /** Commands learned at runtime from composer-refusal notices. */
   learned: Record<string, SideCommandConfig> = {};
 
+  private splitter: HTMLElement;
+  private size: { row?: number; col?: number };
+
   constructor(private deps: SideDeps) {
+    // Split layout: body is a flex container [#app | splitter | side panel].
+    // Wide views split left/right, narrow views (the usual sidebar) split top/bottom,
+    // so the main conversation always stays visible next to the side thread.
+    this.size = { ...(deps.initialSize ?? {}) };
+    this.splitter = document.createElement("div");
+    this.splitter.className = "side-splitter hidden";
+    this.splitter.title = "Drag to resize · double-click to reset";
+    document.body.appendChild(this.splitter);
+    this.initSplitter();
     this.root = document.createElement("aside");
     this.root.className = "side-panel hidden";
     this.root.innerHTML = `
@@ -104,6 +119,58 @@ export class SidePanel {
         e.stopPropagation();
         this.hide();
       }
+    });
+  }
+
+  // ------------------------------------------------------------ split sizing
+
+  private get horizontal() {
+    return window.matchMedia("(min-width: 640px)").matches;
+  }
+
+  private applySize() {
+    const b = document.body.style;
+    if (this.size.row) b.setProperty("--side-w", `${this.size.row}px`);
+    else b.removeProperty("--side-w");
+    if (this.size.col) b.setProperty("--side-h", `${this.size.col}px`);
+    else b.removeProperty("--side-h");
+  }
+
+  private initSplitter() {
+    this.applySize();
+    let dragging = false;
+    this.splitter.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      dragging = true;
+      try { this.splitter.setPointerCapture(e.pointerId); } catch {}
+      document.body.classList.add("side-resizing");
+    });
+    this.splitter.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      if (this.horizontal) {
+        const w = Math.round(window.innerWidth - e.clientX);
+        this.size.row = Math.max(220, Math.min(w, window.innerWidth - 260));
+      } else {
+        const h = Math.round(window.innerHeight - e.clientY);
+        this.size.col = Math.max(140, Math.min(h, window.innerHeight - 180));
+      }
+      this.applySize();
+    });
+    const end = (e: PointerEvent) => {
+      if (!dragging) return;
+      dragging = false;
+      try { this.splitter.releasePointerCapture(e.pointerId); } catch {}
+      document.body.classList.remove("side-resizing");
+      this.deps.saveSize(this.size);
+    };
+    this.splitter.addEventListener("pointerup", end);
+    this.splitter.addEventListener("pointercancel", end);
+    this.splitter.addEventListener("dblclick", () => {
+      if (this.horizontal) delete this.size.row;
+      else delete this.size.col;
+      this.applySize();
+      this.deps.saveSize(this.size);
     });
   }
 
@@ -160,6 +227,7 @@ export class SidePanel {
     if (!this.open) {
       this.open = true;
       this.root.classList.remove("hidden");
+      this.splitter.classList.remove("hidden");
       this.deps.onOpenChange(true);
     }
     this.render();
@@ -170,6 +238,7 @@ export class SidePanel {
     if (!this.open) return;
     this.open = false;
     this.root.classList.add("hidden");
+    this.splitter.classList.add("hidden");
     this.deps.onOpenChange(false);
   }
 

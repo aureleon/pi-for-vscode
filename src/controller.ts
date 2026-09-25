@@ -27,6 +27,8 @@ const SIDE_ENTRY_PREFIXES = ["btw-"];
 export interface ChatHost {
   webview: vscode.Webview;
   setTitle(title: string | undefined): void;
+  /** Optional: reflect side-panel state in native chrome. */
+  setSideState?(open: boolean, count: number): void;
   reveal(): void;
 }
 
@@ -185,8 +187,11 @@ export class PiController implements vscode.Disposable {
     }
   }
 
+  /** Title reported by the webview (session name, else first prompt). */
+  private webTitle?: string;
+
   private updateTitle() {
-    this.host.setTitle(this.state.sessionName);
+    this.host.setTitle(this.state.sessionName || this.webTitle);
   }
 
   // ---------------------------------------------------------------- pi -> ui
@@ -294,6 +299,13 @@ export class PiController implements vscode.Disposable {
           break;
         case "setModel":
           await this.setModel(m.provider, m.id);
+          break;
+        case "title":
+          this.webTitle = m.title;
+          this.updateTitle();
+          break;
+        case "sideState":
+          this.host.setSideState?.(m.open, m.count);
           break;
         case "listPick":
           await this.onListPick(m.kind, m.id);

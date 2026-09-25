@@ -6,6 +6,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 
 ## Features
 
+- **One native header.** The standard VS Code view header shows "PI" and the session name (the name you set, else the first prompt). It also has the Side panel, Resume, and New session buttons, with *Open in New Tab* and *Restart* in the ••• menu. Chats in editor tabs show the same buttons in the editor title bar. The webview does not add its own header.
 - **Chat in the sidebar.** Text, thinking, and tool calls stream live and show as a timeline. Tool cards show `IN`/`OUT` for bash, read, write, and grep. Edits show an inline diff.
 - **Pi extensions.** Commands from `pi.registerCommand` show in `/` autocomplete. `ctx.ui.select/confirm/input/editor` show as inline dialogs, with timeout support. `notify` shows as a VS Code notification. `setStatus` shows in the status line and `setWidget` shows above or below the input, both with ANSI colors. `set_editor_text` fills the input.
 - **Prompting while Pi works.** <kbd>Enter</kbd> steers, <kbd>⌥ Enter</kbd> queues a follow-up, and <kbd>Esc</kbd> or the red button stops. When you stop, queued messages go back into the input.
@@ -14,13 +15,13 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Images.** Paste, drag and drop, or use the image button.
 - **Sessions.** Start a new session, `/clone`, `/name`, `/compact`, and `/export`. To resume a session (the history button or `/resume`) or to `/fork` from an earlier message, pick it from a searchable dropdown under the header. The extension does not use VS Code's global QuickPick. The sidebar reopens the last session of the workspace.
 - **Side panel for side conversations (`/btw`, and composer extensions).**
-  - In the pi TUI, extensions such as [pi-btw](https://github.com/dbachelder/pi-btw) open an overlay composer. In RPC mode they refuse to do so. The extension opens a side panel for them instead. It slides over the chat in a narrow view and docks next to the chat in a wide view.
+  - In the pi TUI, extensions such as [pi-btw](https://github.com/dbachelder/pi-btw) open an overlay composer. In RPC mode they refuse to do so. The extension opens a side panel for them instead. It splits the view with the chat, so the main conversation stays visible: top/bottom in a narrow sidebar and left/right in a wide view (640px or more). Drag the divider to resize the panel, and double-click it to reset the size. The size is saved.
   - A bare `/btw` opens the panel's composer. `/btw question` opens the panel and sends the question. You type follow-ups in the panel, and the thread continues. The mode stays the same (`/btw:tangent` threads continue as tangents and `/btw:ask` threads as read-only).
   - pi-btw's thread entries fill the panel as soon as each answer is ready, even while the main agent is working. After a reload or a session switch, the panel restores the thread from the session.
   - The panel has **Inject**, **Summarize**, **New** and **Clear** buttons. For Inject and Summarize, text in the panel box becomes the instructions.
   - In the main chat, pi-btw notes show only as a compact `BTW` link that opens the panel.
   - Any other extension that answers a bare command with *"cannot open its composer outside Pi's TUI"* is detected. The panel then opens for that command, and the next bare use opens it directly.
-  - To route more commands to the panel, use `pi.sidePanelCommands`. To open the panel from the command palette, use *Pi: Toggle Side Panel*.
+  - To route more commands to the panel, use `pi.sidePanelCommands`. To open the panel, use the side-panel button in the view header or *Pi: Toggle Side Panel*. When the panel is closed, a badge on the Pi view shows the number of side-thread messages.
 - **Model picker.** Click the model chip in the toolbar to open a model list above the input.
   - The list follows Pi's `enabledModels` setting. It uses the same rules as the pi CLI: exact IDs, `provider/id`, fuzzy names, globs, and `:thinking` suffixes. The order follows your patterns.
   - The setting comes from `--models` in `pi.args`, then `<workspace>/.pi/settings.json`, then `~/.pi/agent/settings.json`. If `enabledModels` is empty, the list shows all models, with your recent models first.
