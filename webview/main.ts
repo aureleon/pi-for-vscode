@@ -61,14 +61,12 @@ app.innerHTML = `
     <div class="composer" id="composer">
       <div id="popup" class="popup hidden"></div>
       <div id="model-picker" class="model-picker hidden"></div>
-      <div id="effort-picker" class="effort-picker hidden"></div>
       <div id="attachments" class="attachments hidden"></div>
       <textarea id="input" rows="1" placeholder="Ask Pi…  (/ commands, @ files, ! shell)"></textarea>
       <div class="toolbar">
         <button class="icon-btn" id="btn-image" title="Attach image">${I.image}</button>
         <button class="icon-btn" id="btn-slash" title="Commands">${I.slash}</button>
-        <button class="chip" id="btn-model" title="Select model"><span id="model-name">…</span></button>
-        <button class="chip dim" id="btn-effort" title="Select effort (thinking level)">${I.brain}<span id="thinking-level"></span></button>
+        <button class="chip" id="btn-model" title="Select model and effort"><span id="model-name">…</span><span class="chip-level" id="thinking-level"></span></button>
         <span class="spacer"></span>
         <span class="ctx" id="ctx" title="Context usage"></span>
         <button class="send" id="btn-send" title="Send (Enter)">${I.send}</button>
@@ -787,13 +785,10 @@ function levelLabel(l?: string): string {
 function updateModel() {
   const m = state.model;
   $("model-name").textContent = m ? (m.name ?? m.id) : "Select model";
-  $("btn-model").title = m ? `${m.provider}/${m.id} — click to change model` : "Select model";
+  $("btn-model").title = m ? `${m.provider}/${m.id} — click to change model or effort` : "Select model";
   const lvl = state.thinkingLevel ?? "off";
-  $("thinking-level").textContent = levelLabel(lvl);
-  $("btn-effort").classList.toggle("hidden", !m?.reasoning);
-  $("btn-effort").title = `Effort: ${levelLabel(lvl)} — click to change thinking level`;
+  $("thinking-level").textContent = m?.reasoning ? levelLabel(lvl) : "";
   if (picker.open) picker.render();
-  if (effortPicker.open) effortPicker.render();
 }
 function updateStats(s: any) {
   const ctx = $("ctx");
@@ -1098,10 +1093,6 @@ $("btn-model").addEventListener("click", (e) => {
   e.stopPropagation();
   picker.toggle();
 });
-$("btn-effort").addEventListener("click", (e) => {
-  e.stopPropagation();
-  effortPicker.toggle();
-});
 $("btn-image").addEventListener("click", () => post({ type: "pickImage" }));
 $("btn-slash").addEventListener("click", () => {
   if (!input.value.startsWith("/")) input.value = "/" + input.value;
@@ -1115,6 +1106,103 @@ document.addEventListener("keydown", (e) => {
 // ------------------------------------------------------------------ model picker
 
 interface ModelInfo { provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number; cost?: { input: number; output: number }; images?: boolean }
+
+// ------------------------------------------------------------------ effort slider
+
+let thinkingLevels: string[] = ["off"];
+
+/**
+ * Stepped effort slider shown in the model menu's footer. The DOM is built once
+ * and updated in place (never re-created while it is being dragged), and uses
+ * pointer capture on a padded hit area so clicks near the track register.
+ */
+class EffortSlider {
+  private label: HTMLElement;
+  private hit: HTMLElement;
+  private track: HTMLElement;
+  private dots: HTMLElement;
+  private levels: string[] = [];
+  private idx = 0;
+  private dragging = false;
+
+  constructor(private root: HTMLElement, private onCommit: (level: string) => void) {
+    root.innerHTML = `
+      <div class="mp-effort-label">Effort <span class="dim"></span></div>
+      <div class="slider-hit" tabindex="0" role="slider" aria-label="Effort" title="Click or drag · ←/→">
+        <div class="slider"><div class="slider-fill"></div><div class="slider-dots"></div><div class="slider-knob"></div></div>
+      </div>`;
+    this.label = root.querySelector(".mp-effort-label .dim")!;
+    this.hit = root.querySelector(".slider-hit")!;
+    this.track = root.querySelector(".slider")!;
+    this.dots = root.querySelector(".slider-dots")!;
+
+    this.hit.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      this.hit.focus();
+      try { this.hit.setPointerCapture(e.pointerId); } catch {}
+      this.dragging = true;
+      this.root.classList.add("dragging");
+      this.moveTo(e.clientX);
+    });
+    this.hit.addEventListener("pointermove", (e) => {
+      if (this.dragging) this.moveTo(e.clientX);
+    });
+    const end = (e: PointerEvent) => {
+      if (!this.dragging) return;
+      this.dragging = false;
+      this.root.classList.remove("dragging");
+      try { this.hit.releasePointerCapture(e.pointerId); } catch {}
+      this.commit();
+    };
+    this.hit.addEventListener("pointerup", end);
+    this.hit.addEventListener("pointercancel", end);
+    this.hit.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft" || e.key === "ArrowDown") { this.step(-1); e.preventDefault(); e.stopPropagation(); }
+      else if (e.key === "ArrowRight" || e.key === "ArrowUp") { this.step(1); e.preventDefault(); e.stopPropagation(); }
+    });
+  }
+
+  /** Sync with the current model's levels and state (ignored mid-drag). */
+  update(levels: string[], current: string, visible: boolean) {
+    this.root.classList.toggle("hidden", !visible);
+    if (this.dragging) return;
+    if (levels.join() !== this.levels.join()) {
+      this.levels = [...levels];
+      this.dots.innerHTML = levels.map((_, i) => `<i style="--p:${levels.length > 1 ? i / (levels.length - 1) : 0}"></i>`).join("");
+    }
+    this.show(Math.max(0, levels.indexOf(current)));
+  }
+
+  step(d: number) {
+    if (this.levels.length < 2) return;
+    this.show(Math.min(this.levels.length - 1, Math.max(0, this.idx + d)));
+    this.commit();
+  }
+
+  private moveTo(clientX: number) {
+    const r = this.track.getBoundingClientRect();
+    const inset = 8; // knob radius: first/last stops sit inside the track ends
+    const f = Math.min(1, Math.max(0, (clientX - r.left - inset) / Math.max(1, r.width - inset * 2)));
+    this.show(Math.round(f * (this.levels.length - 1)));
+  }
+
+  private show(i: number) {
+    this.idx = i;
+    const p = this.levels.length > 1 ? i / (this.levels.length - 1) : 0;
+    this.track.style.setProperty("--p", String(p));
+    this.dots.querySelectorAll("i").forEach((d, j) => d.classList.toggle("on", j <= i));
+    const level = this.levels[i] ?? "off";
+    this.label.textContent = `(${levelLabel(level)})`;
+    this.hit.setAttribute("aria-valuenow", String(i));
+    this.hit.setAttribute("aria-valuetext", levelLabel(level));
+  }
+
+  private commit() {
+    const level = this.levels[this.idx];
+    if (level && level !== state.thinkingLevel) this.onCommit(level);
+  }
+}
 
 class ModelPicker {
   open = false;
@@ -1131,14 +1219,21 @@ class ModelPicker {
   private search!: HTMLInputElement;
   private list!: HTMLElement;
   private loaded = false;
+  private effort!: EffortSlider;
 
   constructor() {
     this.root.innerHTML = `
       <input class="mp-search" placeholder="Select a model" spellcheck="false" aria-label="Search models">
       <div class="mp-list" tabindex="-1"></div>
-      <div class="mp-scope"></div>`;
+      <div class="mp-scope"></div>
+      <div class="mp-effort"></div>`;
     this.search = this.root.querySelector(".mp-search")!;
     this.list = this.root.querySelector(".mp-list")!;
+    this.effort = new EffortSlider(this.root.querySelector(".mp-effort")!, (level) => {
+      state.thinkingLevel = level; // optimistic; host confirms via state
+      updateModel();
+      post({ type: "setThinking", level });
+    });
     this.search.addEventListener("input", () => {
       this.query = this.search.value;
       this.sel = 0;
@@ -1157,7 +1252,6 @@ class ModelPicker {
     this.unmatched = unmatched ?? [];
     this.models = models ?? [];
     thinkingLevels = levels?.length ? levels : ["off"];
-    if (effortPicker.open) effortPicker.render();
     this.recent = recent ?? [];
     this.loaded = true;
     if (this.open) this.render();
@@ -1167,9 +1261,8 @@ class ModelPicker {
     this.open ? this.hide() : this.show("");
   }
 
-  show(query: string) {
+  show(query: string, focusEffort = false) {
     hidePopup();
-    effortPicker.hide(false);
     this.open = true;
     this.query = query;
     this.search.value = query;
@@ -1180,7 +1273,8 @@ class ModelPicker {
     if (!this.loaded) this.list.innerHTML = `<div class="mp-empty">Loading models…</div>`;
     post({ type: "getModels" });
     this.render();
-    this.search.focus();
+    if (focusEffort) this.focusEffort();
+    else this.search.focus();
   }
 
   hide(focusInput = true) {
@@ -1193,6 +1287,7 @@ class ModelPicker {
 
   render() {
     this.renderList();
+    this.renderEffort();
   }
 
   private isCurrent(m: ModelInfo) {
@@ -1205,14 +1300,20 @@ class ModelPicker {
     return q.toLowerCase().split(/\s+/).every((t) => hay.includes(t));
   }
 
+  private renderEffort() {
+    const visible = !!state.model?.reasoning && thinkingLevels.length > 1;
+    this.effort.update(thinkingLevels, state.thinkingLevel ?? "off", visible);
+  }
+
   private ctx(m: ModelInfo) {
     if (!m.contextWindow) return "";
     return m.contextWindow >= 1_000_000 ? `${+(m.contextWindow / 1_000_000).toFixed(1)}M context` : `${Math.round(m.contextWindow / 1000)}k context`;
   }
 
-  /** One short muted line, like Claude Code's menu. */
+  /** One muted line: context · price · capabilities. Full id/provider is in the tooltip. */
   private detail(m: ModelInfo) {
-    return [this.ctx(m), m.reasoning ? "" : "no reasoning"].filter(Boolean).join(" · ");
+    const price = m.cost && (m.cost.input || m.cost.output) ? `$${m.cost.input}/$${m.cost.output} per M` : "";
+    return [this.ctx(m), price, m.reasoning ? "reasoning" : "", m.images ? "images" : ""].filter(Boolean).join(" · ");
   }
 
   /** Everything else goes into the tooltip. */
@@ -1343,131 +1444,18 @@ class ModelPicker {
     else if (e.key === "ArrowUp") { this.sel = (this.sel - 1 + n) % n; this.renderList(); e.preventDefault(); }
     else if (e.key === "Enter") { const m = this.flat[this.sel]; if (m) this.choose(m); e.preventDefault(); }
     else if (e.key === "Escape") { this.hide(); e.preventDefault(); e.stopPropagation(); }
+    else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && (!this.search.value || e.altKey)) {
+      this.effort.step(e.key === "ArrowLeft" ? -1 : 1);
+      e.preventDefault();
+    } else if (e.key === "Tab") { this.effort.step(e.shiftKey ? -1 : 1); e.preventDefault(); }
+  }
+
+  focusEffort() {
+    (this.root.querySelector(".slider-hit") as HTMLElement | null)?.focus();
   }
 }
 const picker = new ModelPicker();
 
-// ------------------------------------------------------------------ effort picker
-
-let thinkingLevels: string[] = ["off"];
-const LEVEL_INFO: Record<string, string> = {
-  off: "No thinking",
-  minimal: "Fastest",
-  low: "Faster",
-  medium: "Balanced",
-  high: "Thorough",
-  xhigh: "More thorough",
-  max: "Most thorough",
-};
-
-class EffortPicker {
-  open = false;
-  private root = $("effort-picker");
-  private loaded = false;
-
-  constructor() {
-    this.root.tabIndex = -1;
-    this.root.addEventListener("mousedown", (e) => e.stopPropagation());
-    this.root.addEventListener("keydown", (e) => this.onKey(e));
-    document.addEventListener("mousedown", (e) => {
-      if (this.open && !(e.target as HTMLElement).closest("#btn-effort")) this.hide();
-    });
-  }
-
-  toggle() {
-    this.open ? this.hide() : this.show();
-  }
-
-  show() {
-    hidePopup();
-    picker.hide(false);
-    this.open = true;
-    this.root.classList.remove("hidden");
-    $("btn-effort").classList.add("active");
-    // Anchor under the chip horizontally.
-    const chip = $("btn-effort");
-    const composerRect = $("composer").getBoundingClientRect();
-    const left = Math.max(0, Math.min(chip.getBoundingClientRect().left - composerRect.left, composerRect.width - 220));
-    this.root.style.left = `${left}px`;
-    if (!this.loaded) post({ type: "getModels" }); // also returns thinking levels for the current model
-    this.loaded = true;
-    this.render();
-    this.root.focus();
-  }
-
-  hide(focusInput = true) {
-    if (!this.open) return;
-    this.open = false;
-    this.root.classList.add("hidden");
-    $("btn-effort").classList.remove("active");
-    if (focusInput) input.focus();
-  }
-
-  render() {
-    const levels = thinkingLevels;
-    const cur = state.thinkingLevel ?? "off";
-    const idx = Math.max(0, levels.indexOf(cur));
-    const pct = levels.length > 1 ? idx / (levels.length - 1) : 0;
-    this.root.innerHTML = `
-      <div class="ep-head">
-        <div class="ep-title">Effort <span class="dim">(${escapeHtml(levelLabel(cur))})</span></div>
-        <div class="slider" role="slider" aria-valuemin="0" aria-valuemax="${levels.length - 1}" aria-valuenow="${idx}" title="←/→ to adjust">
-          <div class="slider-fill" style="width:calc(20px + (100% - 20px) * ${pct})"></div>
-          ${levels.map((l, i) => `<div class="slider-dot${i <= idx ? " on" : ""}" style="left:calc(10px + (100% - 20px) * ${levels.length > 1 ? i / (levels.length - 1) : 0})"></div>`).join("")}
-          <div class="slider-knob" style="left:calc(10px + (100% - 20px) * ${pct})"></div>
-        </div>
-      </div>
-      <div class="ep-list"></div>`;
-    const list = this.root.querySelector(".ep-list")!;
-    levels.forEach((l) => {
-      const row = el("div", `ep-item${l === cur ? " active" : ""}`);
-      row.innerHTML = `<div class="mp-text ep-row"><span class="mp-name">${escapeHtml(levelLabel(l))}</span><span class="mp-detail">${escapeHtml(LEVEL_INFO[l] ?? "")}</span></div>${l === cur ? `<span class="mp-check">✓</span>` : ""}`;
-      row.addEventListener("click", () => {
-        this.set(l);
-        this.hide();
-      });
-      list.appendChild(row);
-    });
-    const slider = this.root.querySelector(".slider") as HTMLElement;
-    const pick = (clientX: number) => {
-      const r = slider.getBoundingClientRect();
-      const f = Math.min(1, Math.max(0, (clientX - r.left - 10) / (r.width - 20)));
-      this.set(levels[Math.round(f * (levels.length - 1))]);
-    };
-    slider.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      pick(e.clientX);
-      const move = (ev: MouseEvent) => pick(ev.clientX);
-      const up = () => {
-        document.removeEventListener("mousemove", move);
-        document.removeEventListener("mouseup", up);
-        this.root.focus();
-      };
-      document.addEventListener("mousemove", move);
-      document.addEventListener("mouseup", up);
-    });
-  }
-
-  set(level: string | undefined) {
-    if (!level || level === state.thinkingLevel) return;
-    state.thinkingLevel = level; // optimistic; host confirms via state
-    updateModel();
-    post({ type: "setThinking", level });
-  }
-
-  private step(d: number) {
-    const i = Math.max(0, thinkingLevels.indexOf(state.thinkingLevel ?? "off"));
-    this.set(thinkingLevels[Math.min(thinkingLevels.length - 1, Math.max(0, i + d))]);
-  }
-
-  private onKey(e: KeyboardEvent) {
-    if (e.key === "ArrowLeft" || e.key === "ArrowUp") { this.step(-1); e.preventDefault(); }
-    else if (e.key === "ArrowRight" || e.key === "ArrowDown") { this.step(1); e.preventDefault(); }
-    else if (e.key === "Enter" || e.key === "Escape") { this.hide(); e.preventDefault(); e.stopPropagation(); }
-    else if (/^[0-9]$/.test(e.key) && thinkingLevels[Number(e.key)]) { this.set(thinkingLevels[Number(e.key)]); }
-  }
-}
-const effortPicker = new EffortPicker();
 
 // ------------------------------------------------------------------ dropdown list (sessions, fork)
 
@@ -1508,7 +1496,6 @@ class ListMenu {
 
   show(kind: string, placeholder: string, items: ListItem[], empty = "Nothing here") {
     picker.hide(false);
-    effortPicker.hide(false);
     hidePopup();
     this.kind = kind;
     this.items = items;
@@ -1653,7 +1640,7 @@ window.addEventListener("message", (ev) => {
       listMenu.show(m.kind, m.placeholder, m.items ?? [], m.empty);
       break;
     case "openEffortPicker":
-      effortPicker.show();
+      picker.show("", true);
       break;
     case "fileResults":
       onFileResults(m.requestId, m.files);
