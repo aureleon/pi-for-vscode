@@ -22,6 +22,15 @@ const configs = [
     target: "es2020",
     sourcemap: true,
   },
+  {
+    // pi-side bridge loaded via `pi -e` (adds tree navigation to RPC mode)
+    entryPoints: ["src/bridge/piBridge.ts"],
+    bundle: true,
+    outfile: "dist/pi-bridge.mjs",
+    platform: "node",
+    format: "esm",
+    target: "node18",
+  },
 ];
 
 if (watch) {

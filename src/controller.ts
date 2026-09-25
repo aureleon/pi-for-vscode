@@ -6,6 +6,7 @@ import { PiProcess, type RpcRecord } from "./piProcess";
 import { defaultSessionDir, listSessions, relativeTime } from "./sessions";
 import { getShellEnv } from "./shellEnv";
 import { agentDir, scopeModels } from "./modelScope";
+import { slimTree } from "./treeData";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
 const RECENT_MODELS_KEY = "pi.recentModels";
@@ -41,6 +42,8 @@ export class PiController implements vscode.Disposable {
   private starting?: Promise<void>;
   private env: NodeJS.ProcessEnv = process.env;
   private args: string[] = [];
+  /** Integrated terminal running the pi TUI on this chat's session, while it owns the session. */
+  private terminal?: vscode.Terminal;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -78,6 +81,8 @@ export class PiController implements vscode.Disposable {
     this.env = env;
     const command = cfg.get<string>("path")?.trim() || "pi";
     const args = [...(cfg.get<string[]>("args") ?? [])];
+    // Bridge extension: adds tree navigation (/tree) and labels, which RPC lacks.
+    args.push("-e", path.join(this.context.extensionPath, "dist", "pi-bridge.mjs"));
 
     const resume = sessionFile ?? this.options.sessionFile ??
       (this.options.primary && cfg.get<boolean>("resumeLastSession", true)
@@ -232,6 +237,10 @@ export class PiController implements vscode.Disposable {
   private async onReady() {
     this.webviewReady = true;
     this.outbox = [];
+    if (this.terminal) {
+      this.post({ type: "terminalAttached", title: this.terminal.name });
+      return;
+    }
     if (!this.pi?.running) await this.start();
     else await this.sendInit("init");
   }
@@ -276,6 +285,22 @@ export class PiController implements vscode.Disposable {
           this.webTitle = m.title;
           this.updateTitle();
           break;
+        case "openTerminal":
+          await this.openInTerminal();
+          break;
+        case "reattach":
+          await this.reattach(this.state.sessionFile);
+          break;
+        case "showTerminal":
+          this.terminal?.show();
+          break;
+        case "treeNavigate":
+          await this.treeNavigate(m.id, !!m.summarize, m.instructions);
+          break;
+        case "treeLabel":
+          await this.req({ type: "prompt", message: `/vscode:label ${JSON.stringify({ entryId: m.id, label: m.label ?? "" })}` });
+          await this.openTree("", m.id, true);
+          break;
         case "listPick":
           await this.onListPick(m.kind, m.id);
           break;
@@ -300,6 +325,7 @@ export class PiController implements vscode.Disposable {
   }
 
   async prompt(text: string, images: any[] | undefined, mode?: "steer" | "followUp") {
+    if (this.terminal) throw new Error("This session is open in the terminal. Reattach to continue here.");
     if (!this.pi?.running) await this.start();
     const cmd: RpcRecord = { type: "prompt", message: text };
     if (images?.length) cmd.images = images;
@@ -374,6 +400,90 @@ export class PiController implements vscode.Disposable {
     }
   }
 
+  /**
+   * Continue this chat's session in the pi TUI inside an integrated terminal
+   * (like Claude Code / Codex "open in terminal").
+   *
+   * Two pi processes appending to one session file would interleave entries, so
+   * the RPC process is stopped while the terminal owns the session. When the
+   * terminal closes (or the user clicks Reattach), the RPC process restarts on
+   * the same session file and the transcript reloads with everything done in the TUI.
+   */
+  async openInTerminal() {
+    if (this.terminal && vscode.window.terminals.includes(this.terminal)) {
+      this.terminal.show();
+      return;
+    }
+    if (this.state.isStreaming) {
+      const choice = await vscode.window.showWarningMessage(
+        "Pi is still working. Stop it and continue in the terminal?",
+        { modal: true },
+        "Stop and Open",
+      );
+      if (choice !== "Stop and Open") return;
+      await this.abort();
+    }
+    // Make sure a session file exists to hand over (new sessions are written lazily).
+    try {
+      this.state = await this.req({ type: "get_state" });
+    } catch {}
+    const sessionFile: string | undefined = this.state.sessionFile;
+    const cfg = vscode.workspace.getConfiguration("pi");
+    const command = cfg.get<string>("path")?.trim() || "pi";
+    const userArgs = (cfg.get<string[]>("args") ?? []).filter((a) => a !== "--no-session");
+    const hasHistory = (this.state.messageCount ?? 0) > 0 && sessionFile && fs.existsSync(sessionFile);
+    const args = [...userArgs, ...(hasHistory ? ["--session", sessionFile!] : [])];
+
+    // Release the session: stop the RPC process before the TUI opens it.
+    const pi = this.pi;
+    this.pi = undefined;
+    pi?.stop();
+    this.statusItem.hide();
+
+    const env = await getShellEnv(cfg.get<boolean>("useLoginShellEnv", true));
+    const title = this.state.sessionName ? `Pi · ${this.state.sessionName}` : "Pi";
+    const terminal = vscode.window.createTerminal({
+      name: title,
+      cwd: this.cwd,
+      iconPath: vscode.Uri.joinPath(this.context.extensionUri, "media", "pi-logo.svg"),
+      env: { PATH: env.PATH ?? process.env.PATH ?? "", PI_VSCODE: "1", PI_VSCODE_TERMINAL: "1" },
+      location: cfg.get<string>("terminalLocation", "editor") === "panel" ? vscode.TerminalLocation.Panel : { viewColumn: vscode.ViewColumn.Active },
+    });
+    this.terminal = terminal;
+    const quote = (a: string) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, "'\\''")}'`);
+    terminal.sendText([command, ...args].map(quote).join(" "), true);
+    terminal.show();
+    this.post({ type: "terminalAttached", title, sessionFile: hasHistory ? sessionFile : undefined });
+
+    const sub = vscode.window.onDidCloseTerminal(async (t) => {
+      if (t !== terminal) return;
+      sub.dispose();
+      if (this.terminal === terminal) await this.reattach(hasHistory ? sessionFile : undefined);
+    });
+    this.disposables.push(sub);
+  }
+
+  /** Take the session back from the terminal and reload the transcript. */
+  async reattach(sessionFile?: string) {
+    const t = this.terminal;
+    this.terminal = undefined;
+    // The TUI may have switched to another session; prefer the newest file in the folder.
+    let resume = sessionFile;
+    try {
+      const dir = sessionFile ? path.dirname(sessionFile) : defaultSessionDir(this.cwd);
+      const newest = (await listSessions(dir, 1))[0];
+      if (newest && (!sessionFile || newest.mtime > (fs.statSync(sessionFile).mtimeMs ?? 0))) resume = newest.file;
+    } catch {}
+    if (t && vscode.window.terminals.includes(t)) t.dispose();
+    this.post({ type: "terminalDetached" });
+    await this.start(resume);
+  }
+
+  get terminalAttached() {
+    return !!this.terminal;
+  }
+
+
   insertText(text: string) {
     this.host.reveal();
     this.post({ type: "insertText", text });
@@ -391,6 +501,12 @@ export class PiController implements vscode.Disposable {
       }
       case "resume":
         await this.pickSession();
+        break;
+      case "tree":
+        await this.openTree(arg);
+        break;
+      case "terminal":
+        await this.openInTerminal();
         break;
       case "model":
         await this.pickModel(arg);
@@ -457,6 +573,42 @@ export class PiController implements vscode.Disposable {
         break;
       }
     }
+  }
+
+  /** Full text of prompt-like entries, for putting back into the composer after navigation. */
+  private treeTexts = new Map<string, string>();
+
+  /**
+   * Open the session tree (the TUI's /tree). Sends a slimmed-down tree: one
+   * node per entry with a kind, a one-line preview, label and children, so the
+   * webview never receives full tool outputs.
+   */
+  async openTree(query = "", selectId?: string, refresh = false) {
+    const { tree, leafId } = await this.req({ type: "get_tree" });
+    const { nodes, texts } = slimTree(tree);
+    this.treeTexts = texts;
+    this.host.reveal();
+    this.post({ type: "openTree", nodes, leafId, roots: tree.map((r: any) => r.entry.id), query, selectId, refresh });
+  }
+
+  private async treeNavigate(id: string, summarize: boolean, instructions?: string) {
+    if (this.state.isStreaming) {
+      this.post({ type: "error", message: "Wait for the current response to finish before navigating the session tree." });
+      return;
+    }
+    const text = this.treeTexts.get(id);
+    this.post({ type: "treeBusy", text: summarize ? "Summarizing the branch you are leaving…" : "Switching branch…" });
+    try {
+      await this.req({
+        type: "prompt",
+        message: `/vscode:tree ${JSON.stringify({ targetId: id, summarize, customInstructions: instructions || undefined })}`,
+      });
+    } finally {
+      this.post({ type: "treeBusy", text: "" });
+    }
+    await this.sendInit("reset");
+    // Like the TUI: selecting a prompt moves to its parent and puts the prompt back in the editor.
+    if (text) this.post({ type: "insertText", text, replace: true });
   }
 
   async pickSession() {
@@ -577,6 +729,7 @@ export class PiController implements vscode.Disposable {
   }
 
   dispose() {
+    this.terminal = undefined; // leave a user's terminal session running
     this.pi?.stop();
     this.pi = undefined;
     for (const d of this.disposables) d.dispose();

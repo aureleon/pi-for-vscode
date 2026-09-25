@@ -1,5 +1,6 @@
 import { marked } from "marked";
 import { ansiToHtml, escapeHtml, stripAnsi } from "./ansi";
+import { TreeMenu } from "./treeMenu";
 
 declare function acquireVsCodeApi(): { postMessage(m: any): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
@@ -97,7 +98,9 @@ const BUILTINS: Command[] = [
   { name: "thinking", description: "Select thinking level", source: "builtin" },
   { name: "compact", description: "Compact context [instructions]", source: "builtin" },
   { name: "name", description: "Name this session", source: "builtin" },
+  { name: "tree", description: "Navigate the session tree (branches, labels, summaries)", source: "builtin" },
   { name: "fork", description: "Fork from a previous message", source: "builtin" },
+  { name: "terminal", description: "Continue this session in the pi TUI in a terminal", source: "builtin" },
   { name: "clone", description: "Clone the current branch into a new session", source: "builtin" },
   { name: "session", description: "Show session stats", source: "builtin" },
   { name: "copy", description: "Copy last response", source: "builtin" },
@@ -1492,6 +1495,7 @@ class ListMenu {
   }
 
   show(kind: string, placeholder: string, items: ListItem[], empty = "Nothing here") {
+    treeMenu.hide();
     picker.hide(false);
     hidePopup();
     this.kind = kind;
@@ -1557,6 +1561,20 @@ class ListMenu {
 }
 const listMenu = new ListMenu();
 
+const treeMenu = new TreeMenu(
+  {
+    post,
+    escapeHtml,
+    onOpen: () => {
+      listMenu.hide();
+      picker.hide(false);
+      hidePopup();
+    },
+    onClose: () => input.focus(),
+  },
+  $("app"),
+);
+
 // ------------------------------------------------------------------ banner
 
 function showBanner(html: string, actions: { label: string; fn: () => void }[] = [], cls = "error") {
@@ -1577,9 +1595,14 @@ function hideBanner() {
 
 // ------------------------------------------------------------------ host messages
 
+/** The VS Code bridge registers internal `vscode:*` commands; never show them. */
+function visibleCommands(list?: Command[]): Command[] | undefined {
+  return list?.filter((c) => !c.name.startsWith("vscode:"));
+}
+
 function applySnapshot(m: any) {
   state = { ...m.state, cwd: m.cwd ?? state.cwd };
-  if (m.commands) commands = m.commands;
+  if (m.commands) commands = visibleCommands(m.commands)!;
   resetTranscript();
   for (const msg of m.messages ?? []) renderMessage(msg);
   setRunning(!!state.isStreaming);
@@ -1610,10 +1633,26 @@ window.addEventListener("message", (ev) => {
       updateStats(m.stats);
       break;
     case "commands":
-      commands = m.commands ?? commands;
+      commands = visibleCommands(m.commands) ?? commands;
       break;
     case "event":
       onEvent(m.event);
+      break;
+    case "terminalAttached":
+      setRunning(false);
+      document.body.classList.add("in-terminal");
+      showBanner(
+        `<b>This session is open in the terminal</b>${m.title ? ` (${escapeHtml(m.title)})` : ""}.<div class="dim">The chat is paused so both don't write to the same session. Close the terminal or reattach to continue here; everything done in the TUI will show up.</div>`,
+        [
+          { label: "Show Terminal", fn: () => post({ type: "showTerminal" }) },
+          { label: "Reattach Here", fn: () => post({ type: "reattach" }) },
+        ],
+        "info",
+      );
+      break;
+    case "terminalDetached":
+      document.body.classList.remove("in-terminal");
+      hideBanner();
       break;
     case "starting":
       hideBanner();
@@ -1639,6 +1678,13 @@ window.addEventListener("message", (ev) => {
       break;
     case "openModelPicker":
       picker.show(m.query ?? "");
+      break;
+    case "openTree":
+      if (treeMenu.open && !m.refresh && !m.selectId) treeMenu.hide();
+      else treeMenu.show(m);
+      break;
+    case "treeBusy":
+      treeMenu.setBusy(m.text ?? "");
       break;
     case "openList":
       if (listMenu.open && m.kind === listMenu.kindOpen) listMenu.hide();

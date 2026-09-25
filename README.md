@@ -14,6 +14,14 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Shell.** `!cmd` runs a command and adds its output to the context. `!!cmd` runs it without adding output to the context.
 - **Images.** Paste, drag and drop, or use the image button.
 - **Sessions.** Start a new session, `/clone`, `/name`, `/compact`, and `/export`. To resume a session (the history button or `/resume`) or to `/fork` from an earlier message, pick it from a searchable dropdown under the header. The extension does not use VS Code's global QuickPick. The sidebar reopens the last session of the workspace.
+- **Session tree (`/tree`).** Use the tree button in the header, `/tree`, or *Pi: Session Tree*. The tree shows every branch of the session, as in the pi TUI: chains stay flat, branch points get `├─ └─` guides, abandoned branches are muted, and the current entry is marked.
+  - Select an entry and press **Enter** (or click *Go*) to continue from there. If you select a prompt, the chat moves to the point before it and puts the prompt back in the input, so you can edit it and send it as a new branch.
+  - **Shift+Enter** (*Summarize & go*) summarizes the branch you are leaving. **Alt+Enter** asks for summary instructions first.
+  - **Ctrl+L** sets or clears a label (a bookmark). *Show all entries* also shows tool results and model changes. Type to search.
+  - RPC mode has no tree commands, so the extension loads a small bridge extension into pi (`pi -e dist/pi-bridge.mjs`). The bridge calls `ctx.navigateTree()`. Its internal `vscode:*` commands do not appear in autocomplete.
+- **Open in Terminal.** Use the terminal button in the header, `/terminal`, or *Pi: Open Session in Terminal*. The current session continues in the full pi TUI in an integrated terminal, as an editor tab by default (`pi.terminalLocation`). The TUI gives you every TUI-only feature (custom extension UIs, overlays, keybindings).
+  - While the terminal has the session, the chat is paused, so that two pi processes do not write to the same session file. Close the terminal, or click *Reattach Here*, and the chat reloads the session with everything you did in the TUI. If you switched sessions in the TUI, the chat uses the newest one.
+  - *Pi: New Pi Terminal (TUI)* opens a plain `pi` terminal with no chat attached.
 - **Model picker.** Click the model chip in the toolbar to open a model list above the input.
   - The list follows Pi's `enabledModels` setting. It uses the same rules as the pi CLI: exact IDs, `provider/id`, fuzzy names, globs, and `:thinking` suffixes. The order follows your patterns.
   - The setting comes from `--models` in `pi.args`, then `<workspace>/.pi/settings.json`, then `~/.pi/agent/settings.json`. If `enabledModels` is empty, the list shows all models, with your recent models first.
@@ -50,12 +58,13 @@ VS Code apps opened from the Dock often do not get your shell `PATH`. For this r
 | `pi.args` | `[]` | More CLI arguments, for example `["--model", "sonnet"]`. |
 | `pi.resumeLastSession` | `true` | Reopen the last session of the workspace. |
 | `pi.useLoginShellEnv` | `true` | Load the environment of your login shell. |
+| `pi.terminalLocation` | `"editor"` | Where *Open in Terminal* opens the TUI: an editor tab or the terminal panel. |
 
 Extensions can check `process.env.PI_VSCODE === "1"` to know that they run inside VS Code.
 
 ## Limitations (from RPC mode)
 
-TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. Tree navigation (`/tree`) is not available in RPC mode.
+TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` works through the bridge extension, and *Open in Terminal* gives you everything else from the TUI.
 
 ## Development
 
