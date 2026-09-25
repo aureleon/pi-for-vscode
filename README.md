@@ -12,7 +12,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Autocomplete.** Type `/` for commands (extension commands, prompt templates, skills, and built-ins) and `@` to mention workspace files.
 - **Shell.** `!cmd` runs a command and adds its output to the context. `!!cmd` runs it without adding output to the context.
 - **Images.** Paste, drag and drop, or use the image button.
-- **Sessions.** Start a new session, resume one from the history picker, `/fork`, `/clone`, `/name`, `/compact`, and `/export`. The sidebar reopens the last session of the workspace.
+- **Sessions.** Start a new session, `/clone`, `/name`, `/compact`, and `/export`. To resume a session (the history button or `/resume`) or to `/fork` from an earlier message, pick it from a searchable dropdown under the header. The extension does not use VS Code's global QuickPick. The sidebar reopens the last session of the workspace.
 - **Model picker.** Click the model chip in the toolbar to open a model list above the input.
   - The list follows Pi's `enabledModels` setting. It uses the same rules as the pi CLI: exact IDs, `provider/id`, fuzzy names, globs, and `:thinking` suffixes. The order follows your patterns.
   - The setting comes from `--models` in `pi.args`, then `<workspace>/.pi/settings.json`, then `~/.pi/agent/settings.json`. If `enabledModels` is empty, the list shows all models, with your recent models first.

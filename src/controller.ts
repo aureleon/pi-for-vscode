@@ -136,7 +136,13 @@ export class PiController implements vscode.Disposable {
       if (state.sessionFile && this.options.primary) {
         this.context.workspaceState.update(LAST_SESSION_KEY, state.sessionFile);
       }
-      this.post({ type: kind, state, commands: commands.commands, messages: messages.messages, cwd: this.cwd });
+      this.post({
+        type: kind,
+        state,
+        commands: commands.commands,
+        messages: messages.messages,
+        cwd: this.cwd,
+      });
       this.updateTitle();
       this.refreshStats();
     } catch (err: any) {
@@ -251,6 +257,9 @@ export class PiController implements vscode.Disposable {
           break;
         case "setModel":
           await this.setModel(m.provider, m.id);
+          break;
+        case "listPick":
+          await this.onListPick(m.kind, m.id);
           break;
         case "editEnabledModels":
           await this.editEnabledModels();
@@ -390,17 +399,18 @@ export class PiController implements vscode.Disposable {
       }
       case "fork": {
         const { messages } = await this.req({ type: "get_fork_messages" });
-        if (!messages?.length) return void vscode.window.showInformationMessage("Pi: nothing to fork from yet.");
-        const pick = await vscode.window.showQuickPick(
-          [...messages].reverse().map((m: any) => ({ label: m.text.split("\n")[0].slice(0, 120), detail: m.text.slice(0, 300), entryId: m.entryId, text: m.text })),
-          { placeHolder: "Fork a new session from a previous message" },
-        );
-        if (!pick) return;
-        const r = await this.req({ type: "fork", entryId: pick.entryId });
-        if (!r?.cancelled) {
-          await this.sendInit("reset");
-          this.post({ type: "insertText", text: r.text ?? pick.text, replace: true });
-        }
+        this.host.reveal();
+        this.post({
+          type: "openList",
+          kind: "fork",
+          placeholder: "Fork from a previous message",
+          empty: "No messages to fork from",
+          items: [...(messages ?? [])].reverse().map((m: any) => ({
+            id: m.entryId,
+            label: m.text.split("\n")[0].slice(0, 200),
+            search: m.text.slice(0, 2000),
+          })),
+        });
         break;
       }
       case "clone": {
@@ -434,19 +444,35 @@ export class PiController implements vscode.Disposable {
   async pickSession() {
     const dir = this.state.sessionFile ? path.dirname(this.state.sessionFile) : defaultSessionDir(this.cwd);
     const sessions = (await listSessions(dir)).filter((s) => s.messageCount > 0 || s.file === this.state.sessionFile);
-    if (!sessions.length) return void vscode.window.showInformationMessage("Pi: no previous sessions for this folder.");
-    const pick = await vscode.window.showQuickPick(
-      sessions.map((s) => ({
-        label: (s.file === this.state.sessionFile ? "$(circle-filled) " : "") + (s.name || s.firstMessage?.split("\n")[0].slice(0, 100) || "(empty session)"),
-        description: `${relativeTime(s.mtime)} · ${s.messageCount} msgs`,
-        detail: s.name && s.firstMessage ? s.firstMessage.slice(0, 160) : undefined,
-        file: s.file,
+    this.host.reveal();
+    this.post({
+      type: "openList",
+      kind: "session",
+      placeholder: "Resume a Pi session",
+      empty: "No previous sessions for this folder",
+      items: sessions.map((s) => ({
+        id: s.file,
+        label: s.name || s.firstMessage?.split("\n")[0].slice(0, 200) || "(empty session)",
+        meta: `${relativeTime(s.mtime)} · ${s.messageCount} msgs`,
+        search: [s.name, s.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
+        current: s.file === this.state.sessionFile,
       })),
-      { placeHolder: "Resume a Pi session", matchOnDescription: true, matchOnDetail: true },
-    );
-    if (!pick || pick.file === this.state.sessionFile) return;
-    const r = await this.req({ type: "switch_session", sessionPath: pick.file });
-    if (!r?.cancelled) await this.sendInit("reset");
+    });
+  }
+
+  /** The user picked an entry in a webview dropdown list. */
+  private async onListPick(kind: string, id: string) {
+    if (kind === "session") {
+      if (id === this.state.sessionFile) return;
+      const r = await this.req({ type: "switch_session", sessionPath: id });
+      if (!r?.cancelled) await this.sendInit("reset");
+    } else if (kind === "fork") {
+      const r = await this.req({ type: "fork", entryId: id });
+      if (!r?.cancelled) {
+        await this.sendInit("reset");
+        if (r?.text) this.post({ type: "insertText", text: r.text, replace: true });
+      }
+    }
   }
 
   /** Open the inline model picker in the webview. */
