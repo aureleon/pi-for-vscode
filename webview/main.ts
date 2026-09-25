@@ -1512,7 +1512,7 @@ const picker = new ModelPicker();
 
 // ------------------------------------------------------------------ dropdown list (sessions, fork)
 
-interface ListItem { id: string; label: string; meta?: string; search?: string; current?: boolean }
+interface ListItem { id: string; label: string; meta?: string; cols?: string[]; group?: string; search?: string; current?: boolean }
 
 /** Header-anchored dropdown styled like the model menu; replaces VS Code's global QuickPick. */
 class ListMenu {
@@ -1576,7 +1576,7 @@ class ListMenu {
     const q = this.search.value.trim().toLowerCase();
     const words = q.split(/\s+/).filter(Boolean);
     this.flat = this.items.filter((it) => {
-      const hay = `${it.label} ${it.search ?? ""} ${it.meta ?? ""}`.toLowerCase();
+      const hay = `${it.label} ${it.search ?? ""} ${it.meta ?? ""} ${(it.cols ?? []).join(" ")}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
     this.sel = Math.min(this.sel, Math.max(0, this.flat.length - 1));
@@ -1585,10 +1585,19 @@ class ListMenu {
       this.list.innerHTML = `<div class="mp-empty">${escapeHtml(q ? `No matches for “${q}”` : this.emptyText)}</div>`;
       return;
     }
+    let group: string | undefined;
     this.flat.forEach((it, i) => {
+      if (it.group && it.group !== group) {
+        group = it.group;
+        this.list.appendChild(el("div", "lm-group", escapeHtml(group)));
+      }
       const row = el("div", `mp-item lm-item${i === this.sel ? " active" : ""}${it.current ? " current" : ""}`);
       row.title = it.search || it.label;
-      row.innerHTML = `${it.current ? `<span class="lm-dot" title="Current session">●</span>` : ""}<span class="lm-label">${escapeHtml(it.label)}</span>${it.meta ? `<span class="lm-meta">${escapeHtml(it.meta)}</span>` : ""}`;
+      const cols = it.cols ?? (it.meta ? [it.meta] : []);
+      row.innerHTML =
+        `<span class="lm-dot">${it.current ? "●" : ""}</span>` +
+        `<span class="lm-label">${escapeHtml(it.label)}</span>` +
+        cols.map((c, j) => `<span class="lm-col lm-col-${j}">${escapeHtml(c)}</span>`).join("");
       row.addEventListener("mousemove", () => {
         if (this.sel === i) return;
         this.sel = i;
@@ -1597,7 +1606,7 @@ class ListMenu {
       row.addEventListener("click", () => this.choose(it));
       this.list.appendChild(row);
     });
-    (this.list.children[this.sel] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
+    (this.list.querySelectorAll(".lm-item")[this.sel] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
   }
 
   private choose(it: ListItem) {
