@@ -86,13 +86,13 @@
       },
       {
         "command": "pi.openInTerminal",
-        "title": "Pi: Open Session in Terminal",
+        "title": "Pi: Continue Session in Terminal",
         "icon": "$(terminal)"
       },
       {
         "command": "pi.newTerminal",
-        "title": "Pi: New Pi Terminal (TUI)",
-        "icon": "$(terminal)"
+        "title": "Pi: Open in Terminal",
+        "icon": "$(pi-logo)"
       }
     ],
     "menus": {
@@ -116,6 +116,11 @@
           "command": "pi.openInTerminal",
           "when": "view == pi.chat",
           "group": "navigation@5"
+        },
+        {
+          "command": "pi.newTerminal",
+          "when": "view == pi.chat",
+          "group": "overflow@0"
         },
         {
           "command": "pi.openInTab",
@@ -167,6 +172,11 @@
           "command": "pi.restart",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "overflow@1"
+        },
+        {
+          "command": "pi.newTerminal",
+          "when": "activeWebviewPanelId == 'pi.panel'",
+          "group": "overflow@0"
         }
       ]
     },
@@ -223,13 +233,23 @@
           "description": "Where \"Pi: Open Session in Terminal\" opens the pi TUI."
         }
       }
+    },
+    "icons": {
+      "pi-logo": {
+        "description": "Pi logo",
+        "default": {
+          "fontPath": "media/pi-icons.woff",
+          "fontCharacter": "\\E900"
+        }
+      }
     }
   },
   "scripts": {
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "package": "npm run build && vsce package --no-dependencies"
+    "package": "npm run build && vsce package --no-dependencies",
+    "build:icons": "node tools/build-icon-font.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
@@ -238,7 +258,10 @@
     "esbuild": "^0.24.0",
     "marked": "^14.1.0",
     "minimatch": "^10.2.6",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "svgicons2svgfont": "^12.0.0",
+    "svg2ttf": "^6.0.3",
+    "ttf2woff": "^3.0.0"
   },
   "repository": {
     "type": "git",
