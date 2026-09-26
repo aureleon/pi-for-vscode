@@ -19,9 +19,10 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
   - **Shift+Enter** (*Summarize & go*) summarizes the branch you are leaving. **Alt+Enter** asks for summary instructions first.
   - **Ctrl+L** sets or clears a label (a bookmark). *Show all entries* also shows tool results and model changes. Type to search.
   - RPC mode has no tree commands, so the extension loads a small bridge extension into pi (`pi -e dist/pi-bridge.mjs`). The bridge calls `ctx.navigateTree()`. Its internal `vscode:*` commands do not appear in autocomplete.
-- **Open in Terminal.** Use the terminal button in the header, `/terminal`, or *Pi: Open Session in Terminal*. The current session continues in the full pi TUI in an integrated terminal, as an editor tab by default (`pi.terminalLocation`). The TUI gives you every TUI-only feature (custom extension UIs, overlays, keybindings).
-  - While the terminal has the session, the chat is paused, so that two pi processes do not write to the same session file. Close the terminal, or click *Reattach Here*, and the chat reloads the session with everything you did in the TUI. If you switched sessions in the TUI, the chat uses the newest one.
-  - *Pi: New Pi Terminal (TUI)* opens a plain `pi` terminal with no chat attached.
+- **Terminal.** The terminal tabs show the Pi logo.
+  - **Pi: Open in Terminal** (in the ••• menu, or `/terminal new`) starts a new pi TUI session in a terminal.
+  - **Continue Session in Terminal** (the terminal button in the header, or `/terminal`) moves the current chat's session into the TUI. The session continues in the full pi TUI in an integrated terminal, as an editor tab by default (`pi.terminalLocation`). The TUI gives you every TUI-only feature (custom extension UIs, overlays, keybindings).
+  - While the terminal has the session, the chat is paused, so that two pi processes do not write to the same session file. The session is handed over by its exact id (`--session-id`). When you close the terminal or click *Reattach Here*, the chat resumes exactly that session, with everything you did in the TUI, even if newer sessions exist in the folder.
 - **Model picker.** Click the model chip in the toolbar to open a model list above the input.
   - The list follows Pi's `enabledModels` setting. It uses the same rules as the pi CLI: exact IDs, `provider/id`, fuzzy names, globs, and `:thinking` suffixes. The order follows your patterns.
   - The setting comes from `--models` in `pi.args`, then `<workspace>/.pi/settings.json`, then `~/.pi/agent/settings.json`. If `enabledModels` is empty, the list shows all models, with your recent models first.
