@@ -7,6 +7,7 @@ import { defaultSessionDir, listSessions, relativeTime } from "./sessions";
 import { getShellEnv } from "./shellEnv";
 import { agentDir, scopeModels } from "./modelScope";
 import { slimTree } from "./treeData";
+import { createPiTerminal } from "./piTerminal";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
 const RECENT_MODELS_KEY = "pi.recentModels";
@@ -82,13 +83,13 @@ export class PiController implements vscode.Disposable {
 
   // ---------------------------------------------------------------- process
 
-  async start(sessionFile?: string): Promise<void> {
+  async start(sessionFile?: string, sessionId?: string): Promise<void> {
     if (this.starting) return this.starting;
-    this.starting = this.doStart(sessionFile).finally(() => (this.starting = undefined));
+    this.starting = this.doStart(sessionFile, sessionId).finally(() => (this.starting = undefined));
     return this.starting;
   }
 
-  private async doStart(sessionFile?: string) {
+  private async doStart(sessionFile?: string, sessionId?: string) {
     this.pi?.stop();
     const cfg = vscode.workspace.getConfiguration("pi");
     const env = await getShellEnv(cfg.get<boolean>("useLoginShellEnv", true));
@@ -104,7 +105,11 @@ export class PiController implements vscode.Disposable {
         ? this.context.workspaceState.get<string>(LAST_SESSION_KEY)
         : undefined);
     this.options.sessionFile = undefined;
-    if (resume && fs.existsSync(resume) && !args.some((a) => ["--session", "--continue", "-c", "--no-session"].includes(a))) {
+    const pinned = args.some((a) => ["--session", "--session-id", "--continue", "-c", "--no-session"].includes(a));
+    if (sessionId && !pinned) {
+      // Exact session (resumes it, or creates it if it was never written).
+      args.push("--session-id", sessionId);
+    } else if (resume && fs.existsSync(resume) && !pinned) {
       args.push("--session", resume);
     }
 
@@ -331,7 +336,7 @@ export class PiController implements vscode.Disposable {
           await this.openInTerminal();
           break;
         case "reattach":
-          await this.reattach(this.state.sessionFile);
+          await this.reattach();
           break;
         case "showTerminal":
           this.terminal?.show();
@@ -487,60 +492,45 @@ export class PiController implements vscode.Disposable {
       if (choice !== "Stop and Open") return;
       await this.abort();
     }
-    // Make sure a session file exists to hand over (new sessions are written lazily).
+    // Refresh state for the current session id (it may have changed via /new, /resume, /tree…).
     try {
       this.state = await this.req({ type: "get_state" });
     } catch {}
-    const sessionFile: string | undefined = this.state.sessionFile;
-    const cfg = vscode.workspace.getConfiguration("pi");
-    const command = cfg.get<string>("path")?.trim() || "pi";
-    const userArgs = (cfg.get<string[]>("args") ?? []).filter((a) => a !== "--no-session");
-    const hasHistory = (this.state.messageCount ?? 0) > 0 && sessionFile && fs.existsSync(sessionFile);
-    const args = [...userArgs, ...(hasHistory ? ["--session", sessionFile!] : [])];
-
+    // Hand over by exact session id: `--session-id` resumes that session, or creates it
+    // under the same id if nothing was written yet, so reattaching finds the same session.
+    const sessionId: string | undefined = this.state.sessionId;
     // Release the session: stop the RPC process before the TUI opens it.
     const pi = this.pi;
     this.pi = undefined;
     pi?.stop();
     this.statusItem.hide();
 
-    const env = await getShellEnv(cfg.get<boolean>("useLoginShellEnv", true));
     const title = this.state.sessionName ? `Pi · ${this.state.sessionName}` : "Pi";
-    const terminal = vscode.window.createTerminal({
-      name: title,
-      cwd: this.cwd,
-      iconPath: vscode.Uri.joinPath(this.context.extensionUri, "media", "pi-logo.svg"),
-      env: { PATH: env.PATH ?? process.env.PATH ?? "", PI_VSCODE: "1", PI_VSCODE_TERMINAL: "1" },
-      location: cfg.get<string>("terminalLocation", "editor") === "panel" ? vscode.TerminalLocation.Panel : { viewColumn: vscode.ViewColumn.Active },
-    });
+    const terminal = await createPiTerminal(sessionId ? ["--session-id", sessionId] : [], { name: title, cwd: this.cwd });
     this.terminal = terminal;
-    const quote = (a: string) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, "'\\''")}'`);
-    terminal.sendText([command, ...args].map(quote).join(" "), true);
-    terminal.show();
-    this.post({ type: "terminalAttached", title, sessionFile: hasHistory ? sessionFile : undefined });
+    this.terminalSessionId = sessionId;
+    this.post({ type: "terminalAttached", title });
 
     const sub = vscode.window.onDidCloseTerminal(async (t) => {
       if (t !== terminal) return;
       sub.dispose();
-      if (this.terminal === terminal) await this.reattach(hasHistory ? sessionFile : undefined);
+      if (this.terminal === terminal) await this.reattach();
     });
     this.disposables.push(sub);
   }
 
+  /** Session id handed to the terminal; reattaching resumes exactly this session. */
+  private terminalSessionId?: string;
+
   /** Take the session back from the terminal and reload the transcript. */
-  async reattach(sessionFile?: string) {
+  async reattach() {
     const t = this.terminal;
+    const id = this.terminalSessionId;
     this.terminal = undefined;
-    // The TUI may have switched to another session; prefer the newest file in the folder.
-    let resume = sessionFile;
-    try {
-      const dir = sessionFile ? path.dirname(sessionFile) : defaultSessionDir(this.cwd);
-      const newest = (await listSessions(dir, 1))[0];
-      if (newest && (!sessionFile || newest.mtime > (fs.statSync(sessionFile).mtimeMs ?? 0))) resume = newest.file;
-    } catch {}
+    this.terminalSessionId = undefined;
     if (t && vscode.window.terminals.includes(t)) t.dispose();
     this.post({ type: "terminalDetached" });
-    await this.start(resume);
+    await this.start(undefined, id);
   }
 
   get terminalAttached() {
@@ -574,7 +564,8 @@ export class PiController implements vscode.Disposable {
         await this.openTree(arg);
         break;
       case "terminal":
-        await this.openInTerminal();
+        if (arg === "new") await createPiTerminal([], { cwd: this.cwd });
+        else await this.openInTerminal();
         break;
       case "model":
         await this.pickModel(arg);
