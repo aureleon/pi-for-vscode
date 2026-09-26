@@ -103,17 +103,17 @@
           "group": "navigation@2"
         },
         {
-          "command": "pi.history",
+          "command": "pi.openInTerminal",
           "when": "view == pi.chat",
           "group": "navigation@3"
         },
         {
-          "command": "pi.newSession",
+          "command": "pi.history",
           "when": "view == pi.chat",
           "group": "navigation@4"
         },
         {
-          "command": "pi.openInTerminal",
+          "command": "pi.newSession",
           "when": "view == pi.chat",
           "group": "navigation@5"
         },
@@ -154,29 +154,29 @@
           "group": "navigation@2"
         },
         {
-          "command": "pi.history",
+          "command": "pi.openInTerminal",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@3"
         },
         {
-          "command": "pi.newSession",
+          "command": "pi.history",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@4"
         },
         {
-          "command": "pi.openInTerminal",
+          "command": "pi.newSession",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@5"
-        },
-        {
-          "command": "pi.restart",
-          "when": "activeWebviewPanelId == 'pi.panel'",
-          "group": "overflow@1"
         },
         {
           "command": "pi.newTerminal",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "overflow@0"
+        },
+        {
+          "command": "pi.restart",
+          "when": "activeWebviewPanelId == 'pi.panel'",
+          "group": "overflow@1"
         }
       ]
     },
