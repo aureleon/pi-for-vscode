@@ -102,7 +102,6 @@ const BUILTINS: Command[] = [
   { name: "name", description: "Name this session", source: "builtin" },
   { name: "tree", description: "Navigate the session tree (branches, labels, summaries)", source: "builtin" },
   { name: "fork", description: "Fork from a previous message", source: "builtin" },
-  { name: "terminal", description: "Continue this session in the pi TUI in a terminal (/terminal new: fresh session)", source: "builtin" },
   { name: "clone", description: "Clone the current branch into a new session", source: "builtin" },
   { name: "session", description: "Show session stats", source: "builtin" },
   { name: "copy", description: "Copy last response", source: "builtin" },

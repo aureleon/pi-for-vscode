@@ -563,10 +563,6 @@ export class PiController implements vscode.Disposable {
       case "tree":
         await this.openTree(arg);
         break;
-      case "terminal":
-        if (arg === "new") await createPiTerminal([], { cwd: this.cwd });
-        else await this.openInTerminal();
-        break;
       case "model":
         await this.pickModel(arg);
         break;
