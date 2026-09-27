@@ -7,7 +7,7 @@ import { defaultSessionDir, listSessions, relativeTime } from "./sessions";
 import { getShellEnv } from "./shellEnv";
 import { agentDir, scopeModels } from "./modelScope";
 import { slimTree } from "./treeData";
-import { createPiTerminal } from "./piTerminal";
+import { createPiTerminal, piTerminalName } from "./piTerminal";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
 const RECENT_MODELS_KEY = "pi.recentModels";
@@ -441,7 +441,7 @@ export class PiController implements vscode.Disposable {
     pi?.stop();
     this.statusItem.hide();
 
-    const title = this.state.sessionName ? `Pi · ${this.state.sessionName}` : "Pi";
+    const title = piTerminalName(this.state.sessionName || this.webTitle);
     const terminal = await createPiTerminal(sessionId ? ["--session-id", sessionId] : [], { name: title, cwd: this.cwd });
     this.terminal = terminal;
     this.terminalSessionId = sessionId;

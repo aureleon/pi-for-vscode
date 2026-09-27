@@ -19,7 +19,7 @@
       "activitybar": [
         {
           "id": "pi",
-          "title": "Pi",
+          "title": "Session",
           "icon": "media/pi.svg"
         }
       ]
@@ -29,7 +29,7 @@
         {
           "type": "webview",
           "id": "pi.chat",
-          "name": "Pi",
+          "name": "Session",
           "icon": "media/pi.svg"
         }
       ]
@@ -98,12 +98,12 @@
     "menus": {
       "view/title": [
         {
-          "command": "pi.tree",
+          "command": "pi.openInTerminal",
           "when": "view == pi.chat",
-          "group": "navigation@2"
+          "group": "navigation@1"
         },
         {
-          "command": "pi.openInTerminal",
+          "command": "pi.tree",
           "when": "view == pi.chat",
           "group": "navigation@3"
         },
@@ -149,12 +149,12 @@
       ],
       "editor/title": [
         {
-          "command": "pi.tree",
+          "command": "pi.openInTerminal",
           "when": "activeWebviewPanelId == 'pi.panel'",
-          "group": "navigation@2"
+          "group": "navigation@1"
         },
         {
-          "command": "pi.openInTerminal",
+          "command": "pi.tree",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@3"
         },
