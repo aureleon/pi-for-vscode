@@ -51,7 +51,13 @@ class SidebarProvider implements vscode.WebviewViewProvider {
     view.webview.options = webviewOptions(this.context.extensionUri);
     const host: ChatHost = {
       webview: view.webview,
-      setTitle: (t) => (view.description = t),
+      // The view's own title carries the session name. Its container is already titled
+      // "Pi Coding Agent", so a static view name would repeat it whenever VS Code shows
+      // both (e.g. after moving the view into the secondary side bar).
+      setTitle: (t) => {
+        view.title = t || "New session";
+        view.description = undefined;
+      },
       reveal: () => view.show(true),
     };
     // A re-resolved view (e.g. moved to another container) gets a fresh controller
