@@ -505,7 +505,7 @@ export class PiController implements vscode.Disposable {
     pi?.stop();
     this.statusItem.hide();
 
-    const title = piTerminalName(this.state.sessionName || this.webTitle);
+    const title = piTerminalName();
     const terminal = await createPiTerminal(sessionId ? ["--session-id", sessionId] : [], { name: title, cwd: this.cwd });
     this.terminal = terminal;
     this.terminalSessionId = sessionId;

@@ -9,13 +9,11 @@ export const shellQuote = (a: string) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${a
  * (the `pi-logo` product icon from media/pi-icons.woff) in the tab.
  */
 /**
- * Terminal tab title. VS Code's connected editor tabs mark very short labels
- * (e.g. just "Pi") as narrow and hide their icon, so always add some context.
+ * Terminal tab title. Kept long on purpose: VS Code's connected editor tabs
+ * mark very short labels (e.g. just "Pi") as narrow and hide their icon.
  */
-export function piTerminalName(detail?: string): string {
-  const folder = vscode.workspace.workspaceFolders?.[0]?.name;
-  const d = (detail || folder || "terminal").replace(/\s+/g, " ").trim();
-  return `Pi · ${d.length > 40 ? d.slice(0, 39) + "…" : d}`;
+export function piTerminalName(): string {
+  return "Pi Coding Agent";
 }
 
 export async function createPiTerminal(extraArgs: string[], opts: { name?: string; cwd?: string } = {}): Promise<vscode.Terminal> {
