@@ -19,7 +19,7 @@
       "activitybar": [
         {
           "id": "pi",
-          "title": "Pi",
+          "title": "Session",
           "icon": "media/pi.svg"
         }
       ]
@@ -29,7 +29,7 @@
         {
           "type": "webview",
           "id": "pi.chat",
-          "name": "Pi",
+          "name": "Session",
           "icon": "media/pi.svg"
         }
       ]
@@ -42,7 +42,7 @@
       },
       {
         "command": "pi.history",
-        "title": "Pi: Resume Session…",
+        "title": "Pi: Resume Session\u2026",
         "icon": "$(history)"
       },
       {
@@ -103,17 +103,17 @@
     "menus": {
       "view/title": [
         {
-          "command": "pi.toggleSidePanel",
+          "command": "pi.openInTerminal",
           "when": "view == pi.chat",
           "group": "navigation@1"
         },
         {
-          "command": "pi.tree",
+          "command": "pi.toggleSidePanel",
           "when": "view == pi.chat",
           "group": "navigation@2"
         },
         {
-          "command": "pi.openInTerminal",
+          "command": "pi.tree",
           "when": "view == pi.chat",
           "group": "navigation@3"
         },
@@ -159,17 +159,17 @@
       ],
       "editor/title": [
         {
-          "command": "pi.toggleSidePanel",
+          "command": "pi.openInTerminal",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@1"
         },
         {
-          "command": "pi.tree",
+          "command": "pi.toggleSidePanel",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@2"
         },
         {
-          "command": "pi.openInTerminal",
+          "command": "pi.tree",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@3"
         },
@@ -232,7 +232,7 @@
         "pi.useLoginShellEnv": {
           "type": "boolean",
           "default": true,
-          "description": "Load environment variables (PATH, API keys, …) from your login shell before starting pi."
+          "description": "Load environment variables (PATH, API keys, \u2026) from your login shell before starting pi."
         },
         "pi.sidePanelCommands": {
           "type": "object",
@@ -251,11 +251,11 @@
             },
             "btw:tangent": {
               "followUp": "btw:tangent",
-              "title": "BTW · tangent"
+              "title": "BTW \u00b7 tangent"
             },
             "btw:ask": {
               "followUp": "btw:ask",
-              "title": "BTW · read-only"
+              "title": "BTW \u00b7 read-only"
             }
           },
           "additionalProperties": {
