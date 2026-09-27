@@ -19,7 +19,7 @@
       "activitybar": [
         {
           "id": "pi",
-          "title": "Session",
+          "title": "Pi Coding Agent",
           "icon": "media/pi.svg"
         }
       ]
@@ -29,7 +29,7 @@
         {
           "type": "webview",
           "id": "pi.chat",
-          "name": "Session",
+          "name": "Pi Coding Agent",
           "icon": "media/pi.svg"
         }
       ]
