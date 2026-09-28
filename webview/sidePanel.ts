@@ -45,6 +45,12 @@ interface Turn {
 }
 
 const BTW_FAMILY = /^(btw|side)(:|$)/;
+
+// Codicon-style 16px icons for the header toolbar (matches VS Code's view title actions).
+const ICON = {
+  trash: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M10 3h3v1h-1v9.5a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 4 13.5V4H3V3h3V2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1zM7 2v1h2V2H7zM5 4v9.5c0 .28.22.5.5.5h5a.5.5 0 0 0 .5-.5V4H5zm1.5 2h1v6h-1V6zm2 0h1v6h-1V6z"/></svg>`,
+  close: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="m8 7.3 3.6-3.6.7.7L8.7 8l3.6 3.6-.7.7L8 8.7l-3.6 3.6-.7-.7L7.3 8 3.7 4.4l.7-.7z"/></svg>`,
+};
 const MODE_LABEL: Record<string, string> = { contextual: "", tangent: "tangent · no main context", readonly: "read-only" };
 
 export class SidePanel {
@@ -90,7 +96,7 @@ export class SidePanel {
       <div class="sp-header">
         <div class="sp-title-wrap"><span class="sp-title"></span><span class="sp-mode"></span></div>
         <div class="sp-actions"></div>
-        <button class="icon-btn sp-close" title="Close side panel (Esc)"><svg viewBox="0 0 16 16"><path fill="currentColor" d="m8 7.3 3.6-3.6.7.7L8.7 8l3.6 3.6-.7.7L8 8.7l-3.6 3.6-.7-.7L7.3 8 3.7 4.4l.7-.7z"/></svg></button>
+        <button class="sp-icon sp-close" title="Close side panel (Esc)" aria-label="Close side panel">${ICON.close}</button>
       </div>
       <div class="sp-body"></div>
       <div class="sp-status"></div>
@@ -361,10 +367,13 @@ export class SidePanel {
     }, 1000);
   }
 
-  private button(label: string, title: string, fn: () => void) {
+  private button(label: string, title: string, fn: () => void, icon?: string) {
     const b = document.createElement("button");
-    b.className = "sp-btn";
-    b.textContent = label;
+    b.className = icon ? "sp-icon" : "sp-btn";
+    if (icon) {
+      b.innerHTML = icon;
+      b.setAttribute("aria-label", label);
+    } else b.textContent = label;
     b.title = title;
     b.addEventListener("click", fn);
     return b;
@@ -382,17 +391,12 @@ export class SidePanel {
       const has = this.turns.some((t) => t.answer);
       const inject = this.button("Inject", "Send the full thread to the main agent (/btw:inject). Text in the box is used as instructions.", () => this.runLifecycle("btw:inject"));
       const summarize = this.button("Summarize", "Send a summary of the thread to the main agent (/btw:summarize). Text in the box is used as instructions.", () => this.runLifecycle("btw:summarize"));
-      const fresh = this.button("New", "Start a fresh side thread (/btw:new)", () => {
-        this.turns = this.turns.filter((t) => t.pending);
-        this.mode = "contextual";
-        this.nextCmd = "btw:new";
-        this.followCmd = "btw";
-        this.render();
-        this.input.focus();
-      });
-      const clear = this.button("Clear", "Clear the side thread (/btw:clear)", () => this.runLifecycle("btw:clear", false));
+      const clear = this.button("Clear", "Clear the side thread and start fresh (/btw:clear)", () => this.runLifecycle("btw:clear", false), ICON.trash);
       inject.disabled = summarize.disabled = !has;
-      this.actionsEl.append(inject, summarize, fresh, clear);
+      clear.disabled = !this.turns.length;
+      const sep = document.createElement("span");
+      sep.className = "sp-sep";
+      this.actionsEl.append(inject, summarize, sep, clear);
     }
 
     this.body.innerHTML = "";

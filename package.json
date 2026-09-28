@@ -251,11 +251,11 @@
             },
             "btw:tangent": {
               "followUp": "btw:tangent",
-              "title": "BTW \u00b7 tangent"
+              "title": "BTW"
             },
             "btw:ask": {
               "followUp": "btw:ask",
-              "title": "BTW \u00b7 read-only"
+              "title": "BTW"
             }
           },
           "additionalProperties": {
