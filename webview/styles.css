@@ -213,13 +213,35 @@ kbd {
 .chip.dim { background: transparent; color: var(--muted); }
 .chip.dim:hover, .chip:hover { filter: brightness(1.15); }
 .chip svg { width: 13px; height: 13px; }
+/* Context usage pill: ring gauge + % ; hovering reveals "Compact" (click runs /compact). */
 .ctx {
-  color: var(--muted); font-size: 0.85em; margin-right: 4px; white-space: nowrap; font-variant-numeric: tabular-nums;
-  background: none; border: none; border-radius: 4px; padding: 2px 6px; cursor: pointer;
+  --ctx-color: var(--vscode-foreground);
+  display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px 0 6px; margin-right: 6px;
+  font: inherit; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap;
+  color: var(--ctx-color); cursor: pointer;
+  background: color-mix(in srgb, var(--ctx-color) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ctx-color) 35%, transparent); border-radius: 11px;
+  transition: background .12s ease, border-color .12s ease;
 }
-.ctx:hover:not([disabled]) { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
-.ctx[disabled] { cursor: default; }
-.ctx.compacting { color: var(--vscode-foreground); }
+.ctx[data-level="warn"] { --ctx-color: var(--vscode-editorWarning-foreground, #cca700); }
+.ctx[data-level="high"] { --ctx-color: var(--vscode-errorForeground, #f85149); }
+.ctx-ring { width: 14px; height: 14px; flex: none; }
+.ctx-ring circle { fill: none; stroke-width: 2.5; }
+.ctx-track { stroke: color-mix(in srgb, var(--ctx-color) 25%, transparent); }
+.ctx-fill { stroke: var(--ctx-color); stroke-linecap: round; transition: stroke-dasharray .3s ease; }
+.ctx-action {
+  max-width: 0; overflow: hidden; opacity: 0; font-weight: 600;
+  transition: max-width .15s ease, opacity .15s ease, margin .15s ease;
+}
+.ctx:hover:not([disabled]) .ctx-action, .ctx:focus-visible .ctx-action { max-width: 70px; opacity: 1; margin-left: 1px; }
+.ctx:hover:not([disabled]) .ctx-action::before, .ctx:focus-visible .ctx-action::before { content: "· "; opacity: .6; }
+.ctx:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--ctx-color) 20%, transparent);
+  border-color: color-mix(in srgb, var(--ctx-color) 60%, transparent);
+}
+.ctx[disabled] { cursor: default; opacity: .6; }
+.ctx[data-level="busy"] { opacity: 1; }
+.ctx .spinner { width: 12px; height: 12px; }
 .send {
   width: 28px; height: 28px; border-radius: 7px; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
   background: var(--vscode-button-background); color: var(--vscode-button-foreground);
