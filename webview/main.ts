@@ -2,6 +2,7 @@ import { marked } from "marked";
 import { ansiToHtml, escapeHtml, stripAnsi } from "./ansi";
 import { SidePanel } from "./sidePanel";
 import { TreeMenu } from "./treeMenu";
+import { SPINNER } from "./spinner";
 
 declare function acquireVsCodeApi(): { postMessage(m: any): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
@@ -49,7 +50,7 @@ app.innerHTML = `
       <div>Ask Pi anything about your code.</div>
       <div class="hint">Type <kbd>/</kbd> for commands, <kbd>@</kbd> to mention files, <kbd>!</kbd> to run a shell command.</div>
     </div>
-    <div id="working" class="working hidden"><span class="spinner">✱</span><span id="working-text">Working…</span></div>
+    <div id="working" class="working hidden">${SPINNER}<span id="working-text">Working…</span></div>
   </main>
   <div id="dialogs"></div>
   <div class="bottom">
@@ -65,7 +66,7 @@ app.innerHTML = `
         <button class="icon-btn" id="btn-slash" title="Commands">${I.slash}</button>
         <button class="chip" id="btn-model" title="Select model and effort"><span id="model-name">…</span><span class="chip-level" id="thinking-level"></span></button>
         <span class="spacer"></span>
-        <span class="ctx" id="ctx" title="Context usage"></span>
+        <button class="ctx" id="ctx" title="Context usage · click to compact"></button>
         <button class="send" id="btn-send" title="Send (Enter)">${I.send}</button>
       </div>
     </div>
@@ -592,9 +593,13 @@ function onEvent(e: any) {
       renderQueue(e.steering ?? [], e.followUp ?? []);
       break;
     case "compaction_start":
+      compacting = true;
+      updateStats();
       renderNote(`Compacting context (${e.reason})…`, "muted compaction");
       break;
     case "compaction_end":
+      compacting = false;
+      updateStats();
       if (e.result) renderNote(`Context compacted: ${fmtTokens(e.result.tokensBefore)} → ~${fmtTokens(e.result.estimatedTokensAfter ?? 0)} tokens`, "muted");
       else if (e.errorMessage) renderNote(`Compaction failed: ${e.errorMessage}`, "error");
       else if (e.aborted) renderNote("Compaction aborted", "muted");
@@ -817,15 +822,32 @@ function updateModel() {
   $("thinking-level").textContent = m?.reasoning ? levelLabel(lvl) : "";
   if (picker.open) picker.render();
 }
-function updateStats(s: any) {
-  const ctx = $("ctx");
-  if (!s) return (ctx.textContent = "");
-  const parts: string[] = [];
-  const cu = s.contextUsage;
-  if (cu?.percent != null) parts.push(`${Math.round(cu.percent)}%`);
-  ctx.textContent = parts.join(" · ");
-  ctx.title = cu ? `Context: ${cu.tokens != null ? fmtTokens(cu.tokens) : "?"} / ${fmtTokens(cu.contextWindow)} tokens\nSession tokens: ${fmtTokens(s.tokens?.total ?? 0)}` : "";
+let lastStats: any;
+let compacting = false;
+
+/** Context-usage button in the toolbar: shows %, click compacts (like /compact). */
+function updateStats(s: any = lastStats) {
+  lastStats = s;
+  const ctx = $<HTMLButtonElement>("ctx");
+  const cu = s?.contextUsage;
+  const pct = cu?.percent != null ? `${Math.round(cu.percent)}%` : "";
+  ctx.classList.toggle("hidden", !pct && !compacting);
+  ctx.classList.toggle("compacting", compacting);
+  ctx.disabled = compacting || running;
+  ctx.textContent = compacting ? "Compacting…" : pct;
+  const usage = cu
+    ? `Context: ${cu.tokens != null ? fmtTokens(cu.tokens) : "?"} / ${fmtTokens(cu.contextWindow)} tokens (${pct || "?"})`
+    : "Context usage";
+  ctx.title = compacting
+    ? "Compacting context…"
+    : running
+      ? `${usage}\nCompaction is available once Pi finishes`
+      : `${usage}\nClick to compact the conversation (/compact)`;
 }
+$("ctx").addEventListener("click", () => {
+  if (compacting || running) return;
+  post({ type: "builtin", name: "compact", arg: "" });
+});
 
 let workingTimer: number | undefined;
 const VERBS = ["Working", "Thinking", "Pondering", "Computing", "Tinkering", "Reasoning", "Cooking"];
@@ -848,6 +870,7 @@ function setRunning(r: boolean) {
     clearInterval(workingTimer);
   }
   updateSendButton();
+  updateStats();
 }
 function updateWorking() {
   if (!running) return;

@@ -1,3 +1,5 @@
+import { SPINNER } from "./spinner";
+
 /**
  * Side panel for "side conversation" extensions such as pi-btw.
  *
@@ -416,7 +418,7 @@ export class SidePanel {
       if (t.answer) html += `<div class="md">${md(t.answer)}</div>`;
       for (const n of t.notes) html += `<div class="sp-note">${escapeHtml(n)}</div>`;
       if (t.error) html += `<div class="sp-error">${escapeHtml(t.error)}</div>`;
-      if (t.pending) html += `<div class="sp-pending"><span class="spinner">✱</span> Thinking on the side… <span class="sp-pending-time" data-start="${t.startedAt}">0s</span></div>`;
+      if (t.pending) html += `<div class="sp-pending">${SPINNER} Thinking on the side… <span class="sp-pending-time" data-start="${t.startedAt}">0s</span></div>`;
       if (t.model && !t.pending) {
         const tok = t.usage?.totalTokens ? ` · ${t.usage.totalTokens.toLocaleString()} tokens` : "";
         html += `<div class="sp-meta">${escapeHtml(t.model)}${tok}</div>`;

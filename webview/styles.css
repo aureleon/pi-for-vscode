@@ -141,7 +141,8 @@ kbd {
 
 /* ---------------------------------------------------------------- working */
 .working { display: flex; gap: 8px; align-items: center; padding: 10px 2px; color: var(--muted); }
-.spinner { color: #e0735a; display: inline-block; animation: spin 2.4s linear infinite; font-size: 15px; }
+.spinner { display: inline-flex; width: 14px; height: 14px; flex: none; animation: spin 1.6s cubic-bezier(.45,.05,.55,.95) infinite; }
+.spinner svg { width: 100%; height: 100%; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------------------------------------------------------------- dialogs */
@@ -195,7 +196,8 @@ kbd {
   background: var(--input-bg);
 }
 .composer:focus-within { border-color: var(--accent); }
-.running .composer { border-color: #d0604b; }
+/* While Pi works: pi-logo blue border with a soft glow (not an error-like red). */
+.running .composer { border-color: #4D9ABF; box-shadow: 0 0 0 1px rgba(77, 154, 191, .25); }
 .composer.drag { border-style: dashed; border-color: var(--accent); }
 #input {
   display: block; width: 100%; resize: none; border: none; outline: none; background: transparent;
@@ -212,7 +214,13 @@ kbd {
 .chip.dim { background: transparent; color: var(--muted); }
 .chip.dim:hover, .chip:hover { filter: brightness(1.15); }
 .chip svg { width: 13px; height: 13px; }
-.ctx { color: var(--muted); font-size: 0.85em; margin-right: 4px; white-space: nowrap; }
+.ctx {
+  color: var(--muted); font-size: 0.85em; margin-right: 4px; white-space: nowrap; font-variant-numeric: tabular-nums;
+  background: none; border: none; border-radius: 4px; padding: 2px 6px; cursor: pointer;
+}
+.ctx:hover:not([disabled]) { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+.ctx[disabled] { cursor: default; }
+.ctx.compacting { color: var(--vscode-foreground); }
 .send {
   width: 28px; height: 28px; border-radius: 7px; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
   background: var(--vscode-button-background); color: var(--vscode-button-foreground);
@@ -401,12 +409,20 @@ body.side-resizing { user-select: none; cursor: row-resize; }
 .chip-level:empty { display: none; }
 
 /* ---------------------------------------------------------------- session tree (/tree) */
-.tree-menu { max-height: calc(100vh - 150px); }
-.tm-list { font-size: 12px; }
+/* The tree fills the chat area: it is a navigator, not a small dropdown. */
+.tree-menu { bottom: 8px; max-height: none; font-size: 13px; }
+.tree-menu .mp-search { font-size: 13px; padding: 6px 10px; }
+.tm-list { font-size: 13px; flex: 1; }
 .tm-item {
-  display: grid; grid-template-columns: auto 14px minmax(0, 1fr) auto; column-gap: 6px; align-items: center;
-  padding: 2px 10px 2px 8px; line-height: 18px;
+  display: grid; grid-template-columns: auto 16px minmax(0, 1fr) auto; column-gap: 8px; align-items: center;
+  padding: 4px 12px 4px 10px; line-height: 20px; border-radius: 5px;
 }
+.tm-item:not(.active):hover { background: var(--vscode-list-hoverBackground); }
+.tree-menu .tm-guide { font-size: 12px; }
+.tree-menu .tm-mark { font-size: 12px; }
+.tree-menu .tm-meta { font-size: 11.5px; }
+.tree-menu .tm-footer { font-size: 12px; padding: 8px 12px 10px; }
+.tree-menu .tm-footer .sp-btn { font-size: 12px; padding: 3px 10px; }
 .tm-guide { font-family: var(--mono); font-size: 11px; white-space: pre; color: var(--muted); opacity: .6; }
 .tm-mark { text-align: center; color: var(--muted); font-size: 11px; }
 .tm-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

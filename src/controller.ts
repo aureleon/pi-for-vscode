@@ -572,7 +572,7 @@ export class PiController implements vscode.Disposable {
       case "compact":
         this.req({ type: "compact", customInstructions: arg || undefined })
           .then(() => this.refreshStats())
-          .catch((e) => this.post({ type: "error", message: `Compaction failed: ${e.message}` }));
+          .catch(() => {}); // failures arrive as compaction_end { errorMessage } and are shown there
         break;
       case "name": {
         const name = arg || (await vscode.window.showInputBox({ prompt: "Session name", value: this.state.sessionName ?? "" }));

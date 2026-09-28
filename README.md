@@ -42,7 +42,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
   - The model chip shows the current effort, for example "Claude Opus 5.5 (Global)  Medium".
   - `/thinking [level]` sets the level directly. Without a level, it opens the menu with the slider focused.
   - Each model row shows its context size and capabilities. The tooltip shows the full `provider/id`.
-  - The toolbar also shows context use.
+  - The toolbar also shows context use as a percentage. Click it to compact the conversation (the same as `/compact`); hover to see the token counts.
 - **Editor integration.** *Pi: Add Selection to Chat* (<kbd>⌘⌥L</kbd>) inserts `@file:10-20`. Right-click a file in the Explorer and select *Pi: Add File to Chat*. Click a file path in a tool card or inline code to open it.
 - **More sessions.** *Pi: Open in New Tab* opens another chat panel with its own pi process.
 
