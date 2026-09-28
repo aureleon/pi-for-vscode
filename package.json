@@ -18,14 +18,14 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "pi",
+          "id": "pi-coding-agent",
           "title": "Pi Coding Agent",
           "icon": "media/pi.svg"
         }
       ]
     },
     "views": {
-      "pi": [
+      "pi-coding-agent": [
         {
           "type": "webview",
           "id": "pi.chat",
