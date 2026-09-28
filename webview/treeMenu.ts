@@ -1,3 +1,5 @@
+import { SPINNER } from "./spinner";
+
 /**
  * Session tree navigator: the webview version of the pi TUI's /tree.
  *
@@ -178,15 +180,12 @@ export class TreeMenu {
         `<span class="tm-mark">${KIND_MARK[n.kind] ?? "·"}</span>` +
         `<span class="tm-text">${n.label ? `<span class="tm-label">${escapeHtml(n.label)}</span>` : ""}${escapeHtml(n.text || `(${n.kind})`)}</span>` +
         `<span class="tm-meta">${isLeaf ? `<span class="tm-current">current</span>` : escapeHtml(n.meta ?? relTime(n.time))}</span>`;
-      row.addEventListener("mousemove", () => {
-        if (this.sel === i) return;
-        this.sel = i;
-        this.list.querySelectorAll(".tm-item").forEach((x, j) => x.classList.toggle("active", j === i));
-        this.renderFooter();
-      });
+      // Hover only highlights (CSS). Selection changes on click or keyboard, so moving
+      // the pointer down to the footer buttons can't re-select the rows it crosses.
       row.addEventListener("click", () => {
         this.sel = i;
         this.list.querySelectorAll(".tm-item").forEach((x, j) => x.classList.toggle("active", j === i));
+        if (this.mode !== "idle") this.mode = "idle";
         this.renderFooter();
         this.search.focus();
       });
@@ -207,7 +206,7 @@ export class TreeMenu {
     const f = this.footer;
     f.innerHTML = "";
     if (this.busy) {
-      f.innerHTML = `<div class="tm-hint"><span class="spinner">✱</span> ${escapeHtml(this.busy)}</div>`;
+      f.innerHTML = `<div class="tm-hint">${SPINNER} ${escapeHtml(this.busy)}</div>`;
       return;
     }
     if (this.mode !== "idle" && n) {

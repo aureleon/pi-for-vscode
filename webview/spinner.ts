@@ -1,0 +1,2 @@
+/** Spinning pi.dev logo, used wherever Pi is working (main chat, tree). */
+export const SPINNER = `<span class="spinner" aria-hidden="true"><svg viewBox="141.8 141.8 516.4 516.4"><path fill="#F09082" d="M165.29 165.29H517.36V400H400V282.65H165.29Z"/><path fill="#4D9ABF" d="M165.29 282.65H282.65V400H400V517.36H282.65V634.72H165.29Z"/><path fill="#F1BE58" d="M517.36 400H634.72V634.72H517.36Z"/></svg></span>`;
