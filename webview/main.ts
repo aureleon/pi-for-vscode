@@ -805,7 +805,14 @@ function updateStats(s: any = lastStats) {
   ctx.classList.toggle("hidden", !pct && !compacting);
   ctx.classList.toggle("compacting", compacting);
   ctx.disabled = compacting || running;
-  ctx.textContent = compacting ? "Compacting…" : pct;
+  const frac = Math.max(0, Math.min(1, (cu?.percent ?? 0) / 100));
+  const level = frac >= 0.9 ? "high" : frac >= 0.7 ? "warn" : "ok";
+  ctx.dataset.level = compacting ? "busy" : level;
+  // Ring gauge (r=6 → circumference ≈ 37.7) + percentage + hover-revealed action label.
+  const C = 37.7;
+  ctx.innerHTML = compacting
+    ? `${SPINNER}<span class="ctx-pct">Compacting…</span>`
+    : `<svg class="ctx-ring" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" class="ctx-track"/><circle cx="8" cy="8" r="6" class="ctx-fill" stroke-dasharray="${(frac * C).toFixed(2)} ${C}" transform="rotate(-90 8 8)"/></svg><span class="ctx-pct">${pct}</span><span class="ctx-action">Compact</span>`;
   const usage = cu
     ? `Context: ${cu.tokens != null ? fmtTokens(cu.tokens) : "?"} / ${fmtTokens(cu.contextWindow)} tokens (${pct || "?"})`
     : "Context usage";
@@ -813,7 +820,7 @@ function updateStats(s: any = lastStats) {
     ? "Compacting context…"
     : running
       ? `${usage}\nCompaction is available once Pi finishes`
-      : `${usage}\nClick to compact the conversation (/compact)`;
+      : `${usage}\nClick to compact now: older messages are summarized to free up context (/compact)`;
 }
 $("ctx").addEventListener("click", () => {
   if (compacting || running) return;
