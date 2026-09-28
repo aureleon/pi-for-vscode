@@ -543,7 +543,7 @@ export class PiController implements vscode.Disposable {
         const s = await this.req({ type: "get_session_stats" });
         const ctx = s.contextUsage?.percent != null ? `${Math.round(s.contextUsage.percent)}% of ${s.contextUsage.contextWindow}` : "n/a";
         vscode.window.showInformationMessage(
-          `Pi session ${s.sessionId}: ${s.userMessages} prompts, ${s.toolCalls} tool calls, ${s.tokens.total.toLocaleString()} tokens, $${s.cost.toFixed(3)}, context ${ctx}`,
+          `Pi session ${s.sessionId}: ${s.userMessages} prompts, ${s.toolCalls} tool calls, ${s.tokens.total.toLocaleString()} tokens, context ${ctx}`,
           { modal: false },
         );
         break;
@@ -660,7 +660,6 @@ export class PiController implements vscode.Disposable {
         name: m.name ?? m.id,
         reasoning: !!m.reasoning,
         contextWindow: m.contextWindow,
-        cost: m.cost ? { input: m.cost.input, output: m.cost.output } : undefined,
         images: Array.isArray(m.input) && m.input.includes("image"),
       }));
     }
