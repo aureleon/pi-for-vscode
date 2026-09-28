@@ -419,8 +419,7 @@ export class SidePanel {
       if (t.pending) html += `<div class="sp-pending"><span class="spinner">✱</span> Thinking on the side… <span class="sp-pending-time" data-start="${t.startedAt}">0s</span></div>`;
       if (t.model && !t.pending) {
         const tok = t.usage?.totalTokens ? ` · ${t.usage.totalTokens.toLocaleString()} tokens` : "";
-        const cost = t.usage?.cost?.total ? ` · $${t.usage.cost.total.toFixed(4)}` : "";
-        html += `<div class="sp-meta">${escapeHtml(t.model)}${tok}${cost}</div>`;
+        html += `<div class="sp-meta">${escapeHtml(t.model)}${tok}</div>`;
       }
       a.innerHTML = html;
       this.deps.linkify(a);

@@ -823,9 +823,8 @@ function updateStats(s: any) {
   const parts: string[] = [];
   const cu = s.contextUsage;
   if (cu?.percent != null) parts.push(`${Math.round(cu.percent)}%`);
-  if (s.cost) parts.push(`$${s.cost.toFixed(2)}`);
   ctx.textContent = parts.join(" · ");
-  ctx.title = cu ? `Context: ${cu.tokens != null ? fmtTokens(cu.tokens) : "?"} / ${fmtTokens(cu.contextWindow)} tokens\nSession tokens: ${fmtTokens(s.tokens?.total ?? 0)}\nCost: $${(s.cost ?? 0).toFixed(4)}` : "";
+  ctx.title = cu ? `Context: ${cu.tokens != null ? fmtTokens(cu.tokens) : "?"} / ${fmtTokens(cu.contextWindow)} tokens\nSession tokens: ${fmtTokens(s.tokens?.total ?? 0)}` : "";
 }
 
 let workingTimer: number | undefined;
@@ -1160,7 +1159,7 @@ document.addEventListener("keydown", (e) => {
 
 // ------------------------------------------------------------------ model picker
 
-interface ModelInfo { provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number; cost?: { input: number; output: number }; images?: boolean }
+interface ModelInfo { provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number; images?: boolean }
 
 // ------------------------------------------------------------------ effort slider
 
@@ -1367,8 +1366,7 @@ class ModelPicker {
 
   /** One muted line: context · price · capabilities. Full id/provider is in the tooltip. */
   private detail(m: ModelInfo) {
-    const price = m.cost && (m.cost.input || m.cost.output) ? `$${m.cost.input}/$${m.cost.output} per M` : "";
-    return [this.ctx(m), price, m.reasoning ? "reasoning" : "", m.images ? "images" : ""].filter(Boolean).join(" · ");
+    return [this.ctx(m), m.reasoning ? "reasoning" : "", m.images ? "images" : ""].filter(Boolean).join(" · ");
   }
 
   /** Everything else goes into the tooltip. */
@@ -1376,7 +1374,6 @@ class ModelPicker {
     const lines = [`${m.provider}/${m.id}`];
     if (m.contextWindow) lines.push(this.ctx(m));
     if (m.reasoning) lines.push("Supports reasoning");
-    if (m.cost && (m.cost.input || m.cost.output)) lines.push(`$${m.cost.input} in / $${m.cost.output} out per 1M tokens`);
     return lines.join("\n");
   }
 
