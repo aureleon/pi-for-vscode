@@ -29,7 +29,7 @@
         {
           "type": "webview",
           "id": "pi.chat",
-          "name": "Pi Coding Agent",
+          "name": "Session",
           "icon": "media/pi.svg"
         }
       ]
