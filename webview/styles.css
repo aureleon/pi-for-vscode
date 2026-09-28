@@ -331,7 +331,6 @@ kbd {
 }
 .mp-effort.dragging .slider-knob, .mp-effort.dragging .slider-fill { transition: none; }
 
-
 /* ---------------------------------------------------------------- header dropdown (sessions, fork) */
 .list-menu {
   position: absolute; top: 6px; left: 8px; right: 8px; z-index: 30;
@@ -402,10 +401,10 @@ kbd {
 .tm-toggle { margin-left: auto; font-size: 11px; }
 /* Small text buttons in menus and navigators. */
 .sp-btn {
-  background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);
-  border: none; border-radius: 4px; padding: 2px 8px; font-size: .85em; cursor: pointer;
+  height: 22px; padding: 0 7px; border: none; border-radius: 5px; background: none; cursor: pointer;
+  color: var(--vscode-icon-foreground, var(--vscode-foreground)); font: inherit; font-size: 12px; white-space: nowrap;
 }
-.sp-btn:hover:not([disabled]) { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground)); filter: brightness(1.15); }
+.sp-btn:hover:not([disabled]) { background: var(--vscode-toolbar-hoverBackground); }
 .sp-btn[disabled] { opacity: .45; cursor: default; }
 .sp-btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .tm-edit { flex: 1 1 100%; }
