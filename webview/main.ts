@@ -2,6 +2,7 @@ import { marked } from "marked";
 import { ansiToHtml, escapeHtml, stripAnsi } from "./ansi";
 import { TreeMenu } from "./treeMenu";
 import { SPINNER } from "./spinner";
+import { highlightMarkdown } from "./mdHighlight";
 
 declare function acquireVsCodeApi(): { postMessage(m: any): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
@@ -58,7 +59,10 @@ app.innerHTML = `
       <div id="popup" class="popup hidden"></div>
       <div id="model-picker" class="model-picker hidden"></div>
       <div id="attachments" class="attachments hidden"></div>
-      <textarea id="input" rows="1" placeholder="Ask Pi…  (/ commands, @ files, ! shell)"></textarea>
+      <div class="input-wrap">
+        <div id="input-hl" class="input-hl" aria-hidden="true"></div>
+        <textarea id="input" rows="1" spellcheck="true" placeholder="Ask Pi…  (/ commands, @ files, ! shell)"></textarea>
+      </div>
       <div class="toolbar">
         <button class="icon-btn" id="btn-image" title="Attach image">${I.image}</button>
         <button class="icon-btn" id="btn-slash" title="Commands">${I.slash}</button>
@@ -871,9 +875,18 @@ function renderQueue(steering: string[], followUp: string[]) {
 
 // ------------------------------------------------------------------ composer
 
+/** Live markdown styling: re-render the backdrop copy of the input and keep it scrolled in sync. */
+const inputHl = $("input-hl");
+function syncHighlight() {
+  inputHl.innerHTML = highlightMarkdown(input.value);
+  inputHl.scrollTop = input.scrollTop;
+}
+input.addEventListener("scroll", () => (inputHl.scrollTop = input.scrollTop));
+
 function resizeInput() {
   input.style.height = "auto";
   input.style.height = Math.min(input.scrollHeight, 300) + "px";
+  syncHighlight();
   updateSendButton();
 }
 function updateSendButton() {

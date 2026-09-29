@@ -198,10 +198,41 @@ kbd {
 /* While Pi works: pi-logo blue border with a soft glow (not an error-like red). */
 .running .composer { border-color: #4D9ABF; box-shadow: 0 0 0 1px rgba(77, 154, 191, .25); }
 .composer.drag { border-style: dashed; border-color: var(--accent); }
-#input {
-  display: block; width: 100%; resize: none; border: none; outline: none; background: transparent;
-  color: var(--vscode-input-foreground); font: inherit; padding: 10px 12px 6px; max-height: 300px; line-height: 1.45;
+/* Input = transparent-text <textarea> over a backdrop with the same metrics that renders
+   the markdown styling (see webview/mdHighlight.ts). Only width-neutral styles are used. */
+.input-wrap { position: relative; }
+#input, .input-hl {
+  font: inherit; line-height: 1.45; padding: 10px 12px 6px; letter-spacing: normal; tab-size: 4;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
 }
+#input {
+  position: relative; z-index: 1; display: block; width: 100%; resize: none; border: none; outline: none;
+  background: transparent; max-height: 300px;
+  color: transparent; caret-color: var(--vscode-input-foreground);
+  scrollbar-width: none; /* a scrollbar would narrow the text box and break alignment */
+}
+#input::-webkit-scrollbar { display: none; }
+#input::selection { color: transparent; background: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, .6)); }
+.input-hl {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  color: var(--vscode-input-foreground);
+}
+.input-hl .md-mark { opacity: .45; }
+.input-hl .md-b, .input-hl .md-h { color: var(--vscode-foreground); text-shadow: .35px 0 0 currentColor, -.1px 0 0 currentColor; }
+.input-hl .md-h { color: var(--vscode-textLink-foreground); }
+.input-hl .md-em { color: var(--vscode-foreground); }
+.input-hl .md-i { display: inline-block; transform: skewX(-11deg); }
+.input-hl .md-s { text-decoration: line-through; opacity: .75; }
+.input-hl .md-code { background: var(--vscode-textCodeBlock-background, rgba(128,128,128,.18)); border-radius: 3px; color: var(--vscode-textPreformat-foreground, #d7ba7d); }
+.input-hl .md-code .md-mark { opacity: .6; }
+.input-hl .md-fence { color: var(--muted); }
+.input-hl .md-codeblock { color: var(--vscode-textPreformat-foreground, #d7ba7d); }
+.input-hl .md-quote { color: var(--muted); }
+.input-hl .md-li { color: var(--vscode-textLink-foreground); }
+.input-hl .md-link, .input-hl .md-url { color: var(--vscode-textLink-foreground); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
+.input-hl .md-mention { color: var(--vscode-textLink-foreground); background: color-mix(in srgb, var(--vscode-textLink-foreground) 14%, transparent); border-radius: 3px; }
+.input-hl .md-cmd { color: var(--vscode-textLink-foreground); text-shadow: .35px 0 0 currentColor; }
+.input-hl .md-shell { color: var(--vscode-textPreformat-foreground, #d7ba7d); }
 #input::placeholder { color: var(--vscode-input-placeholderForeground); }
 .toolbar { display: flex; align-items: center; gap: 4px; padding: 4px 6px 6px; border-top: 1px solid var(--border); }
 .spacer { flex: 1; }
