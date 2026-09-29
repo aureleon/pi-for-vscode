@@ -1011,7 +1011,15 @@ let popupSel = 0;
 let fileReq = 0;
 let fileToken: { start: number; end: number } | undefined;
 
+/** Pending "hide on blur" timer; cancelled when the popup is (re)opened or the input refocuses. */
+let blurHideTimer: number | undefined;
+function cancelBlurHide() {
+  clearTimeout(blurHideTimer);
+  blurHideTimer = undefined;
+}
+
 function showPopup(items: PopupItem[]) {
+  cancelBlurHide();
   popupItems = items;
   popupSel = 0;
   if (!items.length) return hidePopup();
@@ -1122,7 +1130,11 @@ input.addEventListener("keydown", (e) => {
     post({ type: "abort" });
   }
 });
-input.addEventListener("blur", () => setTimeout(hidePopup, 150));
+input.addEventListener("blur", () => {
+  cancelBlurHide();
+  blurHideTimer = window.setTimeout(hidePopup, 150);
+});
+input.addEventListener("focus", cancelBlurHide);
 input.addEventListener("paste", (e) => {
   const items = e.clipboardData?.items ?? ([] as any);
   for (const it of items as DataTransferItemList) {
@@ -1178,9 +1190,16 @@ $("btn-model").addEventListener("click", (e) => {
   picker.toggle();
 });
 $("btn-image").addEventListener("click", () => post({ type: "pickImage" }));
+// Composer toolbar buttons must not steal focus from the input: a blur would schedule
+// hiding the "/" popup right after the click opened it (it then flashed and vanished).
+for (const b of document.querySelectorAll<HTMLElement>(".composer .toolbar button")) {
+  b.addEventListener("mousedown", (e) => e.preventDefault());
+}
 $("btn-slash").addEventListener("click", () => {
+  // Always opens (or keeps open) the command list; Esc or clicking elsewhere closes it.
   if (!input.value.startsWith("/")) input.value = "/" + input.value;
   input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
   updateAutocomplete();
 });
 document.addEventListener("keydown", (e) => {
