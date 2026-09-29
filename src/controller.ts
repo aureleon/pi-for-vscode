@@ -8,6 +8,7 @@ import { getShellEnv } from "./shellEnv";
 import { agentDir, scopeModels } from "./modelScope";
 import { slimTree } from "./treeData";
 import { createPiTerminal, piTerminalName } from "./piTerminal";
+import { completePath } from "./pathComplete";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
 const RECENT_MODELS_KEY = "pi.recentModels";
@@ -380,16 +381,10 @@ export class PiController implements vscode.Disposable {
     await vscode.window.showTextDocument(doc, opts);
   }
 
+  /** @-mention completion: folder listing for paths, fuzzy workspace search for bare words. */
   private async searchFiles(query: string, requestId: number) {
-    const q = query.replace(/[\[\]{}*?]/g, "");
-    const glob = q ? `**/*${q.split("/").pop()}*` : "**/*";
-    const uris = await vscode.workspace.findFiles(glob, "**/{node_modules,.git,dist,out,build}/**", 200);
-    const rels = uris
-      .map((u) => vscode.workspace.asRelativePath(u, false))
-      .filter((r) => r.toLowerCase().includes(q.toLowerCase()))
-      .sort((a, b) => a.length - b.length)
-      .slice(0, 30);
-    this.post({ type: "fileResults", requestId, files: rels });
+    const items = await completePath(query, this.cwd).catch(() => []);
+    this.post({ type: "fileResults", requestId, items });
   }
 
   private async pickImage() {
