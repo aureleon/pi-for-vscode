@@ -1005,7 +1005,7 @@ function clearInput() {
 
 // ------------------------------------------------------------------ autocomplete
 
-interface PopupItem { label: string; detail?: string; tag?: string; apply: () => void }
+interface PopupItem { label: string; detail?: string; tag?: string; icon?: string; apply: () => void }
 let popupItems: PopupItem[] = [];
 let popupSel = 0;
 let fileReq = 0;
@@ -1030,7 +1030,7 @@ function renderPopup() {
   popup.innerHTML = "";
   popupItems.forEach((it, i) => {
     const row = el("div", `popup-item${i === popupSel ? " active" : ""}`);
-    row.innerHTML = `<span class="popup-label">${escapeHtml(it.label)}</span>${it.detail ? `<span class="popup-detail">${escapeHtml(it.detail)}</span>` : ""}${it.tag ? `<span class="popup-tag">${escapeHtml(it.tag)}</span>` : ""}`;
+    row.innerHTML = `${it.icon ? `<span class="popup-icon">${it.icon}</span>` : ""}<span class="popup-label">${escapeHtml(it.label)}</span>${it.detail ? `<span class="popup-detail">${escapeHtml(it.detail)}</span>` : ""}${it.tag ? `<span class="popup-tag">${escapeHtml(it.tag)}</span>` : ""}`;
     row.addEventListener("mousedown", (e) => {
       e.preventDefault();
       it.apply();
@@ -1085,21 +1085,33 @@ function updateAutocomplete() {
   hidePopup();
 }
 
-function onFileResults(requestId: number, files: string[]) {
+interface PathItem { label: string; insert: string; detail?: string; dir: boolean }
+
+const FOLDER_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 3h4.3l1.5 1.5h7.2v8.5h-13V3zm1 1v8h11V5.5H6.9L5.4 4H2.5z"/></svg>`;
+const FILE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M3.5 1.5h6l3 3v10h-9v-13zm1 1v11h7V5H9V2.5H4.5z"/></svg>`;
+
+/**
+ * Show @-mention completions. Picking a folder inserts "@folder/" and immediately
+ * lists its contents (drill down, like shell completion); picking a file inserts
+ * "@path " and closes the list. Paths with spaces are quoted.
+ */
+function onFileResults(requestId: number, items: PathItem[]) {
   if (requestId !== fileReq || !fileToken) return;
   const tok = fileToken;
   showPopup(
-    files.map((f) => ({
-      label: f.split("/").pop()!,
-      detail: f,
+    (items ?? []).map((it) => ({
+      label: it.label,
+      detail: it.detail,
+      icon: it.dir ? FOLDER_ICON : FILE_ICON,
       apply: () => {
-        const ref = f.includes(" ") ? `@"${f}" ` : `@${f} `;
-        input.value = input.value.slice(0, tok.start) + ref + input.value.slice(tok.end);
-        const p = tok.start + ref.length;
+        const text = it.dir ? `@${it.insert}` : it.insert.includes(" ") ? `@"${it.insert}" ` : `@${it.insert} `;
+        input.value = input.value.slice(0, tok.start) + text + input.value.slice(tok.end);
+        const p = tok.start + text.length;
         input.setSelectionRange(p, p);
-        hidePopup();
         resizeInput();
         input.focus();
+        if (it.dir) updateAutocomplete(); // drill into the folder
+        else hidePopup();
       },
     })),
   );
@@ -1809,7 +1821,7 @@ window.addEventListener("message", (ev) => {
       picker.show("", true);
       break;
     case "fileResults":
-      onFileResults(m.requestId, m.files);
+      onFileResults(m.requestId, m.items ?? []);
       break;
     case "addImage":
       images.push({ image: m.image, name: m.name });

@@ -10,7 +10,10 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Chat in the sidebar.** Text, thinking, and tool calls stream live and show as a timeline. Tool cards show `IN`/`OUT` for bash, read, write, and grep. Edits show an inline diff.
 - **Pi extensions.** Commands from `pi.registerCommand` show in `/` autocomplete. `ctx.ui.select/confirm/input/editor` show as inline dialogs, with timeout support. `notify` shows as a VS Code notification. `setStatus` shows in the status line and `setWidget` shows above or below the input, both with ANSI colors. `set_editor_text` fills the input.
 - **Prompting while Pi works.** <kbd>Enter</kbd> steers, <kbd>⌥ Enter</kbd> queues a follow-up, and <kbd>Esc</kbd> or the red button stops. When you stop, queued messages go back into the input.
-- **Autocomplete.** Type `/` for commands (extension commands, prompt templates, skills, and built-ins) and `@` to mention workspace files.
+- **Autocomplete.** Type `/` for commands (extension commands, prompt templates, skills, and built-ins).
+  - Type `@` to complete file paths as in a shell. `@src/` lists that folder, with folders first. Picking a folder moves into it, and picking a file inserts `@path`.
+  - Relative, `./`, `../`, `~/`, and absolute paths all work. Hidden entries show when the prefix starts with `.`.
+  - A bare word (`@contr`) also searches the whole workspace.
 - **Shell.** `!cmd` runs a command and adds its output to the context. `!!cmd` runs it without adding output to the context.
 - **Images.** Paste, drag and drop, or use the image button.
 - **Sessions.** Start a new session, `/clone`, `/name`, `/compact`, and `/export`. To resume a session (the history button or `/resume`) or to `/fork` from an earlier message, pick it from a searchable dropdown under the header. The extension does not use VS Code's global QuickPick. The sidebar reopens the last session of the workspace.

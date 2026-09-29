@@ -494,3 +494,6 @@ body.side-resizing { user-select: none; cursor: row-resize; }
 .banner .dim { color: var(--muted); margin-top: 3px; font-size: .92em; }
 body.in-terminal .composer { opacity: .5; pointer-events: none; }
 body.in-terminal #empty { display: none; }
+
+.popup-icon { width: 14px; height: 14px; flex: none; align-self: center; color: var(--muted); display: inline-flex; }
+.popup-icon svg { width: 14px; height: 14px; }
