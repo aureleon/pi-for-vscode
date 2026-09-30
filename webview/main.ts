@@ -167,6 +167,9 @@ function shortPath(p: string): string {
 const isPathLike = (s: string) => /^(~|\.{1,2})?\/?[\w@.\-]+(\/[\w@.\-]+)+(:\d+(-\d+)?)?$/.test(s) || /^[\w\-]+\.[a-z0-9]{1,6}(:\d+)?$/i.test(s);
 
 /** Make inline code that looks like a path clickable. */
+const COPY_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M4 4V2.5A1.5 1.5 0 0 1 5.5 1h7A1.5 1.5 0 0 1 14 2.5v7a1.5 1.5 0 0 1-1.5 1.5H11v1.5A1.5 1.5 0 0 1 9.5 14h-7A1.5 1.5 0 0 1 1 12.5v-7A1.5 1.5 0 0 1 2.5 4H4zm1 0h4.5A1.5 1.5 0 0 1 11 5.5V10h1.5a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-7a.5.5 0 0 0-.5.5V4zM2.5 5a.5.5 0 0 0-.5.5v7c0 .28.22.5.5.5h7a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-7z"/></svg>`;
+const CHECK_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M6.3 11.3 2.9 7.9l-.7.7 4.1 4.1 7.6-7.6-.7-.7z"/></svg>`;
+
 function linkify(root: HTMLElement) {
   root.querySelectorAll("code").forEach((c) => {
     if (c.parentElement?.tagName === "PRE") return;
@@ -176,16 +179,31 @@ function linkify(root: HTMLElement) {
       c.title = "Open file";
     }
   });
+  // Code blocks get a header bar (language + Copy) above the scrolling <pre>, so the
+  // button never overlaps code and doesn't scroll away with long lines.
   root.querySelectorAll("pre").forEach((pre) => {
-    if (pre.querySelector(".copy-btn")) return;
-    const b = el("button", "copy-btn", "Copy");
+    if (pre.parentElement?.classList.contains("code-block")) return;
+    const code = pre.querySelector("code");
+    const lang = (code?.className.match(/language-([\w+#.-]+)/)?.[1] ?? "").toLowerCase();
+    const wrap = el("div", "code-block");
+    const head = el("div", "code-head");
+    head.appendChild(el("span", "code-lang", escapeHtml(lang || "text")));
+    const b = el("button", "copy-btn", `${COPY_ICON}<span>Copy</span>`);
+    b.title = "Copy code";
     b.addEventListener("click", (e) => {
       e.stopPropagation();
-      navigator.clipboard.writeText(pre.querySelector("code")?.textContent ?? pre.textContent ?? "");
-      b.textContent = "Copied";
-      setTimeout(() => (b.textContent = "Copy"), 1200);
+      const text = (code?.textContent ?? pre.textContent ?? "").replace(/\n$/, "");
+      post({ type: "copy", text });
+      b.classList.add("done");
+      b.innerHTML = `${CHECK_ICON}<span>Copied</span>`;
+      setTimeout(() => {
+        b.classList.remove("done");
+        b.innerHTML = `${COPY_ICON}<span>Copy</span>`;
+      }, 1400);
     });
-    pre.appendChild(b);
+    head.appendChild(b);
+    pre.replaceWith(wrap);
+    wrap.append(head, pre);
   });
 }
 document.addEventListener("click", (e) => {
