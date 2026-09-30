@@ -308,6 +308,10 @@ export class PiController implements vscode.Disposable {
           await this.req({ type: "prompt", message: `/vscode:label ${JSON.stringify({ entryId: m.id, label: m.label ?? "" })}` });
           await this.openTree("", m.id, true);
           break;
+        case "copy":
+          await vscode.env.clipboard.writeText(String(m.text ?? ""));
+          vscode.window.setStatusBarMessage("Pi: copied to clipboard", 1500);
+          break;
         case "listAction":
           if (m.kind === "session" && (m.action === "archive" || m.action === "unarchive")) {
             await this.setArchived(m.id, m.action === "archive");
