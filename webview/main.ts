@@ -4,6 +4,7 @@ import { SidePanel } from "./sidePanel";
 import { TreeMenu } from "./treeMenu";
 import { SPINNER } from "./spinner";
 import { highlightMarkdown } from "./mdHighlight";
+import { StreamingMarkdown } from "./streamMd";
 
 declare function acquireVsCodeApi(): { postMessage(m: any): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
@@ -135,6 +136,10 @@ scrollEl.addEventListener("scroll", () => {
   stick = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 60;
 });
 let scrollQueued = false;
+/** Scroll to the bottom now (same frame as a render), so content never jumps for a frame. */
+function scrollNow() {
+  if (stick) scrollEl.scrollTop = scrollEl.scrollHeight;
+}
 function autoscroll() {
   if (!stick || scrollQueued) return;
   scrollQueued = true;
@@ -270,7 +275,7 @@ function renderNote(text: string, cls = "") {
 
 // ------------------------------------------------------------------ assistant messages
 
-interface Block { type: string; el: HTMLElement; text: string; id?: string }
+interface Block { type: string; el: HTMLElement; text: string; id?: string; sm?: StreamingMarkdown }
 class AssistantView {
   blocks = new Map<number, Block>();
   errorEl?: HTMLElement;
@@ -305,19 +310,19 @@ class AssistantView {
       this.rafQueued = false;
       for (const x of this.pendingRender) this.renderBlock(x);
       this.pendingRender.clear();
-      autoscroll();
+      scrollNow();
     });
   }
 
+  /** Incremental render: only markdown blocks whose source changed are rebuilt. */
   renderBlock(b: Block) {
     if (b.type === "text") {
-      const target = b.el.querySelector(".md") as HTMLElement;
-      target.innerHTML = md(b.text);
-      linkify(target);
+      b.sm ??= new StreamingMarkdown(b.el.querySelector(".md") as HTMLElement, linkify);
+      b.sm.update(b.text);
       b.el.classList.toggle("hidden", !b.text.trim());
     } else if (b.type === "thinking") {
-      const body = b.el.querySelector(".thinking-body") as HTMLElement;
-      body.innerHTML = md(b.text);
+      b.sm ??= new StreamingMarkdown(b.el.querySelector(".thinking-body") as HTMLElement, linkify);
+      b.sm.update(b.text);
       b.el.classList.toggle("empty-thinking", !b.text.trim());
     }
   }
