@@ -154,8 +154,12 @@ kbd {
 
 /* ---------------------------------------------------------------- working */
 .working { display: flex; gap: 8px; align-items: center; padding: 10px 2px; color: var(--muted); }
-.spinner { display: inline-flex; width: 14px; height: 14px; flex: none; animation: spin 1.6s cubic-bezier(.45,.05,.55,.95) infinite; }
-.spinner svg { width: 100%; height: 100%; }
+/* A π glyph spinning about its centre: fixed square box, centred, line-height 1. */
+.spinner {
+  display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; flex: none;
+  font-family: Georgia, "Times New Roman", serif; font-size: 15px; line-height: 1; font-weight: 600;
+  color: var(--vscode-foreground); opacity: .85; animation: spin 1.6s cubic-bezier(.45,.05,.55,.95) infinite;
+}
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ---------------------------------------------------------------- dialogs */
