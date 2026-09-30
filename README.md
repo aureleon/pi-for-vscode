@@ -6,41 +6,38 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 
 ## Features
 
-- **One native header.** The standard VS Code view header shows "Pi Coding Agent", a "Session" subtitle, and the session name in a subdued font (the name you set, else the first prompt). It also has the Continue in terminal, Tree, Resume, and New session buttons, with *Open in New Tab* and *Restart* in the ••• menu. Chats in editor tabs show the same buttons in the editor title bar. The webview does not add its own header.
-- **Chat in the sidebar.** Text, thinking, and tool calls stream live and show as a timeline. Tool cards show `IN`/`OUT` for bash, read, write, and grep. Edits show an inline diff.
-- **Pi extensions.** Commands from `pi.registerCommand` show in `/` autocomplete. `ctx.ui.select/confirm/input/editor` show as inline dialogs, with timeout support. `notify` shows as a VS Code notification. `setStatus` shows in the status line and `setWidget` shows above or below the input, both with ANSI colors. `set_editor_text` fills the input.
-- **Prompting while Pi works.** <kbd>Enter</kbd> steers, <kbd>⌥ Enter</kbd> queues a follow-up, and <kbd>Esc</kbd> or the red button stops. When you stop, queued messages go back into the input.
-- **Autocomplete.** Type `/` for commands (extension commands, prompt templates, skills, and built-ins).
-  - Type `@` to complete file paths as in a shell. `@src/` lists that folder, with folders first. Picking a folder moves into it, and picking a file inserts `@path`.
-  - Relative, `./`, `../`, `~/`, and absolute paths all work. Hidden entries show when the prefix starts with `.`.
-  - A bare word (`@contr`) also searches the whole workspace.
-- **Markdown in the input.** Markdown is styled as you type: **bold**, *italic*, `code`, ~~strike~~, headings, lists, quotes, links, fenced code blocks, `@mentions`, and a leading `/command` or `!shell`. The markup characters stay visible (dimmed), and the text stays plain and editable. Fenced code blocks appear as a shaded block. Sent prompts render as markdown in the chat, with single line breaks kept.
-- **Shell.** `!cmd` runs a command and adds its output to the context. `!!cmd` runs it without adding output to the context.
-- **Images.** Paste, drag and drop, or use the image button.
-- **Sessions.** Start a new session, `/clone`, `/name`, `/compact`, and `/export`. To resume a session (the history button or `/resume`) or to `/fork` from an earlier message, pick it from a searchable dropdown under the header. To hide a session from that list, archive it with the archive button on its row, or ⌘⌫. *Show archived* in the footer lists archived sessions and lets you unarchive them. The session files stay on disk, so the pi TUI can still resume them. The extension does not use VS Code's global QuickPick. The sidebar reopens the last session of the workspace.
-- **Session tree (`/tree`).** Use the tree button in the header, `/tree`, or *Pi: Session Tree*. The tree shows every branch of the session, as in the pi TUI: chains stay flat, branch points get `├─ └─` guides, abandoned branches are muted, and the current entry is marked.
-  - Select an entry and press **Enter** (or click *Go*) to continue from there. If you select a prompt, the chat moves to the point before it and puts the prompt back in the input, so you can edit it and send it as a new branch.
-  - **Shift+Enter** (*Summarize & go*) summarizes the branch you are leaving. **Alt+Enter** asks for summary instructions first.
-  - **Ctrl+L** sets or clears a label (a bookmark). *Show all entries* also shows tool results and model changes. Type to search.
-  - RPC mode has no tree commands, so the extension loads a small bridge extension into pi (`pi -e dist/pi-bridge.mjs`). The bridge calls `ctx.navigateTree()`. Its internal `vscode:*` commands do not appear in autocomplete.
-- **Terminal.** The terminal tabs show the Pi logo.
-  - **Pi: Open in Terminal** (in the ••• menu) starts a new pi TUI session in a terminal.
-  - **Continue Session in Terminal** (the terminal button in the header) moves the current chat's session into the TUI. The session continues in the full pi TUI in an integrated terminal, as an editor tab by default (`pi.terminalLocation`). The TUI gives you every TUI-only feature (custom extension UIs, overlays, keybindings).
-  - While the terminal has the session, the chat is paused, so that two pi processes do not write to the same session file. The session is handed over by its exact id (`--session-id`). When you close the terminal or click *Reattach Here*, the chat resumes exactly that session, with everything you did in the TUI, even if newer sessions exist in the folder.
-- **Model picker.** Click the model chip in the toolbar to open a model list above the input.
-  - The list follows Pi's `enabledModels` setting. It uses the same rules as the pi CLI: exact IDs, `provider/id`, fuzzy names, globs, and `:thinking` suffixes. The order follows your patterns.
-  - The setting comes from `--models` in `pi.args`, then `<workspace>/.pi/settings.json`, then `~/.pi/agent/settings.json`. If `enabledModels` is empty, the list shows all models, with your recent models first.
-  - The search also finds models that are not enabled. It lists them under "Other models".
-  - The footer tells you where the list comes from and how many patterns match no model. Click *Show all* to see all models. Click *Edit* to open the settings file at `enabledModels`. The picker reads the file again each time it opens.
-  - `/model [query]` also opens the picker.
-- **Effort (thinking level).** The last row of the model menu shows the effort label on the left and a stepped slider on the right. The slider has a fixed width and position, so it does not move when the label changes. It only appears for reasoning models.
-  - Click or drag anywhere on or near the slider to set the level. You can also use ←/→ (when the search box is empty) or Tab/Shift+Tab. The level is sent to pi when you release the slider.
-  - The model chip shows the current effort, for example "Claude Opus 5.5 (Global)  Medium".
-  - `/thinking [level]` sets the level directly. Without a level, it opens the menu with the slider focused.
-  - Each model row shows its context size and capabilities. The tooltip shows the full `provider/id`.
-  - The toolbar shows context use as a pill with a ring gauge and a percentage. The pill turns amber from 70% and red from 90%. Hovering reveals "Compact" and the token counts. Clicking compacts the conversation (the same as `/compact`).
-- **Editor integration.** *Pi: Add Selection to Chat* (<kbd>⌘⌥L</kbd>) inserts `@file:10-20`. Right-click a file in the Explorer and select *Pi: Add File to Chat*. Click a file path in a tool card or inline code to open it.
-- **More sessions.** *Pi: Open in New Tab* opens another chat panel with its own pi process.
+### Chat
+- Replies, thinking and tool calls stream in as a timeline. Tool cards show input and output, and edits show a diff.
+- Markdown renders in replies and in your sent prompts. It is also styled live as you type.
+- While Pi works: <kbd>Enter</kbd> steers, <kbd>⌥ Enter</kbd> queues a follow-up, <kbd>Esc</kbd> stops.
+- `/` for commands, `@` for file paths, `!cmd` for shell commands. Paste or drop images.
+- The context pill shows how full the context is. Click it to compact.
+
+### Models
+- The model menu lists the models in Pi's `enabledModels`, or all models if the setting is empty.
+- The effort (thinking level) slider is at the bottom of the same menu.
+
+### Sessions
+- Resume or fork from a searchable list. Archive a session to hide it from the list.
+- `/tree` moves between branches of a session. It can summarize the branch you leave and label entries.
+- The last session reopens automatically. *Open in New Tab* starts another chat.
+
+### Pi extensions
+- Extension commands, dialogs, notifications, status text and widgets work in the chat.
+
+### Terminal
+- *Pi: Open in Terminal* starts a new pi TUI session.
+- *Continue Session in Terminal* moves the current session into the TUI. The chat pauses and picks the session back up when you close the terminal.
+
+### Editor
+- <kbd>⌘⌥L</kbd> adds the selection to the chat. The Explorer context menu adds a file.
+- Click a file path in the chat to open it.
+
+## Notes
+
+- **Archived sessions** stay on disk. Only the list in VS Code hides them, so the pi TUI can still resume them.
+- **`/tree`** needs a command that RPC mode does not have. The extension adds it by loading a small bridge extension into pi (`dist/pi-bridge.mjs`).
+- **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.
 
 ## Built-in slash commands
 
@@ -63,13 +60,13 @@ VS Code apps opened from the Dock often do not get your shell `PATH`. For this r
 | `pi.args` | `[]` | More CLI arguments, for example `["--model", "sonnet"]`. |
 | `pi.resumeLastSession` | `true` | Reopen the last session of the workspace. |
 | `pi.useLoginShellEnv` | `true` | Load the environment of your login shell. |
-| `pi.terminalLocation` | `"editor"` | Where *Open in Terminal* opens the TUI: an editor tab or the terminal panel. |
+| `pi.terminalLocation` | `"editor"` | Where terminals open: as an editor tab or in the terminal panel. |
 
 Extensions can check `process.env.PI_VSCODE === "1"` to know that they run inside VS Code.
 
 ## Limitations (from RPC mode)
 
-TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` works through the bridge extension, and *Open in Terminal* gives you everything else from the TUI.
+TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` works through the bridge extension. For everything else, open the session in the terminal.
 
 ## Development
 
