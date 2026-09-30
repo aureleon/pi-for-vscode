@@ -20,7 +20,7 @@
         {
           "id": "pi-coding-agent",
           "title": "Pi Coding Agent",
-          "icon": "media/pi.svg"
+          "icon": "media/pi-logo.svg"
         }
       ]
     },
@@ -30,7 +30,7 @@
           "type": "webview",
           "id": "pi.chat",
           "name": "Session",
-          "icon": "media/pi.svg"
+          "icon": "media/pi-logo.svg"
         }
       ]
     },
