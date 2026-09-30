@@ -21,6 +21,8 @@ marked.use({
   },
 });
 const md = (s: string) => marked.parse(s ?? "", { async: false }) as string;
+/** Markdown for what the user typed: single newlines stay line breaks, like the input. */
+const mdUser = (s: string) => marked.parse(s ?? "", { async: false, breaks: true }) as string;
 
 // ------------------------------------------------------------------ icons
 
@@ -213,8 +215,9 @@ function renderUser(msg: any) {
     updateTitle();
   }
   const bubble = el("div", "user-msg");
-  const body = el("div", "user-text");
-  body.textContent = text;
+  const body = el("div", "user-text md");
+  body.innerHTML = mdUser(text);
+  linkify(body);
   bubble.appendChild(body);
   const imgs = imagesOf(msg.content);
   if (imgs.length) {

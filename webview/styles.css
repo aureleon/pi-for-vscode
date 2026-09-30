@@ -54,6 +54,10 @@ kbd {
   background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 8px 12px; margin: 12px 0 6px; white-space: pre-wrap; word-break: break-word; position: relative;
 }
+.user-text.md { white-space: normal; }
+.user-text.md > :first-child, .sp-q.md > :first-child { margin-top: 0; }
+.user-text.md > :last-child, .sp-q.md > :last-child { margin-bottom: 0; }
+.sp-q.md { white-space: normal; }
 .user-msg.collapsed .user-text { max-height: 120px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); cursor: pointer; }
 .user-images { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
 .user-images img { max-height: 80px; border-radius: 4px; border: 1px solid var(--border); }
@@ -212,7 +216,8 @@ kbd {
   scrollbar-width: none; /* a scrollbar would narrow the text box and break alignment */
 }
 #input::-webkit-scrollbar { display: none; }
-#input::selection { color: transparent; background: var(--vscode-editor-selectionBackground, rgba(38, 79, 120, .6)); }
+/* Translucent so the styled text in the backdrop stays readable under the selection. */
+#input::selection { color: transparent; background: color-mix(in srgb, var(--vscode-editor-selectionBackground, #264f78) 45%, transparent); }
 .input-hl {
   position: absolute; inset: 0; overflow: hidden; pointer-events: none;
   color: var(--vscode-input-foreground);
@@ -225,7 +230,17 @@ kbd {
 .input-hl .md-s { text-decoration: line-through; opacity: .75; }
 .input-hl .md-code { background: var(--vscode-textCodeBlock-background, rgba(128,128,128,.18)); border-radius: 3px; color: var(--vscode-textPreformat-foreground, #d7ba7d); }
 .input-hl .md-code .md-mark { opacity: .6; }
-.input-hl .md-fence { color: var(--muted); }
+/* Fenced code block: every line is a full-width box with the code background;
+   sideways box-shadows widen it into the padding without moving any text. */
+.input-hl .md-bl {
+  --bl-bg: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, .18));
+  display: inline-block; width: 100%; vertical-align: top; background: var(--bl-bg);
+  box-shadow: -6px 0 0 var(--bl-bg), 6px 0 0 var(--bl-bg);
+}
+.input-hl .md-bl.first { border-top-left-radius: 4px; border-top-right-radius: 4px; }
+.input-hl .md-bl.last { border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }
+.input-hl .md-bl .md-mark { opacity: .5; }
+.input-hl .md-lang { color: var(--muted); }
 .input-hl .md-codeblock { color: var(--vscode-textPreformat-foreground, #d7ba7d); }
 .input-hl .md-quote { color: var(--muted); }
 .input-hl .md-li { color: var(--vscode-textLink-foreground); }
