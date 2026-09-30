@@ -82,7 +82,7 @@ export class TreeMenu {
     this.root.innerHTML = `
       <input class="mp-search" spellcheck="false" placeholder="Session tree · search entries">
       <div class="mp-list tm-list"></div>
-      <div class="tm-footer"></div>`;
+      <div class="tm-footer menu-footer"></div>`;
     mount.appendChild(this.root);
     this.search = this.root.querySelector(".mp-search")!;
     this.list = this.root.querySelector(".tm-list")!;
@@ -206,7 +206,7 @@ export class TreeMenu {
     const f = this.footer;
     f.innerHTML = "";
     if (this.busy) {
-      f.innerHTML = `<div class="tm-hint">${SPINNER} ${escapeHtml(this.busy)}</div>`;
+      f.innerHTML = `<div class="tm-hint menu-hint">${SPINNER} ${escapeHtml(this.busy)}</div>`;
       return;
     }
     if (this.mode !== "idle" && n) {
@@ -235,7 +235,7 @@ export class TreeMenu {
       return;
     }
     const hint = document.createElement("div");
-    hint.className = "tm-hint";
+    hint.className = "tm-hint menu-hint";
     hint.textContent = !n
       ? ""
       : n.id === this.leafId
@@ -261,7 +261,7 @@ export class TreeMenu {
     btn("Label", "Set or clear a label (Ctrl+L)", () => this.setMode("label"));
     if (atLeaf) actions.querySelectorAll("button").forEach((b, i) => i < 3 && (b.disabled = true));
     const toggle = document.createElement("button");
-    toggle.className = "link tm-toggle";
+    toggle.className = "link tm-toggle menu-toggle";
     toggle.textContent = this.showAll ? "Hide tool/system entries" : "Show all entries";
     toggle.addEventListener("click", () => {
       const id = this.current()?.id;
