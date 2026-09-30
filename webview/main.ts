@@ -4,6 +4,7 @@ import { TreeMenu } from "./treeMenu";
 import { SPINNER } from "./spinner";
 import { highlightMarkdown } from "./mdHighlight";
 import { StreamingMarkdown } from "./streamMd";
+import { fmtDuration } from "./duration";
 
 declare function acquireVsCodeApi(): { postMessage(m: any): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
@@ -899,9 +900,8 @@ function setRunning(r: boolean) {
 }
 function updateWorking() {
   if (!running) return;
-  const secs = Math.round((Date.now() - runStart) / 1000);
   const toks = outputTokens ? ` · ↓ ${fmtTokens(outputTokens)} tokens` : "";
-  $("working-text").textContent = `${verb}… (${secs}s${toks} · esc to interrupt)`;
+  $("working-text").textContent = `${verb}… (${fmtDuration(Date.now() - runStart)}${toks} · esc to interrupt)`;
 }
 
 function renderQueue(steering: string[], followUp: string[]) {
