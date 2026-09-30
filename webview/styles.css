@@ -362,51 +362,68 @@ kbd {
 }
 .mp-effort.dragging .slider-knob, .mp-effort.dragging .slider-fill { transition: none; }
 
-/* ---------------------------------------------------------------- header dropdown (sessions, fork) */
+/* ---------------------------------------------------------------- navigators: sessions (/resume, /fork) and tree (/tree)
+   Both share one look: full-height box under the header, 13px rows (28px tall),
+   11.5px muted metadata, the same search field and footer. */
 .list-menu {
-  position: absolute; top: 6px; left: 8px; right: 8px; z-index: 30;
-  display: flex; flex-direction: column; max-height: min(460px, 70vh); overflow: hidden; font-size: 12px;
+  position: absolute; top: 6px; left: 8px; right: 8px; bottom: 8px; z-index: 30;
+  display: flex; flex-direction: column; overflow: hidden; font-size: 13px;
   background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
   border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
 }
 .list-menu .mp-search {
-  margin: 6px 6px 2px; padding: 5px 9px; border-radius: 5px;
+  margin: 6px 6px 4px; padding: 6px 10px; border-radius: 5px; font-size: 13px;
   background: var(--input-bg); border: 1px solid var(--accent);
 }
-/* Row = [current-dot gutter | title (ellipsis) | time | count]; metadata in fixed right-aligned columns. */
-.lm-item {
-  display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; column-gap: 12px; align-items: center;
-  padding: 5px 10px 5px 6px; line-height: 18px;
-}
+.list-menu .mp-list { flex: 1; padding: 2px 4px 6px; font-size: 13px; }
+.list-menu .mp-empty { padding: 10px 12px; }
+.list-menu .mp-item { min-height: 28px; padding: 3px 10px; line-height: 20px; border-radius: 5px; }
+.list-menu .mp-item:not(.active):hover { background: var(--vscode-list-hoverBackground); }
+.list-menu .mp-item.current:not(.active) { background: var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,.12)); }
+
+/* Session rows: [current dot | title | time | count | archive] */
+.lm-item { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; column-gap: 12px; align-items: center; padding-left: 6px !important; }
+.lm-item.has-action { grid-template-columns: 10px minmax(0, 1fr) auto auto 22px; }
 .lm-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lm-col { color: var(--muted); font-size: 11px; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; opacity: .85; }
+.lm-col { color: var(--muted); font-size: 11.5px; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; opacity: .85; }
 .lm-col-0 { min-width: 8ch; }
 .lm-col-1 { min-width: 7ch; }
 .mp-item.active .lm-col { color: inherit; opacity: .75; }
-.lm-dot { font-size: 8px; line-height: 18px; text-align: center; color: var(--vscode-textLink-foreground); }
-.mp-item.current:not(.active) { background: var(--vscode-list-inactiveSelectionBackground, rgba(128,128,128,.12)); }
-.lm-group { font-size: 11px; color: var(--muted); padding: 8px 10px 3px 28px; opacity: .8; }
+.lm-dot { font-size: 8px; line-height: 20px; text-align: center; color: var(--vscode-textLink-foreground); }
+.lm-group { font-size: 11.5px; color: var(--muted); padding: 8px 10px 3px 28px; opacity: .8; }
 .lm-group:first-child { padding-top: 4px; }
-.list-menu .mp-list { padding: 2px 4px 6px; }
-#btn-history.active { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
-.chip-level { color: var(--muted); margin-left: 5px; }
-.chip-level:empty { display: none; }
-
-/* ---------------------------------------------------------------- session tree (/tree) */
-/* The tree fills the chat area: it is a navigator, not a small dropdown. */
-.tree-menu { bottom: 8px; max-height: none; font-size: 13px; }
-.tree-menu .mp-search { font-size: 13px; padding: 6px 10px; }
-.tm-list { font-size: 13px; flex: 1; }
-.tm-item {
-  display: grid; grid-template-columns: auto 16px minmax(0, 1fr) auto; column-gap: 8px; align-items: center;
-  padding: 4px 12px 4px 10px; line-height: 20px; border-radius: 5px;
+.lm-item.archived .lm-label { opacity: .6; font-style: italic; }
+.lm-action {
+  width: 22px; height: 22px; padding: 3px; border: none; border-radius: 5px; background: none; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; color: inherit; opacity: 0;
 }
-.tm-item:not(.active):hover { background: var(--vscode-list-hoverBackground); }
-.tree-menu .tm-guide { font-size: 12px; }
-.tree-menu .tm-mark { font-size: 12px; }
-.tree-menu .tm-meta { font-size: 11.5px; }
-.tree-menu .tm-footer { font-size: 12px; padding: 8px 12px 10px; }
-.tree-menu .tm-footer .sp-btn { font-size: 12px; padding: 3px 10px; }
+.lm-action svg { width: 16px; height: 16px; }
+.mp-item:hover .lm-action, .mp-item.active .lm-action, .lm-item.archived .lm-action { opacity: .75; }
+.lm-action:hover:not([disabled]) { opacity: 1 !important; background: var(--vscode-toolbar-hoverBackground); }
+.lm-action[disabled] { opacity: 0 !important; cursor: default; }
+
+/* Tree rows */
+.tm-item { display: grid; grid-template-columns: auto 16px minmax(0, 1fr) auto; column-gap: 8px; align-items: center; }
+.list-menu .tm-guide { font-size: 12px; }
+.list-menu .tm-mark { font-size: 12px; }
+.list-menu .tm-meta { font-size: 11.5px; }
+
+/* Shared footer */
+.menu-footer {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 12px 10px; flex: none;
+  border-top: 1px solid var(--border); font-size: 12px;
+}
+.menu-footer:empty { display: none; }
+.menu-hint { flex: 1 1 auto; color: var(--muted); display: flex; gap: 6px; align-items: center; min-width: 0; }
+.menu-toggle { margin-left: auto; font-size: 12px; }
+/* Small text buttons in menus and navigators. */
+.sp-btn {
+  height: 22px; padding: 0 7px; border: none; border-radius: 5px; background: none; cursor: pointer;
+  color: var(--vscode-icon-foreground, var(--vscode-foreground)); font: inherit; font-size: 12px; white-space: nowrap;
+}
+.sp-btn:hover:not([disabled]) { background: var(--vscode-toolbar-hoverBackground); }
+.sp-btn[disabled] { opacity: .45; cursor: default; }
+.menu-footer .sp-btn { font-size: 12px; padding: 0 10px; }
 .tm-guide { font-family: var(--mono); font-size: 11px; white-space: pre; color: var(--muted); opacity: .6; }
 .tm-mark { text-align: center; color: var(--muted); font-size: 11px; }
 .tm-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -423,20 +440,8 @@ kbd {
   font-size: 10px; padding: 0 5px; margin-right: 6px; border-radius: 3px;
   background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
 }
-.tm-footer {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 10px 8px;
-  border-top: 1px solid var(--border); font-size: 11px;
-}
 .tm-hint { flex: 1 1 100%; color: var(--muted); display: flex; gap: 6px; align-items: center; }
 .tm-actions { display: flex; gap: 4px; }
-.tm-toggle { margin-left: auto; font-size: 11px; }
-/* Small text buttons in menus and navigators. */
-.sp-btn {
-  height: 22px; padding: 0 7px; border: none; border-radius: 5px; background: none; cursor: pointer;
-  color: var(--vscode-icon-foreground, var(--vscode-foreground)); font: inherit; font-size: 12px; white-space: nowrap;
-}
-.sp-btn:hover:not([disabled]) { background: var(--vscode-toolbar-hoverBackground); }
-.sp-btn[disabled] { opacity: .45; cursor: default; }
 .sp-btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .tm-edit { flex: 1 1 100%; }
 .tm-input {
