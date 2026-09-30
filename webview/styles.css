@@ -46,6 +46,14 @@ kbd {
 
 /* ---------------------------------------------------------------- transcript */
 .scroll { flex: 1; overflow-y: auto; padding: 12px 12px 8px; }
+/* Separates the view title bar from the transcript: a hairline always, plus VS Code's
+   scroll shadow once content has scrolled under the title. */
+#app::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 0; z-index: 10; pointer-events: none;
+  border-top: 1px solid var(--vscode-panel-border, var(--border));
+  transition: box-shadow .12s;
+}
+#app.scrolled::before { box-shadow: 0 0 6px 1px var(--vscode-scrollbar-shadow, rgba(0, 0, 0, .5)); }
 .messages { display: flex; flex-direction: column; }
 .empty { text-align: center; color: var(--muted); margin-top: 18vh; line-height: 1.7; }
 .empty .logo { width: 64px; height: 64px; display: block; margin: 0 auto 10px; }
@@ -483,8 +491,15 @@ body.side-resizing { user-select: none; cursor: row-resize; }
   background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
   border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
 }
+.lm-head { display: flex; align-items: center; gap: 4px; margin: 6px 6px 4px; flex: none; }
+.lm-close {
+  width: 26px; height: 26px; padding: 4px; flex: none; border: none; border-radius: 5px; background: none; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--vscode-icon-foreground, var(--vscode-foreground));
+}
+.lm-close svg { width: 16px; height: 16px; }
+.lm-close:hover { background: var(--vscode-toolbar-hoverBackground); }
 .list-menu .mp-search {
-  margin: 6px 6px 4px; padding: 6px 10px; border-radius: 5px; font-size: 13px;
+  flex: 1; min-width: 0; margin: 0; padding: 6px 10px; border-radius: 5px; font-size: 13px;
   background: var(--input-bg); border: 1px solid var(--accent);
 }
 .list-menu .mp-list { flex: 1; padding: 2px 4px 6px; font-size: 13px; }

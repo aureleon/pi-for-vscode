@@ -80,13 +80,17 @@ export class TreeMenu {
     this.root = document.createElement("div");
     this.root.className = "list-menu tree-menu hidden";
     this.root.innerHTML = `
-      <input class="mp-search" spellcheck="false" placeholder="Session tree · search entries">
+      <div class="lm-head">
+        <input class="mp-search" spellcheck="false" placeholder="Session tree · search entries">
+        <button class="lm-close" title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 16 16"><path fill="currentColor" d="m8 7.3 3.6-3.6.7.7L8.7 8l3.6 3.6-.7.7L8 8.7l-3.6 3.6-.7-.7L7.3 8 3.7 4.4l.7-.7z"/></svg></button>
+      </div>
       <div class="mp-list tm-list"></div>
       <div class="tm-footer menu-footer"></div>`;
     mount.appendChild(this.root);
     this.search = this.root.querySelector(".mp-search")!;
     this.list = this.root.querySelector(".tm-list")!;
     this.footer = this.root.querySelector(".tm-footer")!;
+    this.root.querySelector(".lm-close")!.addEventListener("click", () => !this.busy && this.hide());
     this.search.addEventListener("input", () => {
       this.sel = 0;
       this.renderList();

@@ -133,6 +133,7 @@ let firstUserText = "";
 
 let stick = true;
 scrollEl.addEventListener("scroll", () => {
+  app.classList.toggle("scrolled", scrollEl.scrollTop > 0);
   stick = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 60;
 });
 let scrollQueued = false;
@@ -171,7 +172,7 @@ function shortPath(p: string): string {
   if (cwd && p.startsWith(cwd + "/")) return p.slice(cwd.length + 1);
   return p;
 }
-const isPathLike = (s: string) => /^(~|\.{1,2})?\/?[\w@.\-]+(\/[\w@.\-]+)+(:\d+(-\d+)?)?$/.test(s) || /^[\w\-]+\.[a-z0-9]{1,6}(:\d+)?$/i.test(s);
+const isPathLike = (s: string) => /^(~|\.{1,2})?\/?[\w@.\-]+(\/[\w@.\-]+)*\/?(:\d+(-\d+)?)?$/.test(s) && s.includes("/") || /^[\w\-]+\.[a-z0-9]{1,6}(:\d+)?$/i.test(s);
 
 /** Make inline code that looks like a path clickable. */
 const COPY_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M4 4V2.5A1.5 1.5 0 0 1 5.5 1h7A1.5 1.5 0 0 1 14 2.5v7a1.5 1.5 0 0 1-1.5 1.5H11v1.5A1.5 1.5 0 0 1 9.5 14h-7A1.5 1.5 0 0 1 1 12.5v-7A1.5 1.5 0 0 1 2.5 4H4zm1 0h4.5A1.5 1.5 0 0 1 11 5.5V10h1.5a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-7a.5.5 0 0 0-.5.5V4zM2.5 5a.5.5 0 0 0-.5.5v7c0 .28.22.5.5.5h7a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-7z"/></svg>`;
@@ -220,6 +221,22 @@ document.addEventListener("click", (e) => {
     const raw = link.dataset.path ?? link.textContent ?? "";
     const m = raw.match(/^(.*?)(?::(\d+)(?:-\d+)?)?$/)!;
     post({ type: "openFile", path: m[1], line: m[2] ? Number(m[2]) : undefined });
+    return;
+  }
+  // Markdown links: web URLs open in the browser, anything else is treated as a path
+  // (relative to the session cwd). Letting the webview follow a relative href resolves it
+  // against the webview origin, which is wrong, especially under Remote-SSH.
+  const a = t.closest("a[href]") as HTMLAnchorElement | null;
+  if (a) {
+    e.preventDefault();
+    const href = a.getAttribute("href") ?? "";
+    if (/^[a-z][\w+.-]*:/i.test(href) && !/^file:/i.test(href)) post({ type: "openExternal", url: href });
+    else {
+      let p = decodeURI(href.replace(/^file:\/\//i, "").replace(/#.*$/, ""));
+      const m = p.match(/^(.*?)(?::(\d+)(?:-\d+)?)?$/)!;
+      p = m[1];
+      if (p) post({ type: "openFile", path: p, line: m[2] ? Number(m[2]) : undefined });
+    }
   }
 });
 
@@ -1649,8 +1666,12 @@ class ListMenu {
   private showArchived = false;
 
   constructor() {
-    this.root.innerHTML = `<input class="mp-search" spellcheck="false"><div class="mp-list"></div><div class="menu-footer"></div>`;
+    this.root.innerHTML =
+      `<div class="lm-head"><input class="mp-search" spellcheck="false">` +
+      `<button class="lm-close" title="Close (Esc)" aria-label="Close">${I.close}</button></div>` +
+      `<div class="mp-list"></div><div class="menu-footer"></div>`;
     this.search = this.root.querySelector(".mp-search")!;
+    this.root.querySelector(".lm-close")!.addEventListener("click", () => this.hide());
     this.list = this.root.querySelector(".mp-list")!;
     this.footer = this.root.querySelector(".menu-footer")!;
     this.search.addEventListener("input", () => {
