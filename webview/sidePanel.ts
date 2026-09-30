@@ -23,6 +23,8 @@ export interface SideCommandConfig {
 export interface SideDeps {
   post(m: any): void;
   md(s: string): string;
+  /** Markdown for user-typed text (keeps single line breaks). */
+  mdUser?(s: string): string;
   escapeHtml(s: string): string;
   linkify(el: HTMLElement): void;
   onOpenChange(open: boolean): void;
@@ -412,8 +414,8 @@ export class SidePanel {
     }
     for (const t of this.turns) {
       const q = document.createElement("div");
-      q.className = "sp-q";
-      q.textContent = t.question;
+      q.className = "sp-q md";
+      q.innerHTML = (this.deps.mdUser ?? md)(t.question);
       this.body.appendChild(q);
       const a = document.createElement("div");
       a.className = "sp-a";

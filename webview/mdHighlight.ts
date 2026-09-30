@@ -9,6 +9,9 @@
  *   bold   → faux-bold text-shadow (no font-weight change)
  *   italic → per-word skew via inline-block transform (layout width unchanged)
  *   code   → background tint + colour (no font-family change)
+ *   fenced code blocks → each line is a full-width inline-block with the code
+ *     background (box-shadow extends it sideways), so the block reads as one
+ *     shaded region; empty lines get a zero-width space so they keep a background.
  */
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -56,16 +59,34 @@ export function highlightMarkdown(src: string): string {
   const lines = src.split("\n");
   const out: string[] = [];
   let fence: string | null = null;
+  // Line indexes that belong to a fenced block (fences included), to mark first/last lines.
+  const inBlock: boolean[] = [];
+  {
+    let f: string | null = null;
+    lines.forEach((line, n) => {
+      const m = line.match(/^\s*(`{3,}|~{3,})/);
+      if (m) {
+        inBlock[n] = true;
+        if (!f) f = m[1][0];
+        else if (m[1][0] === f) f = null;
+      } else inBlock[n] = !!f;
+    });
+  }
+  const blockLine = (n: number, html: string) => {
+    const first = !inBlock[n - 1];
+    const last = !inBlock[n + 1];
+    return `<span class="md-bl${first ? " first" : ""}${last ? " last" : ""}">${html || "\u200b"}</span>`;
+  };
   lines.forEach((line, n) => {
-    const f = line.match(/^\s*(`{3,}|~{3,})/);
+    const f = line.match(/^(\s*)(`{3,}|~{3,})(.*)$/);
     if (f) {
-      if (!fence) fence = f[1][0];
-      else if (f[1][0] === fence) fence = null;
-      out.push(`<span class="md-fence">${esc(line)}</span>`);
+      if (!fence) fence = f[2][0];
+      else if (f[2][0] === fence) fence = null;
+      out.push(blockLine(n, `${esc(f[1])}${mark(f[2])}<span class="md-lang">${esc(f[3])}</span>`));
       return;
     }
     if (fence) {
-      out.push(`<span class="md-codeblock">${esc(line)}</span>`);
+      out.push(blockLine(n, `<span class="md-codeblock">${esc(line)}</span>`));
       return;
     }
     let m: RegExpMatchArray | null;
