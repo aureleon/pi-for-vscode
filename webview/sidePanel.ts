@@ -1,4 +1,5 @@
 import { SPINNER } from "./spinner";
+import { fmtDuration } from "./duration";
 
 /**
  * Side panel for "side conversation" extensions such as pi-btw.
@@ -365,7 +366,7 @@ export class SidePanel {
     this.timer = window.setInterval(() => {
       const els = this.body.querySelectorAll<HTMLElement>(".sp-pending-time");
       if (!els.length) return clearInterval(this.timer);
-      els.forEach((el) => (el.textContent = `${Math.round((Date.now() - Number(el.dataset.start)) / 1000)}s`));
+      els.forEach((el) => (el.textContent = fmtDuration(Date.now() - Number(el.dataset.start))));
     }, 1000);
   }
 
