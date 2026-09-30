@@ -12,6 +12,7 @@ import { completePath } from "./pathComplete";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
 const RECENT_MODELS_KEY = "pi.recentModels";
+const ARCHIVED_SESSIONS_KEY = "pi.archivedSessions";
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g;
 export const stripAnsi = (s: string) => (s ?? "").replace(ANSI_RE, "");
 
@@ -349,6 +350,12 @@ export class PiController implements vscode.Disposable {
           await this.req({ type: "prompt", message: `/vscode:label ${JSON.stringify({ entryId: m.id, label: m.label ?? "" })}` });
           await this.openTree("", m.id, true);
           break;
+        case "listAction":
+          if (m.kind === "session" && (m.action === "archive" || m.action === "unarchive")) {
+            await this.setArchived(m.id, m.action === "archive");
+            await this.pickSession(true);
+          }
+          break;
         case "listPick":
           await this.onListPick(m.kind, m.id);
           break;
@@ -661,9 +668,22 @@ export class PiController implements vscode.Disposable {
     if (text) this.post({ type: "insertText", text, replace: true });
   }
 
-  async pickSession() {
+  /** Session files hidden from the resume list (VS Code-only; the files stay on disk). */
+  private get archivedSessions(): Set<string> {
+    return new Set(this.context.globalState.get<string[]>(ARCHIVED_SESSIONS_KEY, []));
+  }
+
+  private async setArchived(file: string, archived: boolean) {
+    const set = this.archivedSessions;
+    if (archived) set.add(file);
+    else set.delete(file);
+    await this.context.globalState.update(ARCHIVED_SESSIONS_KEY, [...set]);
+  }
+
+  async pickSession(refresh = false) {
     const dir = this.state.sessionFile ? path.dirname(this.state.sessionFile) : defaultSessionDir(this.cwd);
-    const sessions = (await listSessions(dir)).filter((s) => s.messageCount > 0 || s.file === this.state.sessionFile);
+    const sessions = (await listSessions(dir, 150)).filter((s) => s.messageCount > 0 || s.file === this.state.sessionFile);
+    const archived = this.archivedSessions;
     this.host.reveal();
     this.post({
       type: "openList",
@@ -677,7 +697,9 @@ export class PiController implements vscode.Disposable {
         group: dayGroup(s.mtime),
         search: [s.name, s.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
         current: s.file === this.state.sessionFile,
+        archived: s.file !== this.state.sessionFile && archived.has(s.file),
       })),
+      refresh,
     });
   }
 

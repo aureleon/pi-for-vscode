@@ -1585,14 +1585,32 @@ const picker = new ModelPicker();
 
 // ------------------------------------------------------------------ dropdown list (sessions, fork)
 
-interface ListItem { id: string; label: string; meta?: string; cols?: string[]; group?: string; search?: string; current?: boolean }
+interface ListItem {
+  id: string;
+  label: string;
+  meta?: string;
+  cols?: string[];
+  group?: string;
+  search?: string;
+  current?: boolean;
+  /** Hidden unless "Show archived" is on; rows then offer Unarchive. */
+  archived?: boolean;
+}
 
-/** Header-anchored dropdown styled like the model menu; replaces VS Code's global QuickPick. */
+const ARCHIVE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13v3.5h-1V14h-11V5.5h-1V2zm1 1v1.5h11V3h-11zm1 2.5V13h9V5.5h-9zM6 7h4v1H6V7z"/></svg>`;
+const UNARCHIVE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13v3.5h-1V14h-11V5.5h-1V2zm1 1v1.5h11V3h-11zm1 2.5V13h9V5.5h-9zM8 6.3l2.4 2.4-.7.7L8.5 8.2V12h-1V8.2L6.3 9.4l-.7-.7L8 6.3z"/></svg>`;
+
+/**
+ * Header-anchored navigator for sessions (/resume) and /fork. Shares its look with the
+ * tree navigator (webview/treeMenu.ts): same box, search field, row metrics and footer.
+ * Sessions can be archived: hidden from the list (kept on disk, still resumable by pi).
+ */
 class ListMenu {
   open = false;
   private root = $("list-menu");
   private search!: HTMLInputElement;
   private list!: HTMLElement;
+  private footer!: HTMLElement;
   private kind = "";
   get kindOpen() {
     return this.open ? this.kind : "";
@@ -1601,11 +1619,13 @@ class ListMenu {
   private flat: ListItem[] = [];
   private sel = 0;
   private emptyText = "";
+  private showArchived = false;
 
   constructor() {
-    this.root.innerHTML = `<input class="mp-search" spellcheck="false"><div class="mp-list"></div>`;
+    this.root.innerHTML = `<input class="mp-search" spellcheck="false"><div class="mp-list"></div><div class="menu-footer"></div>`;
     this.search = this.root.querySelector(".mp-search")!;
     this.list = this.root.querySelector(".mp-list")!;
+    this.footer = this.root.querySelector(".menu-footer")!;
     this.search.addEventListener("input", () => {
       this.sel = 0;
       this.render();
@@ -1614,28 +1634,38 @@ class ListMenu {
       const n = this.flat.length;
       if (e.key === "ArrowDown" && n) { this.sel = (this.sel + 1) % n; this.render(); e.preventDefault(); }
       else if (e.key === "ArrowUp" && n) { this.sel = (this.sel - 1 + n) % n; this.render(); e.preventDefault(); }
+      else if (e.key === "PageDown" && n) { this.sel = Math.min(n - 1, this.sel + 10); this.render(); e.preventDefault(); }
+      else if (e.key === "PageUp" && n) { this.sel = Math.max(0, this.sel - 10); this.render(); e.preventDefault(); }
       else if (e.key === "Enter") { const it = this.flat[this.sel]; if (it) this.choose(it); e.preventDefault(); }
-      else if (e.key === "Escape") { this.hide(); e.preventDefault(); e.stopPropagation(); }
+      else if (e.key === "Backspace" && (e.metaKey || e.ctrlKey) && this.kind === "session") {
+        const it = this.flat[this.sel];
+        if (it && !it.current) this.act(it, it.archived ? "unarchive" : "archive");
+        e.preventDefault();
+      } else if (e.key === "Escape") { this.hide(); e.preventDefault(); e.stopPropagation(); }
     });
     this.root.addEventListener("mousedown", (e) => e.stopPropagation());
-    document.addEventListener("mousedown", (e) => {
+    document.addEventListener("mousedown", () => {
       if (this.open) this.hide();
     });
   }
 
-  show(kind: string, placeholder: string, items: ListItem[], empty = "Nothing here") {
+  show(kind: string, placeholder: string, items: ListItem[], empty = "Nothing here", refresh = false) {
     treeMenu.hide();
     picker.hide(false);
     hidePopup();
+    const keepId = refresh ? this.flat[this.sel]?.id : undefined;
     this.kind = kind;
     this.items = items;
     this.emptyText = empty;
-    this.search.value = "";
+    if (!refresh) {
+      this.search.value = "";
+      this.sel = 0;
+      this.showArchived = false;
+    }
     this.search.placeholder = placeholder;
-    this.sel = 0;
     this.open = true;
     this.root.classList.remove("hidden");
-    this.render();
+    this.render(keepId);
     this.search.focus();
   }
 
@@ -1646,41 +1676,76 @@ class ListMenu {
     input.focus();
   }
 
-  private render() {
+  private render(keepId?: string) {
     const q = this.search.value.trim().toLowerCase();
     const words = q.split(/\s+/).filter(Boolean);
     this.flat = this.items.filter((it) => {
+      if (it.archived && !this.showArchived) return false;
       const hay = `${it.label} ${it.search ?? ""} ${it.meta ?? ""} ${(it.cols ?? []).join(" ")}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
+    if (keepId) {
+      const i = this.flat.findIndex((it) => it.id === keepId);
+      if (i >= 0) this.sel = i;
+    }
     this.sel = Math.min(this.sel, Math.max(0, this.flat.length - 1));
     this.list.innerHTML = "";
     if (!this.flat.length) {
-      this.list.innerHTML = `<div class="mp-empty">${escapeHtml(q ? `No matches for “${q}”` : this.emptyText)}</div>`;
-      return;
+      const allArchived = !q && !this.showArchived && this.items.some((it) => it.archived);
+      this.list.innerHTML = `<div class="mp-empty">${escapeHtml(q ? `No matches for “${q}”` : allArchived ? "All sessions here are archived" : this.emptyText)}</div>`;
     }
+    const archivable = this.kind === "session";
     let group: string | undefined;
     this.flat.forEach((it, i) => {
       if (it.group && it.group !== group) {
         group = it.group;
         this.list.appendChild(el("div", "lm-group", escapeHtml(group)));
       }
-      const row = el("div", `mp-item lm-item${i === this.sel ? " active" : ""}${it.current ? " current" : ""}`);
+      const row = el("div", `mp-item lm-item${i === this.sel ? " active" : ""}${it.current ? " current" : ""}${it.archived ? " archived" : ""}${archivable ? " has-action" : ""}`);
       row.title = it.search || it.label;
       const cols = it.cols ?? (it.meta ? [it.meta] : []);
       row.innerHTML =
         `<span class="lm-dot">${it.current ? "●" : ""}</span>` +
         `<span class="lm-label">${escapeHtml(it.label)}</span>` +
         cols.map((c, j) => `<span class="lm-col lm-col-${j}">${escapeHtml(c)}</span>`).join("");
-      row.addEventListener("mousemove", () => {
-        if (this.sel === i) return;
-        this.sel = i;
-        this.list.querySelectorAll(".mp-item").forEach((r, j) => r.classList.toggle("active", j === i));
-      });
+      if (archivable) {
+        const b = el("button", "lm-action", it.archived ? UNARCHIVE_ICON : ARCHIVE_ICON);
+        b.title = it.current ? "The current session can't be archived" : it.archived ? "Unarchive (⌘⌫)" : "Archive: hide from this list (⌘⌫)";
+        b.disabled = !!it.current;
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.act(it, it.archived ? "unarchive" : "archive");
+        });
+        row.appendChild(b);
+      }
       row.addEventListener("click", () => this.choose(it));
       this.list.appendChild(row);
     });
     (this.list.querySelectorAll(".lm-item")[this.sel] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
+    this.renderFooter();
+  }
+
+  private renderFooter() {
+    const f = this.footer;
+    f.innerHTML = "";
+    const hint = el("div", "menu-hint");
+    const archivedCount = this.items.filter((it) => it.archived).length;
+    hint.textContent = this.kind === "session" ? "Enter to open · ⌘⌫ to archive" : this.kind === "fork" ? "Enter to fork from this message" : "";
+    f.appendChild(hint);
+    if (this.kind === "session" && archivedCount) {
+      const t = el("button", "link menu-toggle", this.showArchived ? "Hide archived" : `Show archived (${archivedCount})`);
+      t.addEventListener("click", () => {
+        const id = this.flat[this.sel]?.id;
+        this.showArchived = !this.showArchived;
+        this.render(id);
+        this.search.focus();
+      });
+      f.appendChild(t);
+    }
+  }
+
+  private act(it: ListItem, action: "archive" | "unarchive") {
+    post({ type: "listAction", kind: this.kind, id: it.id, action });
   }
 
   private choose(it: ListItem) {
@@ -1819,8 +1884,9 @@ window.addEventListener("message", (ev) => {
       treeMenu.setBusy(m.text ?? "");
       break;
     case "openList":
-      if (listMenu.open && m.kind === listMenu.kindOpen) listMenu.hide();
-      else listMenu.show(m.kind, m.placeholder, m.items ?? [], m.empty);
+      if (m.refresh && listMenu.kindOpen === m.kind) listMenu.show(m.kind, m.placeholder, m.items ?? [], m.empty, true);
+      else if (listMenu.open && m.kind === listMenu.kindOpen) listMenu.hide();
+      else if (!m.refresh) listMenu.show(m.kind, m.placeholder, m.items ?? [], m.empty);
       break;
     case "sideDone":
       side.onDone(m.requestId, m.error, m.disposition);
