@@ -19,6 +19,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 
 ### Sessions
 - Resume or fork from a searchable list. Archive a session to hide it from the list.
+- Sessions run in parallel. If you start a new session or open another one while Pi works, the busy session continues in the background. It shows at the top of the session list, and a notification tells you when it finishes or needs an answer.
 - `/tree` moves between branches of a session. It can summarize the branch you leave and label entries.
 - The last session reopens automatically. *Open in New Tab* starts another chat.
 

@@ -27,6 +27,54 @@ function dayGroup(ms: number): string {
   return "Older";
 }
 
+/** Event types that make up in-progress output; replayed after a transcript snapshot. */
+const TAIL_EVENTS = new Set(["message_start", "message_update", "tool_execution_start", "tool_execution_update", "tool_execution_end"]);
+
+/** Extension UI requests that wait for an answer from the user. */
+const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
+
+/** Remove arguments that pin pi to one session, so a new process can open a different one. */
+function withoutSessionArgs(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--continue" || a === "-c" || a.startsWith("--session=") || a.startsWith("--session-id=")) continue;
+    if (a === "--session" || a === "--session-id") {
+      i++;
+      continue;
+    }
+    out.push(a);
+  }
+  return out;
+}
+
+/**
+ * One pi RPC process and the UI state the webview needs to show it. A chat
+ * shows one session at a time; others can keep running in the background.
+ */
+interface Session {
+  pi: PiProcess;
+  state: any;
+  /** Events since the last completed message: the part of a run that `get_messages` does not include yet. */
+  tail: RpcRecord[];
+  /** While a snapshot is being sent, messages for the webview wait here. */
+  queue?: any[];
+  /** Open dialogs (select/confirm/input/editor) by request id. */
+  dialogs: Map<string, RpcRecord>;
+  /** Last status/widget/queue/compaction record per key, replayed when the session is shown again. */
+  ui: Map<string, RpcRecord>;
+  runStartedAt?: number;
+  /** Title reported by the webview (first prompt), used when there is no session name. */
+  webTitle?: string;
+}
+
+interface StartOptions {
+  /** Keep the current session running in the background if it is busy. */
+  keepRunning?: boolean;
+  /** Start a new session instead of resuming one. */
+  fresh?: boolean;
+}
+
 /** Anything that can host the chat webview (sidebar view or editor panel). */
 export interface ChatHost {
   webview: vscode.Webview;
@@ -34,10 +82,16 @@ export interface ChatHost {
   reveal(): void;
 }
 
-/** One pi RPC process bound to one webview. */
+/**
+ * The pi RPC processes of one webview. The webview shows the active session;
+ * sessions that the user switched away from while they were working keep
+ * running in the background until they finish.
+ */
 export class PiController implements vscode.Disposable {
-  private pi?: PiProcess;
-  private state: any = {};
+  /** The session shown in the webview. */
+  private active?: Session;
+  /** Busy sessions the user switched away from. */
+  private background = new Set<Session>();
   private disposables: vscode.Disposable[] = [];
   private webviewReady = false;
   private outbox: any[] = [];
@@ -64,30 +118,54 @@ export class PiController implements vscode.Disposable {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
   }
 
+  private get pi(): PiProcess | undefined {
+    return this.active?.pi;
+  }
+
+  private get state(): any {
+    return this.active?.state ?? {};
+  }
+
   get isRunning(): boolean {
     return !!this.state.isStreaming;
   }
 
+  /** Id of a session in the session list: its file, else (for `--no-session`) its id. */
+  private sessionKey(s: Session): string {
+    return s.state.sessionFile ?? `bg:${s.state.sessionId}`;
+  }
+
+  private titleOf(s: Session): string {
+    return s.state.sessionName || s.webTitle || "Untitled session";
+  }
+
   // ---------------------------------------------------------------- process
 
-  async start(sessionFile?: string, sessionId?: string): Promise<void> {
+  async start(sessionFile?: string, sessionId?: string, opts: StartOptions = {}): Promise<void> {
     if (this.starting) return this.starting;
-    this.starting = this.doStart(sessionFile, sessionId).finally(() => (this.starting = undefined));
+    this.starting = this.doStart(sessionFile, sessionId, opts).finally(() => (this.starting = undefined));
     return this.starting;
   }
 
-  private async doStart(sessionFile?: string, sessionId?: string) {
-    this.pi?.stop();
+  private async doStart(sessionFile?: string, sessionId?: string, opts: StartOptions = {}) {
+    const prev = this.active;
+    if (prev) {
+      if (opts.keepRunning && prev.state.isStreaming && prev.pi.running) this.sendToBackground(prev);
+      else prev.pi.stop();
+      this.active = undefined;
+    }
     const cfg = vscode.workspace.getConfiguration("pi");
     const env = await getShellEnv(cfg.get<boolean>("useLoginShellEnv", true));
     env.PI_VSCODE = "1";
     this.env = env;
     const command = cfg.get<string>("path")?.trim() || "pi";
-    const args = [...(cfg.get<string[]>("args") ?? [])];
+    let args = [...(cfg.get<string[]>("args") ?? [])];
+    // A second process must not continue the session the background one is writing to.
+    if (opts.keepRunning) args = withoutSessionArgs(args);
     // Bridge extension: adds tree navigation (/tree) and labels, which RPC lacks.
     args.push("-e", path.join(this.context.extensionPath, "dist", "pi-bridge.mjs"));
 
-    const resume = sessionFile ?? this.options.sessionFile ??
+    const resume = opts.fresh ? undefined : sessionFile ?? this.options.sessionFile ??
       (this.options.primary && cfg.get<boolean>("resumeLastSession", true)
         ? this.context.workspaceState.get<string>(LAST_SESSION_KEY)
         : undefined);
@@ -101,23 +179,87 @@ export class PiController implements vscode.Disposable {
     }
 
     this.args = args;
+    this.active = this.spawn(command, args, env);
+    this.updateStatus();
+    this.post({ type: "starting" });
+    await this.sendInit("init");
+  }
+
+  private spawn(command: string, args: string[], env: NodeJS.ProcessEnv): Session {
     this.output.appendLine(`[pi] starting: ${command} --mode rpc ${args.join(" ")} (cwd ${this.cwd})`);
     const pi = new PiProcess(command, args, this.cwd, env);
-    this.pi = pi;
-    pi.on("event", (e: RpcRecord) => this.onPiEvent(e));
+    const s: Session = { pi, state: {}, tail: [], dialogs: new Map(), ui: new Map() };
+    pi.on("event", (e: RpcRecord) => this.onPiEvent(s, e));
     pi.on("stderr", (t: string) => this.output.append(t));
     pi.on("exit", (code: number | null, signal: string | null, err?: Error) => {
-      if (this.pi !== pi) return;
       this.output.appendLine(`[pi] exited code=${code} signal=${signal} ${err?.message ?? ""}`);
+      s.state.isStreaming = false;
+      if (this.background.delete(s)) {
+        this.updateStatus();
+        vscode.window.showWarningMessage(`Pi: the background session "${this.titleOf(s)}" exited (code ${code ?? signal}).`);
+        return;
+      }
+      if (this.active !== s) return;
       const hint = (err as any)?.code === "ENOENT"
         ? `Could not find the \`${command}\` executable. Install pi or set "pi.path" in settings.`
         : undefined;
       this.post({ type: "exited", code, signal, hint, stderr: stripAnsi(pi.stderrTail).slice(-3000) });
-      this.statusItem.hide();
+      this.updateStatus();
     });
     pi.start();
-    this.post({ type: "starting" });
-    await this.sendInit("init");
+    return s;
+  }
+
+  /** Keep a busy session running while the webview shows another one. */
+  private sendToBackground(s: Session) {
+    this.background.add(s);
+    this.updateStatus();
+    vscode.window.setStatusBarMessage(`Pi: "${this.titleOf(s)}" keeps running in the background`, 4000);
+  }
+
+  /** Show a background session in the webview again. */
+  private async showBackground(s: Session) {
+    const prev = this.active;
+    this.background.delete(s);
+    if (prev && prev !== s) {
+      if (prev.state.isStreaming && prev.pi.running) this.sendToBackground(prev);
+      else prev.pi.stop();
+    }
+    this.active = s;
+    this.updateStatus();
+    await this.sendInit("reset");
+  }
+
+  /** A background session finished its run: stop its process (the session is on disk) and tell the user. */
+  private onBackgroundSettled(s: Session) {
+    const file = s.state.sessionFile;
+    // Without a session file (`--no-session`) the process is the only copy; keep it.
+    if (file) {
+      this.background.delete(s);
+      s.pi.stop();
+    }
+    this.updateStatus();
+    const title = this.titleOf(s);
+    vscode.window.showInformationMessage(`Pi finished "${title}" in the background.`, "Open").then((pick) => {
+      if (pick !== "Open") return;
+      this.host.reveal();
+      this.openSession(file ?? this.sessionKey(s)).catch((err) => this.post({ type: "error", message: err.message ?? String(err) }));
+    });
+  }
+
+  /** Show the spinner while any session of this chat is working. */
+  private updateStatus() {
+    const busy = [this.active, ...this.background].filter((s) => s?.state.isStreaming).length;
+    if (!busy) {
+      this.statusItem.hide();
+      return;
+    }
+    const bg = [...this.background].filter((s) => s.state.isStreaming).length;
+    this.statusItem.text = busy > 1 ? `$(loading~spin) Pi (${busy})` : "$(loading~spin) Pi";
+    this.statusItem.tooltip = bg
+      ? `Pi is working… (${bg} session${bg === 1 ? "" : "s"} in the background)`
+      : "Pi is working…";
+    this.statusItem.show();
   }
 
   restart() {
@@ -130,8 +272,12 @@ export class PiController implements vscode.Disposable {
   }
 
   private async refreshState() {
+    const s = this.active;
+    if (!s) return;
     try {
-      this.state = await this.req({ type: "get_state" });
+      const state = await this.req({ type: "get_state" });
+      if (this.active !== s) return;
+      s.state = state;
       if (this.state.sessionFile && this.options.primary) {
         this.context.workspaceState.update(LAST_SESSION_KEY, this.state.sessionFile);
       }
@@ -141,21 +287,36 @@ export class PiController implements vscode.Disposable {
   }
 
   private async refreshStats() {
+    const s = this.active;
     try {
       const stats = await this.req({ type: "get_session_stats" });
+      if (this.active !== s) return;
       this.post({ type: "stats", stats });
     } catch {}
   }
 
   /** Send full snapshot (state, commands, transcript) to the webview. */
   private async sendInit(kind: "init" | "reset") {
+    const s = this.active;
+    if (!s) return;
+    // Hold live events until the snapshot is out, then send what the snapshot misses.
+    s.queue = [];
+    let replay: RpcRecord[] = [];
     try {
       const [state, commands, messages] = await Promise.all([
         this.req({ type: "get_state" }),
         this.req({ type: "get_commands" }).catch(() => ({ commands: [] })),
-        this.req({ type: "get_messages" }).catch(() => ({ messages: [] })),
+        this.req({ type: "get_messages" })
+          .then((r) => {
+            // Completed messages are in the snapshot; the unfinished rest of the run is in the tail.
+            replay = [...s.tail];
+            s.queue = (s.queue ?? []).filter((m) => !(m.type === "event" && TAIL_EVENTS.has(m.event?.type)));
+            return r;
+          })
+          .catch(() => ({ messages: [] })),
       ]);
-      this.state = state;
+      if (this.active !== s) return;
+      s.state = state;
       if (state.sessionFile && this.options.primary) {
         this.context.workspaceState.update(LAST_SESSION_KEY, state.sessionFile);
       }
@@ -165,55 +326,101 @@ export class PiController implements vscode.Disposable {
         commands: commands.commands,
         messages: messages.messages,
         cwd: this.cwd,
+        runStartedAt: s.runStartedAt,
       });
+      for (const e of [...s.ui.values(), ...s.dialogs.values(), ...replay]) this.post({ type: "event", event: e });
       this.updateTitle();
+      this.updateStatus();
       this.refreshStats();
     } catch (err: any) {
       this.output.appendLine(`[pi] init failed: ${err.message}`);
+    } finally {
+      const queued = s.queue ?? [];
+      s.queue = undefined;
+      if (this.active === s) for (const m of queued) this.post(m);
     }
   }
 
-  /** Title reported by the webview (session name, else first prompt). */
-  private webTitle?: string;
+  /** Send a message for session `s` to the webview, if it is the one shown. */
+  private emit(s: Session, msg: any) {
+    if (s !== this.active) return;
+    if (s.queue) s.queue.push(msg);
+    else this.post(msg);
+  }
+
 
   private updateTitle() {
-    this.host.setTitle(this.state.sessionName || this.webTitle);
+    this.host.setTitle(this.state.sessionName || this.active?.webTitle);
   }
 
   // ---------------------------------------------------------------- pi -> ui
 
-  private onPiEvent(e: RpcRecord) {
+  private onPiEvent(s: Session, e: RpcRecord) {
+    if (TAIL_EVENTS.has(e.type)) s.tail.push(e);
     switch (e.type) {
       case "extension_ui_request":
-        this.handleExtensionUi(e);
+        this.handleExtensionUi(s, e);
         break;
       case "agent_start":
-        this.state.isStreaming = true;
-        this.statusItem.text = "$(loading~spin) Pi";
-        this.statusItem.tooltip = "Pi is working…";
-        this.statusItem.show();
+        s.state.isStreaming = true;
+        s.runStartedAt = Date.now();
+        s.tail = [];
+        this.updateStatus();
         break;
       case "agent_settled":
-        this.state.isStreaming = false;
-        this.statusItem.hide();
-        this.refreshStats();
-        this.refreshState();
+        s.state.isStreaming = false;
+        s.runStartedAt = undefined;
+        s.tail = [];
+        s.ui.delete("queue");
+        if (this.background.has(s)) {
+          this.onBackgroundSettled(s);
+          return;
+        }
+        this.updateStatus();
+        if (s === this.active) {
+          this.refreshStats();
+          this.refreshState();
+        }
+        break;
+      case "message_end":
+        s.tail = [];
+        break;
+      case "queue_update":
+        s.ui.set("queue", e);
+        break;
+      case "compaction_start":
+        s.ui.set("compaction", e);
+        break;
+      case "compaction_end":
+        s.ui.delete("compaction");
         break;
       case "session_info_changed":
-        this.state.sessionName = e.name;
-        this.updateTitle();
+        s.state.sessionName = e.name;
+        if (s === this.active) this.updateTitle();
         break;
       case "thinking_level_changed":
-        this.state.thinkingLevel = e.level;
+        s.state.thinkingLevel = e.level;
         break;
       case "extension_error":
         this.output.appendLine(`[pi] extension error in ${e.extensionPath} (${e.event}): ${e.error}`);
         break;
     }
-    this.post({ type: "event", event: e });
+    this.emit(s, { type: "event", event: e });
   }
 
-  private handleExtensionUi(e: RpcRecord) {
+  private handleExtensionUi(s: Session, e: RpcRecord) {
+    const shown = s === this.active;
+    if (DIALOG_METHODS.has(e.method)) {
+      s.dialogs.set(e.id, e);
+      if (!shown) {
+        vscode.window.showInformationMessage(`Pi: "${this.titleOf(s)}" is waiting for your answer.`, "Open").then((pick) => {
+          if (pick !== "Open" || !this.background.has(s)) return;
+          this.host.reveal();
+          this.showBackground(s);
+        });
+      }
+      return;
+    }
     switch (e.method) {
       case "notify": {
         const msg = stripAnsi(e.message);
@@ -222,9 +429,15 @@ export class PiController implements vscode.Disposable {
           : e.notifyType === "warning"
             ? vscode.window.showWarningMessage
             : vscode.window.showInformationMessage;
-        fn(`Pi: ${msg}`);
+        fn(shown ? `Pi: ${msg}` : `Pi ("${this.titleOf(s)}"): ${msg}`);
         break;
       }
+      case "setStatus":
+        s.ui.set(`status:${e.statusKey}`, e);
+        break;
+      case "setWidget":
+        s.ui.set(`widget:${e.widgetKey}`, e);
+        break;
       case "setTitle":
         break; // terminal title; the webview shows session names instead
     }
@@ -265,6 +478,7 @@ export class PiController implements vscode.Disposable {
           await this.abort();
           break;
         case "uiResponse":
+          this.active?.dialogs.delete(m.response?.id);
           this.pi?.write({ type: "extension_ui_response", ...m.response });
           break;
         case "builtin":
@@ -292,7 +506,7 @@ export class PiController implements vscode.Disposable {
           await this.setModel(m.provider, m.id);
           break;
         case "title":
-          this.webTitle = m.title;
+          if (this.active) this.active.webTitle = m.title;
           this.updateTitle();
           break;
         case "runCommand":
@@ -357,6 +571,7 @@ export class PiController implements vscode.Disposable {
     const res = await this.req(cmd);
     if (res?.disposition === "handled") this.sendCommandsSoon();
   }
+
 
   private sendCommandsSoon() {
     // Extension commands may change session/model/commands; refresh lightly.
@@ -519,16 +734,16 @@ export class PiController implements vscode.Disposable {
     }
     // Refresh state for the current session id (it may have changed via /new, /resume, /tree…).
     try {
-      this.state = await this.req({ type: "get_state" });
+      const state = await this.req({ type: "get_state" });
+      if (this.active) this.active.state = state;
     } catch {}
     // Hand over by exact session id: `--session-id` resumes that session, or creates it
     // under the same id if nothing was written yet, so reattaching finds the same session.
     const sessionId: string | undefined = this.state.sessionId;
     // Release the session: stop the RPC process before the TUI opens it.
-    const pi = this.pi;
-    this.pi = undefined;
-    pi?.stop();
-    this.statusItem.hide();
+    this.pi?.stop();
+    this.state.isStreaming = false;
+    this.updateStatus();
 
     const title = piTerminalName();
     const terminal = await createPiTerminal(sessionId ? ["--session-id", sessionId] : [], { name: title, cwd: this.cwd });
@@ -574,6 +789,12 @@ export class PiController implements vscode.Disposable {
     if (!this.pi?.running && name !== "restart") await this.start();
     switch (name) {
       case "new": {
+        this.assertNoTerminal();
+        // A busy session keeps working in the background; the new one gets its own process.
+        if (this.state.isStreaming) {
+          await this.start(undefined, undefined, { keepRunning: true, fresh: true });
+          break;
+        }
         const r = await this.req({ type: "new_session" });
         if (!r?.cancelled) await this.sendInit("reset");
         break;
@@ -708,15 +929,31 @@ export class PiController implements vscode.Disposable {
 
   async pickSession(refresh = false) {
     const dir = this.state.sessionFile ? path.dirname(this.state.sessionFile) : defaultSessionDir(this.cwd);
-    const sessions = (await listSessions(dir, 150)).filter((s) => s.messageCount > 0 || s.file === this.state.sessionFile);
+    const listed = await listSessions(dir, 150);
     const archived = this.archivedSessions;
+    const bg = [...this.background];
+    const bgKeys = new Set(bg.map((b) => this.sessionKey(b)));
+    const sessions = listed.filter((s) => (s.messageCount > 0 || s.file === this.state.sessionFile) && !bgKeys.has(s.file));
+    const running = bg.map((b) => {
+      const summary = listed.find((s) => s.file === b.state.sessionFile);
+      const n = summary?.messageCount;
+      return {
+        id: this.sessionKey(b),
+        label: this.titleOf(b),
+        cols: [b.state.isStreaming ? "working" : "idle", n != null ? `${n} msg${n === 1 ? "" : "s"}` : ""],
+        group: "Running in background",
+        search: [this.titleOf(b), summary?.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
+        running: !!b.state.isStreaming,
+        busy: true,
+      };
+    });
     this.host.reveal();
     this.post({
       type: "openList",
       kind: "session",
       placeholder: "Resume a Pi session",
       empty: "No previous sessions for this folder",
-      items: sessions.map((s) => ({
+      items: [...running, ...sessions.map((s) => ({
         id: s.file,
         label: s.name || s.firstMessage?.split("\n")[0].slice(0, 200) || "(empty session)",
         cols: [relativeTime(s.mtime), `${s.messageCount} msg${s.messageCount === 1 ? "" : "s"}`],
@@ -724,7 +961,8 @@ export class PiController implements vscode.Disposable {
         search: [s.name, s.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
         current: s.file === this.state.sessionFile,
         archived: s.file !== this.state.sessionFile && archived.has(s.file),
-      })),
+        running: s.file === this.state.sessionFile && !!this.state.isStreaming,
+      }))],
       refresh,
     });
   }
@@ -732,9 +970,7 @@ export class PiController implements vscode.Disposable {
   /** The user picked an entry in a webview dropdown list. */
   private async onListPick(kind: string, id: string) {
     if (kind === "session") {
-      if (id === this.state.sessionFile) return;
-      const r = await this.req({ type: "switch_session", sessionPath: id });
-      if (!r?.cancelled) await this.sendInit("reset");
+      await this.openSession(id);
     } else if (kind === "fork") {
       const r = await this.req({ type: "fork", entryId: id });
       if (!r?.cancelled) {
@@ -742,6 +978,26 @@ export class PiController implements vscode.Disposable {
         if (r?.text) this.post({ type: "insertText", text: r.text, replace: true });
       }
     }
+  }
+
+  private assertNoTerminal() {
+    if (this.terminal) throw new Error("This session is open in the terminal. Reattach before switching sessions.");
+  }
+
+  /**
+   * Show the session `id` (a session file, or a background session key). A busy
+   * current session keeps running in the background instead of being interrupted.
+   */
+  private async openSession(id: string) {
+    this.assertNoTerminal();
+    const bg = [...this.background].find((b) => this.sessionKey(b) === id);
+    if (bg) return this.showBackground(bg);
+    if (id === this.state.sessionFile && this.pi?.running) return;
+    if (id.startsWith("bg:")) return; // a background session without a file that has since gone away
+    if (!this.pi?.running) return this.start(id);
+    if (this.state.isStreaming) return this.start(id, undefined, { keepRunning: true });
+    const r = await this.req({ type: "switch_session", sessionPath: id });
+    if (!r?.cancelled) await this.sendInit("reset");
   }
 
   /** Open the inline model picker in the webview. */
@@ -828,7 +1084,9 @@ export class PiController implements vscode.Disposable {
   dispose() {
     this.terminal = undefined; // leave a user's terminal session running
     this.pi?.stop();
-    this.pi = undefined;
+    this.active = undefined;
+    for (const s of this.background) s.pi.stop();
+    this.background.clear();
     for (const d of this.disposables) d.dispose();
   }
 }

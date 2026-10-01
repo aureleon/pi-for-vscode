@@ -1639,6 +1639,10 @@ interface ListItem {
   current?: boolean;
   /** Hidden unless "Show archived" is on; rows then offer Unarchive. */
   archived?: boolean;
+  /** The session is working right now (spinner instead of the dot). */
+  running?: boolean;
+  /** Open in a background process; can't be archived. */
+  busy?: boolean;
 }
 
 const ARCHIVE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13v3.5h-1V14h-11V5.5h-1V2zm1 1v1.5h11V3h-11zm1 2.5V13h9V5.5h-9zM6 7h4v1H6V7z"/></svg>`;
@@ -1687,7 +1691,7 @@ class ListMenu {
       else if (e.key === "Enter") { const it = this.flat[this.sel]; if (it) this.choose(it); e.preventDefault(); }
       else if (e.key === "Backspace" && (e.metaKey || e.ctrlKey) && this.kind === "session") {
         const it = this.flat[this.sel];
-        if (it && !it.current) this.act(it, it.archived ? "unarchive" : "archive");
+        if (it && !it.current && !it.busy) this.act(it, it.archived ? "unarchive" : "archive");
         e.preventDefault();
       } else if (e.key === "Escape") { this.hide(); e.preventDefault(); e.stopPropagation(); }
     });
@@ -1753,13 +1757,13 @@ class ListMenu {
       row.title = it.search || it.label;
       const cols = it.cols ?? (it.meta ? [it.meta] : []);
       row.innerHTML =
-        `<span class="lm-dot">${it.current ? "●" : ""}</span>` +
+        `<span class="lm-dot${it.running ? " lm-running" : ""}">${it.running ? SPINNER : it.current ? "●" : ""}</span>` +
         `<span class="lm-label">${escapeHtml(it.label)}</span>` +
         cols.map((c, j) => `<span class="lm-col lm-col-${j}">${escapeHtml(c)}</span>`).join("");
       if (archivable) {
         const b = el("button", "lm-action", it.archived ? UNARCHIVE_ICON : ARCHIVE_ICON);
-        b.title = it.current ? "The current session can't be archived" : it.archived ? "Unarchive (⌘⌫)" : "Archive: hide from this list (⌘⌫)";
-        b.disabled = !!it.current;
+        b.title = it.current ? "The current session can't be archived" : it.busy ? "A running session can't be archived" : it.archived ? "Unarchive (⌘⌫)" : "Archive: hide from this list (⌘⌫)";
+        b.disabled = !!it.current || !!it.busy;
         b.addEventListener("click", (e) => {
           e.stopPropagation();
           this.act(it, it.archived ? "unarchive" : "archive");
@@ -1848,6 +1852,11 @@ function applySnapshot(m: any) {
   resetTranscript();
   for (const msg of m.messages ?? []) renderMessage(msg);
   setRunning(!!state.isStreaming);
+  // A run that started before this snapshot (e.g. a session shown again after running in the background).
+  if (running && m.runStartedAt) {
+    runStart = m.runStartedAt;
+    updateWorking();
+  }
   updateTitle();
   updateModel();
   stick = true;
@@ -1860,11 +1869,14 @@ window.addEventListener("message", (ev) => {
   switch (m.type) {
     case "init":
     case "reset":
+      // The host replays the session's statuses, widgets, queue and open dialogs after the snapshot.
+      statuses.clear();
+      renderStatus();
+      widgets.clear();
+      renderWidgets();
+      renderQueue([], []);
+      compacting = false;
       applySnapshot(m);
-      if (m.type === "reset") {
-        statuses.clear();
-        renderStatus();
-      }
       break;
     case "state":
       state = { ...state, ...m.state };
