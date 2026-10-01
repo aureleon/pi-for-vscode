@@ -45,6 +45,8 @@ interface Turn {
   error?: string;
   requestId?: number;
   startedAt: number;
+  /** The user has opened the panel since this turn arrived (clears the unread badge). */
+  seen?: boolean;
 }
 
 const BTW_FAMILY = /^(btw|side)(:|$)/;
@@ -235,6 +237,7 @@ export class SidePanel {
   // ------------------------------------------------------------ open/close
 
   show() {
+    this.markSeen();
     if (!this.open) {
       this.open = true;
       this.root.classList.remove("hidden");
@@ -247,6 +250,7 @@ export class SidePanel {
 
   hide() {
     if (!this.open) return;
+    this.markSeen();
     this.open = false;
     this.root.classList.add("hidden");
     this.splitter.classList.add("hidden");
@@ -257,8 +261,13 @@ export class SidePanel {
     this.open ? this.hide() : this.show();
   }
 
+  /** Turns the user hasn't looked at yet; 0 while the panel is open. */
   get count() {
-    return this.turns.length;
+    return this.open ? 0 : this.turns.filter((t) => !t.seen).length;
+  }
+
+  private markSeen() {
+    for (const t of this.turns) t.seen = true;
   }
 
   // ------------------------------------------------------------ requests
@@ -294,6 +303,7 @@ export class SidePanel {
     const t = this.turns.find((x) => x.requestId === requestId);
     if (t && t.pending) {
       t.pending = false;
+      t.seen = this.open; // a result that lands while closed is unread
       if (error) t.error = error;
       else if (!t.answer && !t.notes.length && disposition !== "handled") t.notes.push("The command was sent to the main chat.");
       else if (!t.answer && !t.notes.length) t.notes.push("No side answer was produced.");
@@ -329,6 +339,7 @@ export class SidePanel {
       turn.model = data.model;
       turn.usage = data.usage;
       turn.pending = false;
+      turn.seen = this.open;
       if (!pending) this.turns.push(turn);
       // Answers to /btw typed in the main composer also open the panel.
       if (live && !this.open) {
@@ -344,6 +355,7 @@ export class SidePanel {
     this.turns = [];
     this.threadMode = this.mode = "contextual";
     for (const e of entries ?? []) this.applyEntry(e, false);
+    this.markSeen(); // a restored thread isn't new
     this.followCmd = this.threadMode === "tangent" ? "btw:tangent" : this.threadMode === "readonly" ? "btw:ask" : "btw";
     this.nextCmd = this.followCmd;
     this.render();

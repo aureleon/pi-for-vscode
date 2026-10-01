@@ -29,7 +29,7 @@
         {
           "type": "webview",
           "id": "pi.chat",
-          "name": "Session",
+          "name": "Pi Coding Agent",
           "icon": "media/pi-logo.svg"
         }
       ]
@@ -101,48 +101,6 @@
       }
     ],
     "menus": {
-      "view/title": [
-        {
-          "command": "pi.openInTerminal",
-          "when": "view == pi.chat",
-          "group": "navigation@1"
-        },
-        {
-          "command": "pi.toggleSidePanel",
-          "when": "view == pi.chat",
-          "group": "navigation@2"
-        },
-        {
-          "command": "pi.tree",
-          "when": "view == pi.chat",
-          "group": "navigation@3"
-        },
-        {
-          "command": "pi.history",
-          "when": "view == pi.chat",
-          "group": "navigation@4"
-        },
-        {
-          "command": "pi.newSession",
-          "when": "view == pi.chat",
-          "group": "navigation@5"
-        },
-        {
-          "command": "pi.newTerminal",
-          "when": "view == pi.chat",
-          "group": "overflow@0"
-        },
-        {
-          "command": "pi.openInTab",
-          "when": "view == pi.chat",
-          "group": "overflow@1"
-        },
-        {
-          "command": "pi.restart",
-          "when": "view == pi.chat",
-          "group": "overflow@2"
-        }
-      ],
       "editor/context": [
         {
           "command": "pi.addSelection",

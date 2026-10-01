@@ -54,6 +54,25 @@ kbd {
   transition: box-shadow .12s;
 }
 #app.scrolled::before { box-shadow: 0 0 6px 1px var(--vscode-scrollbar-shadow, rgba(0, 0, 0, .5)); }
+/* Sidebar second row under the native "Pi Coding Agent" title: session name left,
+   session actions right. It takes over the scroll shadow from #app::before. */
+.topbar {
+  display: flex; align-items: center; gap: 6px; height: 28px; flex: none; position: relative; z-index: 11;
+  padding: 0 6px 0 12px; border-bottom: 1px solid var(--vscode-panel-border, var(--border));
+  transition: box-shadow .12s;
+}
+body.has-topbar #app.scrolled::before { box-shadow: none; }
+#app.scrolled .topbar { box-shadow: 0 0 6px 1px var(--vscode-scrollbar-shadow, rgba(0, 0, 0, .5)); }
+.topbar-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.topbar-title.placeholder { color: var(--muted); }
+.topbar-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.topbar .sp-icon { position: relative; }
+.topbar .sp-icon.active { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
+.tb-badge {
+  position: absolute; top: -3px; right: -3px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 7px;
+  font-size: 9px; line-height: 13px; text-align: center; font-weight: 600;
+  background: var(--vscode-activityBarBadge-background, var(--accent)); color: var(--vscode-activityBarBadge-foreground, #fff);
+}
 .messages { display: flex; flex-direction: column; }
 .empty { text-align: center; color: var(--muted); margin-top: 18vh; line-height: 1.7; }
 .empty .logo { width: 64px; height: 64px; display: block; margin: 0 auto 10px; }
@@ -577,3 +596,17 @@ body.in-terminal #empty { display: none; }
 
 .popup-icon { width: 14px; height: 14px; flex: none; align-self: center; color: var(--muted); display: inline-flex; }
 .popup-icon svg { width: 14px; height: 14px; }
+.tb-menu {
+  position: absolute; top: calc(100% + 2px); right: 6px; z-index: 40; min-width: 180px; padding: 4px;
+  display: flex; flex-direction: column;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-menu-border, var(--border)); border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, .35);
+}
+.tb-menu button {
+  text-align: left; padding: 4px 10px; border: none; border-radius: 4px; background: none; cursor: pointer; font-size: 12.5px; white-space: nowrap;
+}
+.tb-menu button:hover, .tb-menu button:focus {
+  outline: none; background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+}
