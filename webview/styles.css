@@ -448,6 +448,8 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 .lm-col-1 { min-width: 7ch; }
 .mp-item.active .lm-col { color: inherit; opacity: .75; }
 .lm-dot { font-size: 8px; line-height: 20px; text-align: center; color: var(--vscode-textLink-foreground); }
+.lm-dot.lm-running { font-size: 11px; display: flex; align-items: center; justify-content: center; }
+.lm-dot .spinner { width: 12px; height: 12px; font-size: 12px; }
 .lm-group { font-size: 11.5px; color: var(--muted); padding: 8px 10px 3px 28px; opacity: .8; }
 .lm-group:first-child { padding-top: 4px; }
 .lm-item.archived .lm-label { opacity: .6; font-style: italic; }
