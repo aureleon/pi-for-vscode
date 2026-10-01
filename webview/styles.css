@@ -53,6 +53,20 @@ kbd {
   transition: box-shadow .12s;
 }
 #app.scrolled::before { box-shadow: 0 0 6px 1px var(--vscode-scrollbar-shadow, rgba(0, 0, 0, .5)); }
+/* Sidebar second row under the native "Pi Coding Agent" title: session name left,
+   session actions right. It takes over the scroll shadow from #app::before. */
+.topbar {
+  display: flex; align-items: center; gap: 6px; height: 28px; flex: none; position: relative; z-index: 11;
+  padding: 0 6px 0 12px; border-bottom: 1px solid var(--vscode-panel-border, var(--border));
+  transition: box-shadow .12s;
+}
+body.has-topbar #app.scrolled::before { box-shadow: none; }
+#app.scrolled .topbar { box-shadow: 0 0 6px 1px var(--vscode-scrollbar-shadow, rgba(0, 0, 0, .5)); }
+.topbar-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.topbar-title.placeholder { color: var(--muted); }
+.topbar-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.topbar .sp-icon { position: relative; }
+.topbar .sp-icon.active { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
 .messages { display: flex; flex-direction: column; }
 .empty { text-align: center; color: var(--muted); margin-top: 18vh; line-height: 1.7; }
 .empty .logo { width: 64px; height: 64px; display: block; margin: 0 auto 10px; }
@@ -460,13 +474,20 @@ kbd {
 .menu-footer:empty { display: none; }
 .menu-hint { flex: 1 1 auto; color: var(--muted); display: flex; gap: 6px; align-items: center; min-width: 0; }
 .menu-toggle { margin-left: auto; font-size: 12px; }
-/* Small text buttons in menus and navigators. */
+/* Small text and icon buttons in headers, menus and navigators. */
 .sp-btn {
   height: 22px; padding: 0 7px; border: none; border-radius: 5px; background: none; cursor: pointer;
   color: var(--vscode-icon-foreground, var(--vscode-foreground)); font: inherit; font-size: 12px; white-space: nowrap;
 }
 .sp-btn:hover:not([disabled]) { background: var(--vscode-toolbar-hoverBackground); }
 .sp-btn[disabled] { opacity: .45; cursor: default; }
+.sp-icon {
+  width: 22px; height: 22px; padding: 3px; flex: none; border: none; border-radius: 5px; background: none; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--vscode-icon-foreground, var(--vscode-foreground));
+}
+.sp-icon svg { width: 16px; height: 16px; }
+.sp-icon:hover:not([disabled]) { background: var(--vscode-toolbar-hoverBackground); }
+.sp-icon[disabled] { opacity: .45; cursor: default; }
 .menu-footer .sp-btn { font-size: 12px; padding: 0 10px; }
 .tm-guide { font-family: var(--mono); font-size: 11px; white-space: pre; color: var(--muted); opacity: .6; }
 .tm-mark { text-align: center; color: var(--muted); font-size: 11px; }
@@ -501,3 +522,17 @@ body.in-terminal #empty { display: none; }
 
 .popup-icon { width: 14px; height: 14px; flex: none; align-self: center; color: var(--muted); display: inline-flex; }
 .popup-icon svg { width: 14px; height: 14px; }
+.tb-menu {
+  position: absolute; top: calc(100% + 2px); right: 6px; z-index: 40; min-width: 180px; padding: 4px;
+  display: flex; flex-direction: column;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-menu-border, var(--border)); border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, .35);
+}
+.tb-menu button {
+  text-align: left; padding: 4px 10px; border: none; border-radius: 4px; background: none; cursor: pointer; font-size: 12.5px; white-space: nowrap;
+}
+.tb-menu button:hover, .tb-menu button:focus {
+  outline: none; background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
+}
