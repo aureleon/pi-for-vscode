@@ -37,6 +37,9 @@ const I = {
   send: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 2.5 13.5 8l-.7.7L8.5 4.4V14h-1V4.4L3.2 8.7l-.7-.7z"/></svg>`,
   stop: `<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg>`,
   close: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="m8 7.3 3.6-3.6.7.7L8.7 8l3.6 3.6-.7.7L8 8.7l-3.6 3.6-.7-.7L7.3 8 3.7 4.4l.7-.7z"/></svg>`,
+  terminal: `<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor"/><path d="m4 6 2 2-2 2M7.5 10.5h4" fill="none" stroke="currentColor"/></svg>`,
+  tree: `<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" d="M2.5 3.5h5M4.5 3.5v8h3M4.5 7.5h3M9.5 7.5h4M9.5 11.5h4"/></svg>`,
+  more: `<svg viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.1" fill="currentColor"/><circle cx="8" cy="8" r="1.1" fill="currentColor"/><circle cx="12.5" cy="8" r="1.1" fill="currentColor"/></svg>`,
   brain: `<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" d="M6 2.5a2 2 0 0 0-2 2 2 2 0 0 0-1.5 3 2 2 0 0 0 .5 3.5 2 2 0 0 0 3 2V2.5zM10 2.5a2 2 0 0 1 2 2 2 2 0 0 1 1.5 3 2 2 0 0 1-.5 3.5 2 2 0 0 1-3 2V2.5z"/></svg>`,
 };
 
@@ -44,6 +47,21 @@ const I = {
 
 const app = document.getElementById("app")!;
 app.innerHTML = `
+  <header id="topbar" class="topbar hidden">
+    <span id="topbar-title" class="topbar-title">New session</span>
+    <span class="topbar-actions">
+      <button class="sp-icon" id="tb-terminal" title="Continue Session in Terminal" aria-label="Continue session in terminal">${I.terminal}</button>
+      <button class="sp-icon" id="tb-tree" title="Session Tree (/tree)" aria-label="Session tree">${I.tree}</button>
+      <button class="sp-icon" id="tb-history" title="Resume Session…" aria-label="Resume session">${I.history}</button>
+      <button class="sp-icon" id="tb-new" title="New Session" aria-label="New session">${I.plus}</button>
+      <button class="sp-icon" id="tb-more" title="More Actions…" aria-label="More actions" aria-haspopup="menu">${I.more}</button>
+    </span>
+    <div id="tb-menu" class="tb-menu hidden" role="menu">
+      <button role="menuitem" data-cmd="pi.newTerminal">Open in Terminal</button>
+      <button role="menuitem" data-cmd="pi.openInTab">Open in New Tab</button>
+      <button role="menuitem" data-msg="restart">Restart Agent Process</button>
+    </div>
+  </header>
   <div id="list-menu" class="list-menu hidden"></div>
   <div id="banner" class="banner hidden"></div>
   <main id="scroll" class="scroll">
@@ -821,10 +839,14 @@ function showDialog(r: any) {
 
 // ------------------------------------------------------------------ header / footer
 
-/** The native VS Code view header shows the title; the webview only reports it. */
+/** The sidebar shows the title in its own header row; editor tabs get it reported via the host. */
 let lastTitle: string | undefined;
 function updateTitle() {
   const t = state.sessionName || firstUserText.split("\n")[0].slice(0, 80) || undefined;
+  const titleEl = $("topbar-title");
+  titleEl.textContent = t ?? "New session";
+  titleEl.title = t ?? "";
+  titleEl.classList.toggle("placeholder", !t);
   if (t === lastTitle) return;
   lastTitle = t;
   post({ type: "title", title: t });
@@ -914,6 +936,44 @@ function renderQueue(steering: string[], followUp: string[]) {
     clear.addEventListener("click", () => post({ type: "clearQueue" }));
     q.appendChild(clear);
   }
+}
+
+// Sidebar header row: session name + session actions (replaces the native view toolbar).
+if (document.body.dataset.header) {
+  $("topbar").classList.remove("hidden");
+  document.body.classList.add("has-topbar");
+  $("tb-terminal").addEventListener("click", () => post({ type: "openTerminal" }));
+  $("tb-tree").addEventListener("click", () => post({ type: "builtin", name: "tree", arg: "" }));
+  $("tb-history").addEventListener("click", () => post({ type: "builtin", name: "resume", arg: "" }));
+  $("tb-new").addEventListener("click", () => post({ type: "builtin", name: "new", arg: "" }));
+  const menu = $("tb-menu");
+  const closeMenu = () => menu.classList.add("hidden");
+  $("tb-more").addEventListener("click", (e) => {
+    e.stopPropagation();
+    menu.classList.toggle("hidden");
+    if (!menu.classList.contains("hidden")) menu.querySelector<HTMLElement>("button")?.focus();
+  });
+  menu.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>("button");
+    if (!b) return;
+    closeMenu();
+    if (b.dataset.cmd) post({ type: "runCommand", command: b.dataset.cmd });
+    else if (b.dataset.msg) post({ type: b.dataset.msg });
+  });
+  menu.addEventListener("keydown", (e) => {
+    const items = [...menu.querySelectorAll<HTMLElement>("button")];
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      closeMenu();
+      $("tb-more").focus();
+    }
+  });
+  document.addEventListener("click", (e) => !menu.contains(e.target as Node) && closeMenu());
+  window.addEventListener("blur", closeMenu);
 }
 
 // ------------------------------------------------------------------ composer

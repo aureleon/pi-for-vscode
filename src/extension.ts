@@ -9,7 +9,8 @@ const controllers = new Set<PiController>();
 let sidebar: PiController | undefined;
 let lastActive: PiController | undefined;
 
-function html(webview: vscode.Webview, extUri: vscode.Uri): string {
+/** `header`: render the in-webview session row (sidebar only; editor tabs use their own title bar). */
+function html(webview: vscode.Webview, extUri: vscode.Uri, header = false): string {
   const nonce = crypto.randomBytes(16).toString("base64");
   const script = webview.asWebviewUri(vscode.Uri.joinPath(extUri, "dist", "webview.js"));
   const style = webview.asWebviewUri(vscode.Uri.joinPath(extUri, "webview", "styles.css"));
@@ -30,7 +31,7 @@ function html(webview: vscode.Webview, extUri: vscode.Uri): string {
 <link rel="stylesheet" href="${style}">
 <title>Pi</title>
 </head>
-<body data-logo="${logo}">
+<body data-logo="${logo}"${header ? ' data-header="1"' : ""}>
 <div id="app"></div>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
@@ -51,11 +52,9 @@ class SidebarProvider implements vscode.WebviewViewProvider {
     view.webview.options = webviewOptions(this.context.extensionUri);
     const host: ChatHost = {
       webview: view.webview,
-      // Static "Session" subtitle (package.json view name, so it never flashes) under the
-      // "Pi Coding Agent" container title; the session name goes in the subdued description.
-      setTitle: (t) => {
-        view.description = t || "New session";
-      },
+      // The native title is just "Pi Coding Agent"; the webview's own header row shows
+      // the session name next to the session actions.
+      setTitle: () => {},
       reveal: () => view.show(true),
     };
     // A re-resolved view (e.g. moved to another container) gets a fresh controller
@@ -71,7 +70,7 @@ class SidebarProvider implements vscode.WebviewViewProvider {
       controllers.delete(c);
       if (sidebar === c) sidebar = undefined;
     });
-    view.webview.html = html(view.webview, this.context.extensionUri);
+    view.webview.html = html(view.webview, this.context.extensionUri, true);
   }
 }
 
