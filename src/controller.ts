@@ -429,13 +429,34 @@ export class PiController implements vscode.Disposable {
     }, 300);
   }
 
-  async abort() {
+  /**
+   * Stop the current run. By default, queued messages are not lost: pi would
+   * drop them on abort, so take them out first and send them as the next run
+   * (steering first, then follow-ups). With `resumeQueue: false`, they go
+   * back into the input box instead.
+   */
+  async abort(resumeQueue = true) {
+    let steering: string[] = [];
+    let followUp: string[] = [];
     try {
       const q = await this.req({ type: "clear_queue" });
-      const text = [...(q?.steering ?? []), ...(q?.followUp ?? [])].join("\n\n");
-      if (text) this.post({ type: "restoreQueue", text });
+      steering = q?.steering ?? [];
+      followUp = q?.followUp ?? [];
     } catch {}
     await this.req({ type: "abort" }).catch(() => {});
+    if (!steering.length && !followUp.length) return;
+    if (!resumeQueue || this.terminal || !this.pi?.running) {
+      this.post({ type: "restoreQueue", text: [...steering, ...followUp].join("\n\n") });
+      return;
+    }
+    const [first, ...rest] = steering.length ? [steering.join("\n\n"), ...followUp] : followUp;
+    try {
+      // abort resolves once pi is idle, so the first message starts a new run.
+      await this.req({ type: "prompt", message: first });
+      for (const message of rest) await this.req({ type: "prompt", message, streamingBehavior: "followUp" });
+    } catch (err: any) {
+      this.post({ type: "error", message: err.message ?? String(err) });
+    }
   }
 
   private async bash(command: string, exclude: boolean) {
@@ -554,7 +575,7 @@ export class PiController implements vscode.Disposable {
         "Stop and Open",
       );
       if (choice !== "Stop and Open") return;
-      await this.abort();
+      await this.abort(false);
     }
     // Refresh state for the current session id (it may have changed via /new, /resume, /tree…).
     try {
