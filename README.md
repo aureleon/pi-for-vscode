@@ -40,7 +40,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Archived sessions** stay on disk. Only the list in VS Code hides them, so the pi TUI can still resume them.
 - **`/tree`** needs a command that RPC mode does not have. The extension adds it by loading a small bridge extension into pi (`dist/pi-bridge.mjs`).
 - **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.
-- **The side panel** opens for any command that replies "cannot open its composer outside Pi's TUI". Use `pi.sidePanelCommands` to add more.
+- **The side panel** opens for any command that replies "cannot open its composer outside Pi's TUI". A profile (`webview/sideProfiles.ts`, or `pi.sidePanels`) adds thread modes, header actions, and a thread that is restored from session entries. The entry data uses the fields `question`, `answer`, `thinking`, `model` and `usage`, the same as pi-btw.
 
 ## Built-in slash commands
 
@@ -64,7 +64,8 @@ VS Code apps opened from the Dock often do not get your shell `PATH`. For this r
 | `pi.resumeLastSession` | `true` | Reopen the last session of the workspace. |
 | `pi.useLoginShellEnv` | `true` | Load the environment of your login shell. |
 | `pi.terminalLocation` | `"editor"` | Where terminals open: as an editor tab or in the terminal panel. |
-| `pi.sidePanelCommands` | pi-btw commands | Slash commands that run in the side panel, with an optional `followUp` command and a `title`. |
+| `pi.sidePanels` | `[]` | Side-panel profiles for side-conversation extensions. pi-btw is built in. Use `id: "btw"` to change it, or a new `id` to add an extension. |
+| `pi.sidePanelCommands` | `{}` | Deprecated: use `pi.sidePanels`. Slash commands that run in the side panel, with an optional `followUp` command and a `title`. |
 
 Extensions can check `process.env.PI_VSCODE === "1"` to know that they run inside VS Code.
 

@@ -57,7 +57,7 @@ class SidebarProvider implements vscode.WebviewViewProvider {
       setTitle: () => {},
       setSideState: (open, count) => {
         // Unread side-thread turns show as a badge on the Pi view while the panel is closed.
-        view.badge = !open && count ? { value: count, tooltip: `${count} BTW side-thread message${count === 1 ? "" : "s"}` } : undefined;
+        view.badge = !open && count ? { value: count, tooltip: `${count} side-thread message${count === 1 ? "" : "s"}` } : undefined;
       },
       reveal: () => view.show(true),
     };

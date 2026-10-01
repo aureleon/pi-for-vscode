@@ -10,6 +10,7 @@ Notes for coding agents that work on Pi for VS Code.
 - `src/bridge/piBridge.ts`: pi extension loaded with `pi -e`. It adds hidden `vscode:*` commands (tree navigation, labels). Keep it free of dependencies.
 - `webview/main.ts`: the chat UI, in plain TypeScript and DOM (no framework). `webview/styles.css` holds all styles.
 - `webview/sidePanel.ts`, `webview/treeMenu.ts`, `webview/streamMd.ts`: side panel, `/tree` navigator, streaming markdown.
+- `webview/sideProfiles.ts`: side-panel profiles (pi-btw is built in) and the merge with `pi.sidePanels`. It is plain data with no DOM, so the host imports it too. Put details of one extension here, not in `sidePanel.ts`.
 - `tools/build-icon-font.mjs`: builds `media/pi-icons.woff`. Run `npm run build:icons`.
 
 ## Checks

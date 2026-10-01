@@ -192,30 +192,88 @@
           "default": true,
           "description": "Load environment variables (PATH, API keys, \u2026) from your login shell before starting pi."
         },
+        "pi.sidePanels": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Side-panel profiles for side-conversation extensions. The **pi-btw** profile (`id: \"btw\"`) is built in. A profile with the same `id` changes it: its fields replace the built-in ones, and `commands` and `modes` are merged. A profile with a new `id` adds an extension. Commands without a profile that reply *\"cannot open its composer outside Pi's TUI\"* still open a plain panel.",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+              "id": { "type": "string", "description": "Profile id. Use \"btw\" to change the built-in pi-btw profile." },
+              "title": { "type": "string", "description": "Panel title and the tag of transcript links." },
+              "commands": {
+                "type": "object",
+                "description": "Slash commands (without the leading /) that open the panel.",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "send": { "type": "string", "description": "Command sent for the first message. Defaults to the command itself." },
+                    "followUp": { "type": "string", "description": "Command for follow-up messages typed in the panel." },
+                    "mode": { "type": "string", "description": "Thread mode this command selects (a key of `modes`)." },
+                    "newThread": { "type": "boolean", "description": "The command starts a new thread: clear the visible thread." },
+                    "title": { "type": "string", "description": "Panel title for this command." }
+                  }
+                }
+              },
+              "defaultCommand": { "type": "string", "description": "Command used when a live thread entry opens the panel. Defaults to the first command." },
+              "modes": {
+                "type": "object",
+                "description": "Thread modes.",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "label": { "type": "string", "description": "Short label next to the panel title." },
+                    "hint": { "type": "string", "description": "Line under the empty-thread text." },
+                    "followUp": { "type": "string", "description": "Command for follow-ups in this mode." }
+                  }
+                }
+              },
+              "defaultMode": { "type": "string" },
+              "actions": {
+                "type": "array",
+                "description": "Header buttons that run commands of the extension.",
+                "items": {
+                  "type": "object",
+                  "required": ["label", "command"],
+                  "properties": {
+                    "label": { "type": "string" },
+                    "command": { "type": "string", "description": "Command to run, without the leading /." },
+                    "tooltip": { "type": "string" },
+                    "useInput": { "type": "boolean", "description": "Append the text in the panel's input box as arguments." },
+                    "needsAnswer": { "type": "boolean", "description": "Enable only when the thread has an answer." },
+                    "needsTurns": { "type": "boolean", "description": "Enable only when the thread is not empty." },
+                    "status": { "type": "string", "description": "Status text while the command runs." },
+                    "icon": { "type": "string", "enum": ["trash"] },
+                    "separator": { "type": "boolean", "description": "Put a separator before this button." }
+                  }
+                }
+              },
+              "entries": {
+                "type": "object",
+                "description": "Custom session entries that hold the thread, so the panel can show and restore it.",
+                "properties": {
+                  "thread": { "type": "string", "description": "customType of one question/answer entry." },
+                  "reset": { "type": "string", "description": "customType of the entry that clears the thread." },
+                  "note": { "type": "string", "description": "customType of the custom message that the main transcript shows as a link to the panel." },
+                  "fields": {
+                    "type": "object",
+                    "description": "Field names in the entry data, if they differ from question, answer, thinking, model, usage, mode, timestamp.",
+                    "additionalProperties": { "type": "string" }
+                  }
+                }
+              },
+              "hideNotices": { "type": "array", "items": { "type": "string" }, "description": "Regular expressions for notices that the panel does not show." },
+              "stripFlags": { "type": "array", "items": { "type": "string" }, "description": "Flags removed from the question before it is shown." },
+              "emptyText": { "type": "string", "description": "Text of an empty thread." },
+              "placeholder": { "type": "string" },
+              "followUpPlaceholder": { "type": "string" }
+            }
+          }
+        },
         "pi.sidePanelCommands": {
           "type": "object",
-          "default": {
-            "btw": {
-              "followUp": "btw",
-              "title": "BTW"
-            },
-            "side": {
-              "followUp": "btw",
-              "title": "BTW"
-            },
-            "btw:new": {
-              "followUp": "btw",
-              "title": "BTW"
-            },
-            "btw:tangent": {
-              "followUp": "btw:tangent",
-              "title": "BTW"
-            },
-            "btw:ask": {
-              "followUp": "btw:ask",
-              "title": "BTW"
-            }
-          },
+          "default": {},
           "additionalProperties": {
             "type": "object",
             "properties": {
@@ -229,7 +287,8 @@
               }
             }
           },
-          "markdownDescription": "Slash commands that open the **side panel** instead of running in the main chat. A bare `/cmd` opens the panel composer. `/cmd text` opens the panel and sends the text. Follow-ups typed in the panel are sent as `/<followUp> text`. Commands that reply *\"cannot open its composer outside Pi's TUI\"* are detected and added automatically."
+          "markdownDeprecationMessage": "Use `#pi.sidePanels#`. Entries here still work: a command of a profile gets the new follow-up and title, any other command gets a plain panel.",
+          "markdownDescription": "Slash commands that open the **side panel** instead of running in the main chat. Replaced by `#pi.sidePanels#`."
         },
         "pi.terminalLocation": {
           "type": "string",

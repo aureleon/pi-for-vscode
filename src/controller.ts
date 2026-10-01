@@ -9,6 +9,7 @@ import { agentDir, scopeModels } from "./modelScope";
 import { slimTree } from "./treeData";
 import { createPiTerminal, piTerminalName } from "./piTerminal";
 import { completePath } from "./pathComplete";
+import { mergeProfiles, threadEntryTypes, type SideProfile } from "../webview/sideProfiles";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
 const RECENT_MODELS_KEY = "pi.recentModels";
@@ -24,8 +25,6 @@ export const stripAnsi = (s: string) => (s ?? "").replace(ANSI_RE, "");
  */
 export const COMPOSER_REFUSAL_RE = /(composer|overlay|modal|editor)[^.]*outside (of )?pi'?s? tui|requires (pi'?s? )?(the )?tui|only (available|works) in (the )?tui|pass the (question|prompt|text) inline/i;
 
-/** Custom-entry prefixes whose entries are forwarded to the webview side panel on init. */
-const SIDE_ENTRY_PREFIXES = ["btw-"];
 
 /** Bucket a timestamp into Today / Yesterday / This week / Older for list grouping. */
 function dayGroup(ms: number): string {
@@ -342,7 +341,7 @@ export class PiController implements vscode.Disposable {
         commands: commands.commands,
         messages: messages.messages,
         sideEntries,
-        sideCommands: vscode.workspace.getConfiguration("pi").get("sidePanelCommands", {}),
+        sideProfiles: this.sideProfiles(),
         cwd: this.cwd,
         runStartedAt: s.runStartedAt,
       });
@@ -366,12 +365,19 @@ export class PiController implements vscode.Disposable {
     else this.post(msg);
   }
 
+  /** Side-panel profiles: built-in ones changed by `pi.sidePanels`, plus legacy `pi.sidePanelCommands`. */
+  private sideProfiles(): SideProfile[] {
+    const cfg = vscode.workspace.getConfiguration("pi");
+    return mergeProfiles(cfg.get<Partial<SideProfile>[]>("sidePanels", []), cfg.get("sidePanelCommands", {}));
+  }
+
   /**
    * Custom entries on the active branch that belong to side-conversation
    * extensions (e.g. pi-btw's thread entries), oldest first, so the side
    * panel can restore its thread after a reload or session switch.
    */
   private async getSideEntries(): Promise<any[]> {
+    const types = new Set(threadEntryTypes(this.sideProfiles()));
     try {
       const { entries, leafId } = await this.req({ type: "get_entries" });
       const byId = new Map<string, any>(entries.map((e: any) => [e.id, e]));
@@ -379,7 +385,7 @@ export class PiController implements vscode.Disposable {
       for (let id = leafId; id && byId.has(id); id = byId.get(id).parentId) branch.push(byId.get(id));
       return branch
         .reverse()
-        .filter((e) => e.type === "custom" && SIDE_ENTRY_PREFIXES.some((p) => String(e.customType).startsWith(p)));
+        .filter((e) => e.type === "custom" && types.has(String(e.customType)));
     } catch {
       return [];
     }

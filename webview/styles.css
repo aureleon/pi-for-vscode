@@ -495,11 +495,11 @@ body.side-resizing { user-select: none; cursor: row-resize; }
   background: var(--input-bg); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--border));
 }
 .sp-composer textarea:focus { border-color: var(--accent); }
-.item.btw-link { cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
-.item.btw-link::before { background: var(--vscode-charts-purple, #a371f7); }
-.btw-tag { font-size: .75em; font-weight: 600; letter-spacing: .04em; padding: 0 5px; border-radius: 3px; background: var(--vscode-charts-purple, #a371f7); color: #fff; flex: none; }
-.btw-q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.item.btw-link:hover .btw-q { text-decoration: underline; }
+.item.side-link { cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+.item.side-link::before { background: var(--vscode-charts-purple, #a371f7); }
+.side-tag { font-size: .75em; font-weight: 600; letter-spacing: .04em; padding: 0 5px; border-radius: 3px; background: var(--vscode-charts-purple, #a371f7); color: #fff; flex: none; }
+.side-q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item.side-link:hover .side-q { text-decoration: underline; }
 
 /* ---------------------------------------------------------------- navigators: sessions (/resume, /fork) and tree (/tree)
    Both share one look: full-height box under the header, 13px rows (28px tall),

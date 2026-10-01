@@ -1,25 +1,21 @@
 import { SPINNER } from "./spinner";
 import { fmtDuration } from "./duration";
+import { BTW_PROFILE, simpleProfile, type SideAction, type SideCommandConfig, type SideProfile } from "./sideProfiles";
 
 /**
  * Side panel for "side conversation" extensions such as pi-btw.
  *
  * In Pi's TUI these extensions open an overlay composer. In RPC mode they refuse
  * to open it ("cannot open its composer outside Pi's TUI") and only accept an
- * inline question. This panel stands in for that overlay:
+ * inline question. This panel stands in for that overlay. A profile
+ * (webview/sideProfiles.ts) says how one extension works:
  *
- *  - a bare `/btw` (or any configured / auto-detected command) opens the panel's composer;
- *  - `/btw question` opens the panel and sends the question;
+ *  - a bare `/cmd` (a profile command, or one learned from a refusal) opens the panel's composer;
+ *  - `/cmd question` opens the panel and sends the question;
  *  - follow-ups typed in the panel are sent as `/<followUp> text`;
- *  - pi-btw's persisted thread entries (`btw-thread-entry`, `btw-thread-reset`)
- *    fill the transcript live and restore it after reloads;
- *  - Inject / Summarize / New / Clear map to pi-btw's lifecycle commands.
+ *  - the profile's persisted thread entries fill the transcript live and restore it after reloads;
+ *  - the profile's actions (for pi-btw: Inject, Summarize, Clear) are header buttons.
  */
-
-export interface SideCommandConfig {
-  followUp?: string;
-  title?: string;
-}
 
 export interface SideDeps {
   post(m: any): void;
@@ -47,16 +43,15 @@ interface Turn {
   startedAt: number;
   /** The user has opened the panel since this turn arrived (clears the unread badge). */
   seen?: boolean;
+  /** Id of the profile the turn was sent with; a thread entry only completes a turn of its own profile. */
+  profile?: string;
 }
-
-const BTW_FAMILY = /^(btw|side)(:|$)/;
 
 // Codicon-style 16px icons for the header toolbar (matches VS Code's view title actions).
 const ICON = {
   trash: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M10 3h3v1h-1v9.5a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 4 13.5V4H3V3h3V2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1zM7 2v1h2V2H7zM5 4v9.5c0 .28.22.5.5.5h5a.5.5 0 0 0 .5-.5V4H5zm1.5 2h1v6h-1V6zm2 0h1v6h-1V6z"/></svg>`,
   close: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="m8 7.3 3.6-3.6.7.7L8.7 8l3.6 3.6-.7.7L8 8.7l-3.6 3.6-.7-.7L7.3 8 3.7 4.4l.7-.7z"/></svg>`,
 };
-const MODE_LABEL: Record<string, string> = { contextual: "", tangent: "tangent · no main context", readonly: "read-only" };
 
 export class SidePanel {
   open = false;
@@ -68,17 +63,22 @@ export class SidePanel {
   private modeEl!: HTMLElement;
   private actionsEl!: HTMLElement;
   private turns: Turn[] = [];
-  private mode = "contextual";
+  /** Profiles from the host (built-in ones merged with `pi.sidePanels`). */
+  profiles: SideProfile[] = [BTW_PROFILE];
+  /** The profile the panel shows now. */
+  private profile: SideProfile = BTW_PROFILE;
+  private mode = BTW_PROFILE.defaultMode ?? "";
+  /** Mode of the thread on screen (from the last reset entry). */
+  private threadMode = this.mode;
   /** Command used for the next submission (e.g. `btw:new` right after opening via /btw:new). */
   private nextCmd = "btw";
   /** Command used for follow-ups after the first submission. */
   private followCmd = "btw";
-  private title = "BTW";
+  private title = BTW_PROFILE.title;
   private reqSeq = 0;
   /** Side requests pi has not answered yet (notices are routed here meanwhile). */
   inflight = new Set<number>();
   private timer?: number;
-  config: Record<string, SideCommandConfig> = {};
   /** Commands learned at runtime from composer-refusal notices. */
   learned: Record<string, SideCommandConfig> = {};
 
@@ -189,9 +189,12 @@ export class SidePanel {
 
   // ------------------------------------------------------------ routing
 
-  /** Config entry for a command, if it should be handled by the side panel. */
-  commandConfig(cmd: string): SideCommandConfig | undefined {
-    return this.config[cmd] ?? this.learned[cmd];
+  /** The profile that handles a command, if the side panel should take it over. */
+  profileFor(cmd: string): SideProfile | undefined {
+    const p = this.profiles.find((x) => x.commands[cmd]);
+    if (p) return p;
+    const learned = this.learned[cmd];
+    return learned ? simpleProfile(cmd, learned) : undefined;
   }
 
   /**
@@ -199,39 +202,39 @@ export class SidePanel {
    * side panel took it over.
    */
   interceptMain(cmd: string, args: string): boolean {
-    const cfg = this.commandConfig(cmd);
-    if (!cfg) return false;
-    this.configureFor(cmd, cfg);
+    const profile = this.profileFor(cmd);
+    if (!profile) return false;
+    this.configureFor(profile, cmd);
     this.show();
-    if (args.trim()) this.submit(args, cmd);
+    if (args.trim()) this.submit(args, profile.commands[cmd]?.send ?? cmd);
     return true;
   }
 
   /** Called when an extension reports that it cannot open its composer. */
   learnFromRefusal(cmd: string) {
-    const cfg = { followUp: cmd, title: `/${cmd}` };
+    const cfg: SideCommandConfig = { followUp: cmd, title: `/${cmd}` };
     this.learned[cmd] = cfg;
-    this.configureFor(cmd, cfg);
+    this.configureFor(this.profileFor(cmd) ?? simpleProfile(cmd, cfg), cmd);
     this.show();
   }
 
-  private configureFor(cmd: string, cfg: SideCommandConfig) {
-    const isNewThread = cmd === "btw:new" || cmd === "btw:tangent" || cmd === "btw:ask";
-    this.nextCmd = cmd === "side" ? "btw" : cmd;
-    this.followCmd = cfg.followUp ?? cmd;
-    this.title = cfg.title ?? `/${cmd}`;
-    if (cmd === "btw:tangent") this.mode = "tangent";
-    else if (cmd === "btw:ask") this.mode = "readonly";
-    else if (cmd === "btw" || cmd === "side" || cmd === "btw:new") this.mode = "contextual";
+  private configureFor(profile: SideProfile, cmd: string) {
+    const c = profile.commands[cmd] ?? {};
+    // Another extension's thread: keep only turns that are still waiting for an answer.
+    if (profile.id !== this.profile.id) this.turns = this.turns.filter((t) => t.pending || t.profile === profile.id);
+    this.profile = profile;
+    this.mode = c.mode ?? this.mode;
+    this.nextCmd = c.send ?? cmd;
+    this.followCmd = c.followUp ?? (c.mode ? profile.modes?.[c.mode]?.followUp : undefined) ?? c.send ?? cmd;
+    this.title = c.title ?? profile.title;
     // Starting a new/different thread type: clear the visible (non-pending) thread.
-    if (isNewThread || (BTW_FAMILY.test(cmd) && this.mode !== this.threadMode)) this.turns = this.turns.filter((t) => t.pending);
+    if (c.newThread || (profile.modes && c.mode && this.mode !== this.threadMode)) this.turns = this.turns.filter((t) => t.pending);
     this.render();
   }
 
-  private threadMode = "contextual";
-
-  private get isBtw() {
-    return BTW_FAMILY.test(this.followCmd);
+  /** The profile keeps a persisted thread: answers arrive as entries, not as notices. */
+  private get hasThread() {
+    return !!this.profile.entries?.thread;
   }
 
   // ------------------------------------------------------------ open/close
@@ -276,7 +279,10 @@ export class SidePanel {
     const q = text.trim();
     if (!q) return;
     const requestId = ++this.reqSeq;
-    this.turns.push({ question: q.replace(/(?:^|\s)(?:--save|-s)(?=\s|$)/g, " ").trim(), notes: [], pending: true, requestId, startedAt: Date.now() });
+    const flags = this.profile.stripFlags ?? [];
+    const esc = (f: string) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const shown = flags.length ? q.replace(new RegExp(`(?:^|\\s)(?:${flags.map(esc).join("|")})(?=\\s|$)`, "g"), " ").trim() : q;
+    this.turns.push({ question: shown, notes: [], pending: true, requestId, startedAt: Date.now(), profile: this.profile.id });
     this.inflight.add(requestId);
     this.deps.post({ type: "sidePrompt", text: `/${cmd} ${q}`, requestId });
     this.nextCmd = this.followCmd;
@@ -287,13 +293,13 @@ export class SidePanel {
     this.tick();
   }
 
-  private runLifecycle(cmd: string, useInputAsArgs = true) {
-    const args = useInputAsArgs ? this.input.value.trim() : "";
+  private runAction(a: SideAction) {
+    const args = a.useInput ? this.input.value.trim() : "";
     const requestId = ++this.reqSeq;
     this.inflight.add(requestId);
-    this.deps.post({ type: "sidePrompt", text: `/${cmd}${args ? " " + args : ""}`, requestId });
-    if (useInputAsArgs) this.input.value = "";
-    this.setStatus(cmd === "btw:inject" ? "Injecting thread into the main chat…" : cmd === "btw:summarize" ? "Summarizing thread for the main chat…" : "");
+    this.deps.post({ type: "sidePrompt", text: `/${a.command}${args ? " " + args : ""}`, requestId });
+    if (a.useInput) this.input.value = "";
+    this.setStatus(a.status ?? "");
   }
 
   /** pi finished handling a side-panel command. */
@@ -314,36 +320,46 @@ export class SidePanel {
   /** Extension notices while a side request runs are shown in the panel. */
   onNotify(message: string, level: string) {
     const pending = [...this.turns].reverse().find((t) => t.pending);
-    if (/^(Displayed BTW response|BTW response queued|Saved BTW note|BTW note queued)/.test(message)) return;
+    if ((this.profile.hideNotices ?? []).some((re) => safeRegExp(re)?.test(message))) return;
     if (pending && level === "error") pending.error = message;
-    else if (pending && !this.isBtw) pending.notes.push(message);
+    else if (pending && !this.hasThread) pending.notes.push(message);
     else this.setStatus(message, level);
     this.render();
   }
 
-  // ------------------------------------------------------------ pi-btw entries
+  // ------------------------------------------------------------ thread entries
 
   /** Apply a persisted custom entry (live `entry_appended` or restored from the session). */
   applyEntry(entry: any, live: boolean) {
+    const type = entry?.customType;
+    const owner = type ? this.profiles.find((p) => p.entries?.thread === type || p.entries?.reset === type) : undefined;
+    if (!owner) return;
     const data = entry?.data ?? {};
-    if (entry?.customType === "btw-thread-reset") {
-      this.threadMode = data.mode ?? "contextual";
+    const f = owner.entries?.fields ?? {};
+    const get = (k: "question" | "answer" | "thinking" | "model" | "usage" | "mode" | "timestamp") => data[f[k] ?? k];
+    const switched = owner.id !== this.profile.id;
+    if (switched) this.turns = this.turns.filter((t) => t.pending || t.profile === owner.id);
+    this.profile = owner;
+    if (type === owner.entries?.reset) {
+      this.threadMode = get("mode") ?? owner.defaultMode ?? "";
       this.mode = this.threadMode;
       this.turns = this.turns.filter((t) => t.pending);
       if (live) this.setStatus("");
-    } else if (entry?.customType === "btw-thread-entry" && data.question) {
-      const pending = this.turns.find((t) => t.pending && t.question === data.question) ?? (live ? this.turns.find((t) => t.pending) : undefined);
-      const turn: Turn = pending ?? { question: data.question, notes: [], pending: false, startedAt: data.timestamp ?? Date.now() };
-      turn.answer = data.answer;
-      turn.thinking = data.thinking;
-      turn.model = data.model;
-      turn.usage = data.usage;
+    } else if (get("question")) {
+      const question = String(get("question"));
+      const own = this.turns.filter((t) => t.pending && t.profile === owner.id);
+      const pending = own.find((t) => t.question === question) ?? (live ? own[0] : undefined);
+      const turn: Turn = pending ?? { question, notes: [], pending: false, startedAt: get("timestamp") ?? Date.now(), profile: owner.id };
+      turn.answer = get("answer");
+      turn.thinking = get("thinking");
+      turn.model = get("model");
+      turn.usage = get("usage");
       turn.pending = false;
       turn.seen = this.open;
       if (!pending) this.turns.push(turn);
-      // Answers to /btw typed in the main composer also open the panel.
-      if (live && !this.open) {
-        this.configureFor("btw", this.config.btw ?? { followUp: "btw", title: "BTW" });
+      // Answers to a side command typed in the main composer also open the panel.
+      if (live && (!this.open || switched)) {
+        this.configureFor(owner, owner.defaultCommand ?? Object.keys(owner.commands)[0]);
         this.show();
       }
     } else return;
@@ -353,11 +369,15 @@ export class SidePanel {
   /** Replace the thread with the entries persisted on the active branch. */
   restore(entries: any[]) {
     this.turns = [];
-    this.threadMode = this.mode = "contextual";
+    this.profile = this.profiles[0] ?? BTW_PROFILE;
+    this.threadMode = this.mode = this.profile.defaultMode ?? "";
     for (const e of entries ?? []) this.applyEntry(e, false);
     this.markSeen(); // a restored thread isn't new
-    this.followCmd = this.threadMode === "tangent" ? "btw:tangent" : this.threadMode === "readonly" ? "btw:ask" : "btw";
+    const p = this.profile;
+    const cmd = p.defaultCommand ?? Object.keys(p.commands)[0] ?? "";
+    this.followCmd = p.modes?.[this.threadMode]?.followUp ?? p.commands[cmd]?.followUp ?? cmd;
     this.nextCmd = this.followCmd;
+    this.title = p.title;
     this.render();
   }
 
@@ -396,32 +416,32 @@ export class SidePanel {
 
   render() {
     const { escapeHtml, md } = this.deps;
+    const p = this.profile;
     this.titleEl.textContent = this.title;
-    const modeLabel = this.isBtw ? MODE_LABEL[this.mode] ?? this.mode : "";
+    const mode = p.modes?.[this.mode];
+    const modeLabel = p.modes ? mode?.label ?? this.mode : "";
     this.modeEl.textContent = modeLabel;
     this.modeEl.classList.toggle("hidden", !modeLabel);
 
     this.actionsEl.innerHTML = "";
-    if (this.isBtw) {
-      const has = this.turns.some((t) => t.answer);
-      const inject = this.button("Inject", "Send the full thread to the main agent (/btw:inject). Text in the box is used as instructions.", () => this.runLifecycle("btw:inject"));
-      const summarize = this.button("Summarize", "Send a summary of the thread to the main agent (/btw:summarize). Text in the box is used as instructions.", () => this.runLifecycle("btw:summarize"));
-      const clear = this.button("Clear", "Clear the side thread and start fresh (/btw:clear)", () => this.runLifecycle("btw:clear", false), ICON.trash);
-      inject.disabled = summarize.disabled = !has;
-      clear.disabled = !this.turns.length;
-      const sep = document.createElement("span");
-      sep.className = "sp-sep";
-      this.actionsEl.append(inject, summarize, sep, clear);
+    const hasAnswer = this.turns.some((t) => t.answer);
+    for (const a of p.actions ?? []) {
+      if (a.separator && this.actionsEl.childElementCount) {
+        const sep = document.createElement("span");
+        sep.className = "sp-sep";
+        this.actionsEl.appendChild(sep);
+      }
+      const b = this.button(a.label, a.tooltip ?? `/${a.command}`, () => this.runAction(a), a.icon ? ICON[a.icon] : undefined);
+      b.disabled = (!!a.needsAnswer && !hasAnswer) || (!!a.needsTurns && !this.turns.length);
+      this.actionsEl.appendChild(b);
     }
 
     this.body.innerHTML = "";
     if (!this.turns.length) {
       const empty = document.createElement("div");
       empty.className = "sp-empty";
-      empty.innerHTML = this.isBtw
-        ? `Ask a side question without interrupting the main agent.<br><span class="dim">${
-            this.mode === "tangent" ? "This thread does not see the main conversation." : this.mode === "readonly" ? "This thread can read files but cannot change anything." : "The side thread sees the main conversation's context."
-          }</span>`
+      empty.innerHTML = p.emptyText
+        ? `${escapeHtml(p.emptyText)}${mode?.hint ? `<br><span class="dim">${escapeHtml(mode.hint)}</span>` : ""}`
         : `Type a message for <code>/${escapeHtml(this.followCmd)}</code>.`;
       this.body.appendChild(empty);
     }
@@ -447,8 +467,16 @@ export class SidePanel {
       this.body.appendChild(a);
     }
     this.body.scrollTop = this.body.scrollHeight;
-    this.input.placeholder = this.isBtw
-      ? this.turns.length ? "Follow up on the side…  (Enter to send, Esc to close)" : "Ask a side question…  (Enter to send, Esc to close)"
-      : `Message for /${this.followCmd}…`;
+    const fallback = `Message for /${this.followCmd}…`;
+    this.input.placeholder = this.turns.length ? p.followUpPlaceholder ?? p.placeholder ?? fallback : p.placeholder ?? fallback;
+  }
+}
+
+/** A user-supplied pattern; an invalid one is ignored, not fatal. */
+function safeRegExp(source: string): RegExp | undefined {
+  try {
+    return new RegExp(source);
+  } catch {
+    return undefined;
   }
 }

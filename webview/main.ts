@@ -53,7 +53,7 @@ app.innerHTML = `
     <span id="topbar-title" class="topbar-title">New session</span>
     <span class="topbar-actions">
       <button class="sp-icon" id="tb-terminal" title="Continue Session in Terminal" aria-label="Continue session in terminal">${I.terminal}</button>
-      <button class="sp-icon" id="tb-side" title="Toggle Side Panel (BTW)" aria-label="Toggle side panel">${I.side}<span id="tb-side-badge" class="tb-badge hidden"></span></button>
+      <button class="sp-icon" id="tb-side" title="Toggle Side Panel" aria-label="Toggle side panel">${I.side}<span id="tb-side-badge" class="tb-badge hidden"></span></button>
       <button class="sp-icon" id="tb-tree" title="Session Tree (/tree)" aria-label="Session tree">${I.tree}</button>
       <button class="sp-icon" id="tb-history" title="Resume Session…" aria-label="Resume session">${I.history}</button>
       <button class="sp-icon" id="tb-new" title="New Session" aria-label="New session">${I.plus}</button>
@@ -562,9 +562,12 @@ function renderMessage(msg: any) {
       break;
     }
     case "custom":
-      if (msg.customType === "btw-note") {
-        renderBtwNote(msg);
-        break;
+      {
+        const owner = side.profiles.find((p) => p.entries?.note && p.entries.note === msg.customType);
+        if (owner) {
+          renderSideNote(msg, owner.title);
+          break;
+        }
       }
       if (msg.display) {
         const n = renderNote(textOf(msg.content), "custom");
@@ -580,12 +583,13 @@ function renderMessage(msg: any) {
   }
 }
 
-/** pi-btw notes live in the side panel; the main transcript only shows a compact link. */
-function renderBtwNote(msg: any) {
+/** Side-thread notes (e.g. pi-btw's) live in the side panel; the main transcript only shows a compact link. */
+function renderSideNote(msg: any, tag: string) {
   const q = msg.details?.question ?? textOf(msg.content).replace(/^\*\*Question\*\*\s*/, "").split("\n")[0];
-  const item = addItem("note btw-link");
-  item.innerHTML = `<span class="btw-tag">BTW</span><span class="btw-q"></span>`;
-  (item.querySelector(".btw-q") as HTMLElement).textContent = q;
+  const item = addItem("note side-link");
+  item.innerHTML = `<span class="side-tag"></span><span class="side-q"></span>`;
+  (item.querySelector(".side-tag") as HTMLElement).textContent = tag;
+  (item.querySelector(".side-q") as HTMLElement).textContent = q;
   item.title = "Open in side panel";
   item.addEventListener("click", () => side.show());
 }
@@ -1939,7 +1943,7 @@ window.addEventListener("message", (ev) => {
   switch (m.type) {
     case "init":
     case "reset":
-      side.config = m.sideCommands ?? {};
+      if (m.sideProfiles?.length) side.profiles = m.sideProfiles;
       side.restore(m.sideEntries ?? []);
       updateSideBadge();
       // The host replays the session's statuses, widgets, queue and open dialogs after the snapshot.
