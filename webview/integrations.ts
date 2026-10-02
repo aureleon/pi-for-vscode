@@ -1,13 +1,12 @@
 /**
- * Webview side of integrations. An integration adds support for one pi
- * extension beyond pi's generic RPC extension UI. `main.ts` calls these hooks
- * and never names an extension itself.
+ * Webview side of integrations and workarounds (see `src/integrations.ts`).
+ * `main.ts` calls these hooks and never names a pi extension or a workaround itself.
  *
- * Integrations live in `integrations/<name>/`. `integrations/web.ts` lists them.
- * The host side is in `src/integrations.ts`. The two sides of one integration
- * use the same `id` and talk with `{ type: "ext", id, payload }`.
+ * `integrations/web.ts` and `workarounds/web.ts` list them. The two sides of one
+ * module use the same `id` and talk with `{ type: "ext", id, payload }`.
  */
-import { WEB_INTEGRATIONS as LIST } from "../integrations/web";
+import { WEB_INTEGRATIONS as INTEGRATIONS } from "../integrations/web";
+import { WEB_WORKAROUNDS as WORKAROUNDS } from "../workarounds/web";
 
 /** A command from `get_commands`. */
 export interface PiCommand {
@@ -27,6 +26,20 @@ export interface WebIntegrationApi {
    * button goes into the composer toolbar.
    */
   addToolbarButton(opts: { icon: string; title: string; onClick: () => void }): HTMLButtonElement;
+  /**
+   * Put an item into the composer toolbar, before the context ring. A `menu` goes into the composer
+   * box, where it opens above the input like the model picker (give it the `model-picker` class).
+   */
+  addComposerItem(item: HTMLElement, menu?: HTMLElement): void;
+  /** Close the autocomplete popup, so a menu of the module can open in its place. */
+  hidePopup(): void;
+  /**
+   * Called with the number of monospace characters that fit in a widget box, now and when the view
+   * is resized. The core knows the box geometry.
+   */
+  onWidgetColumns(cb: (columns: number) => void): void;
+  /** Icons of the core, for buttons that should look the same. */
+  icons: { close: string };
   insertText(text: string): void;
   focusComposer(): void;
   /** Markdown for model text. */
@@ -60,9 +73,10 @@ export interface WebIntegrationInstance {
 
 export interface WebIntegration {
   id: string;
-  /** Is the pi extension loaded in this session? The hooks are called only then. */
-  matches(commands: PiCommand[]): boolean;
+  /** Integrations: is the pi extension loaded in this session? The hooks are called only then. Workarounds leave it out. */
+  matches?(commands: PiCommand[]): boolean;
   create(api: WebIntegrationApi): WebIntegrationInstance;
 }
 
-export const WEB_INTEGRATIONS: WebIntegration[] = LIST;
+export const WEB_INTEGRATIONS: WebIntegration[] = INTEGRATIONS;
+export const WEB_WORKAROUNDS: WebIntegration[] = WORKAROUNDS;
