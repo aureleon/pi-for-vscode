@@ -8,6 +8,11 @@ export interface SessionSummary {
   firstMessage?: string;
   mtime: number;
   messageCount: number;
+  /**
+   * File of the session this one came from (`parentSession` in the header). pi sets it for
+   * forks and clones, and extensions set it for sessions they start (for example subagents).
+   */
+  parent?: string;
 }
 
 export function defaultSessionDir(cwd: string): string {
@@ -56,6 +61,13 @@ export async function listSessions(dir: string, limit = 60): Promise<SessionSumm
         const data = await fs.promises.readFile(file, "utf8");
         for (const line of data.split("\n")) {
           if (!line) continue;
+          if (line.startsWith('{"type":"session"')) {
+            try {
+              const h = JSON.parse(line);
+              if (typeof h.parentSession === "string" && h.parentSession) summary.parent = path.resolve(h.parentSession);
+            } catch {}
+            continue;
+          }
           const isInfo = line.includes('"session_info"');
           const isMsg = line.startsWith('{"type":"message"');
           if (!isInfo && !isMsg) continue;
