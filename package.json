@@ -2,7 +2,7 @@
   "name": "pi-for-vscode",
   "displayName": "Pi Coding Agent",
   "description": "Use the Pi coding agent (with all your Pi extensions, skills and prompts) from the VS Code sidebar.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "dhguz",
   "license": "MIT",
   "engines": {
@@ -220,6 +220,14 @@
           "type": "string",
           "default": "Continue as you left off.",
           "description": "The prompt that the Continue button sends. The button shows in an empty composer when the last message is from the model."
+        },
+        "pi.workarounds": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "markdownDescription": "Workarounds for gaps in pi's RPC mode (see `workarounds/` in the source). Set one to `false` to turn it off, for example if a pi update breaks it. Applies to new chats."
         }
       }
     },
