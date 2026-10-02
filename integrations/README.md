@@ -1,6 +1,6 @@
 # Integrations
 
-An integration adds support for one pi extension beyond pi's RPC protocol. The core (`src/`, `webview/`) has no code for a specific pi extension. It calls the hooks of the integrations listed here.
+An integration adds support for one pi extension beyond pi's RPC protocol. A gap in RPC mode that affects every extension is a [workaround](../workarounds/README.md) instead. The core (`src/`, `webview/`) has no code for a specific pi extension. It calls the hooks of the integrations listed here.
 
 ## Layout
 

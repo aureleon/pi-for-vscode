@@ -36,13 +36,13 @@ const configs = [
   },
 ];
 
-// Pi sides of integrations: integrations/<name>/pi.ts → dist/integrations/<name>.mjs, loaded via `pi -e`.
-for (const name of fs.readdirSync("integrations")) {
-  if (!fs.existsSync(`integrations/${name}/pi.ts`)) continue;
+// Pi sides of integrations and workarounds: <dir>/<name>/pi.ts → dist/<dir>/<name>.mjs, loaded via `pi -e`.
+for (const dir of ["integrations", "workarounds"]) for (const name of fs.readdirSync(dir)) {
+  if (!fs.existsSync(`${dir}/${name}/pi.ts`)) continue;
   configs.push({
-    entryPoints: [`integrations/${name}/pi.ts`],
+    entryPoints: [`${dir}/${name}/pi.ts`],
     bundle: true,
-    outfile: `dist/integrations/${name}.mjs`,
+    outfile: `dist/${dir}/${name}.mjs`,
     platform: "node",
     format: "esm",
     target: "node18",
