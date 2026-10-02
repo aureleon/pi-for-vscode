@@ -41,6 +41,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Nested sessions** use the `parentSession` field of the session header, the same as pi's `/resume`. A session whose parent is not in the list shows at the top level.
 - **Archived sessions** stay on disk. Only the list in VS Code hides them, so the pi TUI can still resume them.
 - **`/tree`** needs a command that RPC mode does not have. The extension adds it by loading a small bridge extension into pi (`dist/pi-bridge.mjs`).
+- **Factory widgets** (for example the rpiv-todo list and the pi-subagents bars) are dropped by RPC mode. The bridge renders them to text lines at the width of the chat view and sends them again when they change (at most 4 times a second).
 - **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.
 - **The side panel** opens for any command that replies "cannot open its composer outside Pi's TUI". A profile (`webview/sideProfiles.ts`, or `pi.sidePanels`) adds thread modes, header actions, and a thread that is restored from session entries. The entry data uses the fields `question`, `answer`, `thinking`, `model` and `usage`, the same as pi-btw.
 
@@ -73,7 +74,7 @@ Extensions can check `process.env.PI_VSCODE === "1"` to know that they run insid
 
 ## Limitations (from RPC mode)
 
-TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` works through the bridge extension. For everything else, open the session in the terminal.
+TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` and factory widgets work through the bridge extension. Widgets are read-only: their keys (for example in the pi-subagents fleet list) do nothing. For everything else, open the session in the terminal.
 
 ## Development
 

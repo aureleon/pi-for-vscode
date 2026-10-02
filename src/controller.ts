@@ -123,6 +123,10 @@ interface Session {
   webTitle?: string;
   /** Number of in-flight prompts issued from the side panel; notices are routed there meanwhile. */
   sidePending: number;
+  /** Width the bridge renders factory widgets at, as last told to this process. */
+  widgetColumns?: number;
+  /** The bridge's `vscode:widget-columns` command is loaded (seen in `get_commands`). */
+  canSetColumns?: boolean;
 }
 
 interface StartOptions {
@@ -158,6 +162,8 @@ export class PiController implements vscode.Disposable {
   private starting?: Promise<void>;
   private env: NodeJS.ProcessEnv = process.env;
   private args: string[] = [];
+  /** Widget width in characters, measured by the webview. */
+  private widgetColumns?: number;
   /** Integrated terminal running the pi TUI on this chat's session, while it owns the session. */
   private terminal?: vscode.Terminal;
 
@@ -216,6 +222,7 @@ export class PiController implements vscode.Disposable {
     const cfg = vscode.workspace.getConfiguration("pi");
     const env = await getShellEnv(cfg.get<boolean>("useLoginShellEnv", true));
     env.PI_VSCODE = "1";
+    if (this.widgetColumns) env.PI_VSCODE_WIDGET_COLUMNS = String(this.widgetColumns);
     this.env = env;
     const command = cfg.get<string>("path")?.trim() || "pi";
     let args = [...(cfg.get<string[]>("args") ?? [])];
@@ -247,7 +254,7 @@ export class PiController implements vscode.Disposable {
   private spawn(command: string, args: string[], env: NodeJS.ProcessEnv): Session {
     this.output.appendLine(`[pi] starting: ${command} --mode rpc ${args.join(" ")} (cwd ${this.cwd})`);
     const pi = new PiProcess(command, args, this.cwd, env);
-    const s: Session = { pi, state: {}, tail: [], dialogs: new Map(), ui: new Map(), sidePending: 0 };
+    const s: Session = { pi, state: {}, tail: [], dialogs: new Map(), ui: new Map(), sidePending: 0, widgetColumns: this.widgetColumns };
     pi.on("event", (e: RpcRecord) => this.onPiEvent(s, e));
     pi.on("stderr", (t: string) => this.output.append(t));
     pi.on("exit", (code: number | null, signal: string | null, err?: Error) => {
@@ -394,6 +401,8 @@ export class PiController implements vscode.Disposable {
       this.updateTitle();
       this.updateStatus();
       this.refreshStats();
+      s.canSetColumns = (commands.commands ?? []).some((c: any) => c?.name === "vscode:widget-columns");
+      this.syncWidgetColumns(s);
     } catch (err: any) {
       this.output.appendLine(`[pi] init failed: ${err.message}`);
     } finally {
@@ -566,6 +575,10 @@ export class PiController implements vscode.Disposable {
         case "abort":
           await this.abort();
           break;
+        case "widgetColumns":
+          this.widgetColumns = Math.max(20, Math.round(Number(m.columns) || 0)) || undefined;
+          if (this.active) this.syncWidgetColumns(this.active);
+          break;
         case "uiResponse":
           this.active?.dialogs.delete(m.response?.id);
           this.pi?.write({ type: "extension_ui_response", ...m.response });
@@ -685,6 +698,17 @@ export class PiController implements vscode.Disposable {
       // Late notices from the same command can trail the response slightly.
       setTimeout(() => s.sidePending--, 250);
     }
+  }
+
+  /**
+   * Tell the bridge the widget width when the view was resized. Only when init showed that the
+   * bridge command exists: an unknown slash command would go to the model as a prompt.
+   */
+  private syncWidgetColumns(s: Session) {
+    const columns = this.widgetColumns;
+    if (!columns || s.widgetColumns === columns || !s.canSetColumns || !s.pi.running) return;
+    s.widgetColumns = columns;
+    s.pi.request({ type: "prompt", message: `/vscode:widget-columns ${JSON.stringify({ columns })}` }).catch(() => {});
   }
 
   private sendCommandsSoon() {

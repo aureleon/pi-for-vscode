@@ -1976,6 +1976,38 @@ function hideBanner() {
   $("banner").className = "banner hidden";
 }
 
+// ------------------------------------------------------------------ widget width
+
+/**
+ * The bridge renders factory widgets (todo lists, subagent bars) to text at a fixed width.
+ * Tell the host how many monospace characters fit in a widget box, so they fit the view.
+ */
+function watchWidgetColumns() {
+  const bottom = document.querySelector<HTMLElement>(".bottom")!;
+  const probe = el("div", "widget");
+  probe.style.cssText = "position:absolute;visibility:hidden;left:0;top:0;padding:0;border:0;";
+  probe.textContent = "0".repeat(100);
+  let last = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const measure = () => {
+    document.body.appendChild(probe);
+    const charWidth = probe.getBoundingClientRect().width / 100;
+    probe.remove();
+    // .bottom padding (10px each side) plus the widget's own padding and border.
+    const inner = bottom.clientWidth - 20 - 18;
+    const columns = charWidth > 0 ? Math.floor(inner / charWidth) : 0;
+    if (columns >= 20 && columns !== last) {
+      last = columns;
+      post({ type: "widgetColumns", columns });
+    }
+  };
+  new ResizeObserver(() => {
+    clearTimeout(timer);
+    timer = setTimeout(measure, 300);
+  }).observe(bottom);
+  measure();
+}
+
 // ------------------------------------------------------------------ host messages
 
 /** The VS Code bridge registers internal `vscode:*` commands; never show them. */
@@ -2126,4 +2158,5 @@ window.addEventListener("message", (ev) => {
 updateEmpty();
 resizeInput();
 input.focus();
+watchWidgetColumns(); // before "ready", so the first pi process starts with the right width
 post({ type: "ready" });
