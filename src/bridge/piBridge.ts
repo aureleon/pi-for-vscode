@@ -6,6 +6,8 @@
  * bridge exposes that (plus entry labels) as hidden slash commands whose argument
  * is a JSON payload. The VS Code webview hides `vscode:*` commands from autocomplete.
  *
+ * Workarounds for gaps in RPC mode are separate pi extensions in `workarounds/`.
+ *
  * Kept dependency-free: only the few API shapes used here are typed locally.
  */
 

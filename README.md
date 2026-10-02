@@ -51,6 +51,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Queue edits** take the whole queue out of pi and queue it again, because RPC mode can only add to the queue or clear it. Images in queued messages are not kept. **Send now** stops the run and sends the message as the next run.
 - **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.
 - **Integrations** add support for one pi extension beyond pi's RPC protocol. Each one is in `integrations/<name>/`, and `integrations/host.ts` and `integrations/web.ts` list them. An integration is active only in sessions that load its pi extension. It can also load a small pi extension of its own (`integrations/<name>/pi.ts`), for example the pi-btw workaround for notes that arrive during a run. See [integrations/README.md](integrations/README.md).
+- **Workarounds** fill gaps in pi's RPC mode for every extension. Each one is in `workarounds/<name>/` and loads its own small pi extension. If a pi update breaks one, turn it off with `pi.workarounds`. See [workarounds/README.md](workarounds/README.md).
 
 ## Built-in slash commands
 
@@ -74,6 +75,7 @@ VS Code apps opened from the Dock often do not get your shell `PATH`. For this r
 | `pi.resumeLastSession` | `true` | Reopen the last session of the workspace. |
 | `pi.useLoginShellEnv` | `true` | Load the environment of your login shell. |
 | `pi.terminalLocation` | `"editor"` | Where terminals open: as an editor tab or in the terminal panel. |
+| `pi.workarounds` | `{}` | Turn off a workaround for a gap in RPC mode, for example `{ "<name>": false }`. All are on by default. |
 
 Extensions can check `process.env.PI_VSCODE === "1"` to know that they run inside VS Code.
 
@@ -88,7 +90,7 @@ npm install
 npm run build        # or: npm run watch
 npm run typecheck
 npm run package      # creates pi-for-vscode-<version>.vsix
-code --install-extension pi-for-vscode-0.1.0.vsix
+code --install-extension pi-for-vscode-0.2.0.vsix
 ```
 
 To debug, press <kbd>F5</kbd> with `.vscode/launch.json` ("Run Extension"). Logs from pi's stderr go to the **Pi** output channel.

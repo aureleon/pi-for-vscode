@@ -1,6 +1,6 @@
 import { marked } from "marked";
 import { ansiToHtml, escapeHtml, stripAnsi } from "./ansi";
-import { WEB_INTEGRATIONS, type PiCommand, type WebIntegration, type WebIntegrationInstance } from "./integrations";
+import { WEB_INTEGRATIONS, WEB_WORKAROUNDS, type PiCommand, type WebIntegration, type WebIntegrationInstance } from "./integrations";
 import { TreeMenu } from "./treeMenu";
 import { SPINNER } from "./spinner";
 import { highlightMarkdown } from "./mdHighlight";
@@ -2099,6 +2099,38 @@ function hideBanner() {
   $("banner").className = "banner hidden";
 }
 
+// ------------------------------------------------------------------ widget width
+
+/** Modules that render widgets to text (see `WebIntegrationApi.onWidgetColumns`). */
+const widgetColumnListeners: ((columns: number) => void)[] = [];
+
+/** Count the monospace characters that fit in a widget box, and tell the listeners when it changes. */
+function watchWidgetColumns() {
+  const bottom = document.querySelector<HTMLElement>(".bottom")!;
+  const probe = el("div", "widget");
+  probe.style.cssText = "position:absolute;visibility:hidden;left:0;top:0;padding:0;border:0;";
+  probe.textContent = "0".repeat(100);
+  let last = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const measure = () => {
+    document.body.appendChild(probe);
+    const charWidth = probe.getBoundingClientRect().width / 100;
+    probe.remove();
+    // .bottom padding (10px each side) plus the widget's own padding and border.
+    const inner = bottom.clientWidth - 20 - 18;
+    const columns = charWidth > 0 ? Math.floor(inner / charWidth) : 0;
+    if (columns >= 20 && columns !== last) {
+      last = columns;
+      for (const cb of widgetColumnListeners) cb(columns);
+    }
+  };
+  new ResizeObserver(() => {
+    clearTimeout(timer);
+    timer = setTimeout(measure, 300);
+  }).observe(bottom);
+  measure();
+}
+
 // ------------------------------------------------------------------ host messages
 
 /** The VS Code bridge registers internal `vscode:*` commands; never show them. */
@@ -2260,6 +2292,7 @@ window.addEventListener("message", (ev) => {
 /** Turn integrations on or off when the commands change (a new session or /restart can load other extensions). */
 function updateIntegrations(list: PiCommand[]) {
   for (const x of integrations) {
+    if (!x.def.matches) continue; // workarounds are always active
     const active = x.def.matches(list);
     if (active === x.active) continue;
     x.active = active;
@@ -2267,7 +2300,7 @@ function updateIntegrations(list: PiCommand[]) {
   }
 }
 
-for (const def of WEB_INTEGRATIONS) {
+for (const def of [...WEB_INTEGRATIONS, ...WEB_WORKAROUNDS]) {
   const key = `ext:${def.id}`;
   const hooks = def.create({
     post: (payload) => post({ type: "ext", id: def.id, payload }),
@@ -2286,6 +2319,15 @@ for (const def of WEB_INTEGRATIONS) {
       }
       return b;
     },
+    addComposerItem: (item, menu) => {
+      // Like the other composer toolbar buttons: do not take focus from the input.
+      item.addEventListener("mousedown", (e) => e.preventDefault());
+      $("ctx").before(item);
+      if (menu) $("model-picker").after(menu);
+    },
+    hidePopup: () => hidePopup(),
+    onWidgetColumns: (cb) => void widgetColumnListeners.push(cb),
+    icons: { close: I.close },
     insertText: (text) => insertText(text),
     focusComposer: () => input.focus(),
     md,
@@ -2295,10 +2337,11 @@ for (const def of WEB_INTEGRATIONS) {
     loadState: <T>() => vscode.getState()?.[key] as T | undefined,
     saveState: (value) => vscode.setState({ ...(vscode.getState() ?? {}), [key]: value }),
   });
-  integrations.push({ def, hooks, active: false });
+  integrations.push({ def, hooks, active: !def.matches });
 }
 
 updateEmpty();
 resizeInput();
 input.focus();
+watchWidgetColumns(); // before "ready", so a module can tell the host the width before the first pi process starts
 post({ type: "ready" });

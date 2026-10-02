@@ -2,7 +2,7 @@
   "name": "pi-for-vscode",
   "displayName": "Pi Coding Agent",
   "description": "Use the Pi coding agent (with all your Pi extensions, skills and prompts) from the VS Code sidebar.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "dhguz",
   "license": "MIT",
   "engines": {
@@ -198,6 +198,14 @@
             "Open the pi TUI in the terminal panel"
           ],
           "description": "Where \"Pi: Open Session in Terminal\" opens the pi TUI."
+        },
+        "pi.workarounds": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "markdownDescription": "Workarounds for gaps in pi's RPC mode (see `workarounds/` in the source). Set one to `false` to turn it off, for example if a pi update breaks it. Applies to new chats."
         }
       }
     },
