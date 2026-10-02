@@ -42,6 +42,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Archived sessions** stay on disk. Only the list in VS Code hides them, so the pi TUI can still resume them.
 - **`/tree`** needs a command that RPC mode does not have. The extension adds it by loading a small bridge extension into pi (`dist/pi-bridge.mjs`).
 - **Factory widgets** (for example the rpiv-todo list and the pi-subagents bars) are dropped by RPC mode. The bridge renders them to text lines at the width of the chat view and sends them again when they change (at most 4 times a second).
+- **pi-btw notes** that arrive while the agent runs start an extra model turn in pi-btw 0.7.1. The request ends with an assistant message, and providers without prefill (for example Claude on Bedrock) reject it. The bridge queues these notes without a turn.
 - **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.
 - **The side panel** opens for any command that replies "cannot open its composer outside Pi's TUI". A profile (`webview/sideProfiles.ts`, or `pi.sidePanels`) adds thread modes, header actions, and a thread that is restored from session entries. The entry data uses the fields `question`, `answer`, `thinking`, `model` and `usage`, the same as pi-btw.
 

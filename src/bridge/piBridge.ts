@@ -10,9 +10,14 @@
  * also drafted as an upstream PR; remove the workaround when that lands):
  *  - factory widgets (`ctx.ui.setWidget(key, (tui, theme) => component)`) are dropped
  *    by RPC mode. The bridge renders them to text lines (see `RpcWidgetHost`).
+ *  - pi-btw queues its display-only note as a follow-up that starts a model turn with
+ *    no new user message (see `patchBtwFollowUp`).
  *
  * Kept dependency-free: only the few API shapes used here are typed locally.
  */
+
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 interface NavigateOptions {
   summarize?: boolean;
@@ -174,9 +179,47 @@ function installWidgetHost(ctx: EventContext) {
   widgetHost = host;
 }
 
+// ------------------------------------------------------------------ pi-btw follow-up
+
+const BTW_NOTE_TYPE = "btw-note";
+/** Marks the AgentSession prototype as patched, so a reloaded bridge does not wrap it twice. */
+const BTW_PATCHED = Symbol.for("pi-vscode.btwFollowUp");
+
+/**
+ * pi-btw (0.7.1) queues its display-only `btw-note` with `deliverAs: "followUp"` while the main
+ * agent runs. pi then starts a model turn for it, and pi-btw's own context hook removes the note,
+ * so the request ends with an assistant message. Providers without assistant prefill reject it.
+ * Force `triggerTurn: false`: pi then appends the note at the end of the turn with no model call.
+ */
+async function patchBtwFollowUp() {
+  let mod: any;
+  try {
+    // A plain `import("@earendil-works/pi-coding-agent")` does not resolve from this file. pi's
+    // own entry (`dist/.../cli.js`) sits next to `index.js`, and importing that file URL gives
+    // the same module instance that the running session uses.
+    const cli = process.argv[1] ? realpathSync(process.argv[1]) : "";
+    if (!/cli\.[cm]?js$/.test(cli)) return;
+    mod = await import(new URL("./index.js", pathToFileURL(cli)).href);
+  } catch {
+    return;
+  }
+  const proto = mod?.AgentSession?.prototype;
+  if (!proto || typeof proto.sendCustomMessage !== "function" || proto[BTW_PATCHED]) return;
+  const original = proto.sendCustomMessage;
+  proto.sendCustomMessage = function (this: unknown, message: any, options?: any) {
+    if (message?.customType === BTW_NOTE_TYPE && options?.deliverAs === "followUp" && options.triggerTurn === undefined) {
+      options = { ...options, triggerTurn: false };
+    }
+    return original.call(this, message, options);
+  };
+  proto[BTW_PATCHED] = true;
+}
+
 // ------------------------------------------------------------------ commands
 
 export default function piVscodeBridge(pi: PiApi) {
+  void patchBtwFollowUp();
+
   pi.on("session_start", (_e, ctx) => installWidgetHost(ctx));
   // Drop the old session's widgets; the wrapper stays on the UI context in case pi reuses it.
   pi.on("session_shutdown", () => widgetHost?.dispose());
