@@ -3,5 +3,6 @@
  * `web.ts`) to build without that workaround.
  */
 import type { HostIntegration } from "../src/integrations";
+import { factoryWidgetsHost } from "./factory-widgets/host";
 
-export const HOST_WORKAROUNDS: HostIntegration[] = [];
+export const HOST_WORKAROUNDS: HostIntegration[] = [factoryWidgetsHost];
