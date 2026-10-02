@@ -9,6 +9,8 @@
  * `vscode:fork` does the same for `ctx.fork()`: RPC's `fork` command can only
  * fork before a user prompt, but /tree can start a new session at any entry.
  *
+ * Workarounds for gaps in RPC mode are separate pi extensions in `workarounds/`.
+ *
  * Kept dependency-free: only the few API shapes used here are typed locally.
  */
 
