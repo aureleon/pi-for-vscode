@@ -20,3 +20,4 @@ A workaround fills a gap in pi's RPC mode that affects every extension. It is no
 | Name | Gap | Uses pi internals |
 |---|---|---|
 | [factory-widgets](factory-widgets/README.md) | RPC mode drops factory widgets. | No |
+| [child-runs](child-runs/README.md) | RPC events miss agent sessions that extensions run in the process. | Yes |

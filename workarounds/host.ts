@@ -3,6 +3,7 @@
  * `web.ts`) to build without that workaround.
  */
 import type { HostIntegration } from "../src/integrations";
+import { childRunsHost } from "./child-runs/host";
 import { factoryWidgetsHost } from "./factory-widgets/host";
 
-export const HOST_WORKAROUNDS: HostIntegration[] = [factoryWidgetsHost];
+export const HOST_WORKAROUNDS: HostIntegration[] = [factoryWidgetsHost, childRunsHost];
