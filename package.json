@@ -202,6 +202,13 @@
         "pi.workarounds": {
           "type": "object",
           "default": {},
+          "properties": {
+            "factory-widgets": {
+              "type": "boolean",
+              "default": true,
+              "description": "Render factory widgets (for example todo lists and agent bars) to text. RPC mode drops them."
+            }
+          },
           "additionalProperties": {
             "type": "boolean"
           },

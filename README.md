@@ -49,9 +49,10 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Archived sessions** stay on disk. Only the list in VS Code hides them, so the pi TUI can still resume them.
 - **`/tree`** needs a command that RPC mode does not have. The extension adds it by loading a small bridge extension into pi (`dist/pi-bridge.mjs`).
 - **Queue edits** take the whole queue out of pi and queue it again, because RPC mode can only add to the queue or clear it. Images in queued messages are not kept. **Send now** stops the run and sends the message as the next run.
+- **Factory widgets** (for example todo lists and agent bars) are dropped by RPC mode. A workaround renders them to text lines at the width of the chat view and sends them again when they change (at most 4 times a second).
 - **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.
 - **Integrations** add support for one pi extension beyond pi's RPC protocol. Each one is in `integrations/<name>/`, and `integrations/host.ts` and `integrations/web.ts` list them. An integration is active only in sessions that load its pi extension. It can also load a small pi extension of its own (`integrations/<name>/pi.ts`), for example the pi-btw workaround for notes that arrive during a run. See [integrations/README.md](integrations/README.md).
-- **Workarounds** fill gaps in pi's RPC mode for every extension. Each one is in `workarounds/<name>/` and loads its own small pi extension. If a pi update breaks one, turn it off with `pi.workarounds`. See [workarounds/README.md](workarounds/README.md).
+- **Workarounds** fill gaps in pi's RPC mode for every extension, for example factory widgets. Each one is in `workarounds/<name>/` and loads its own small pi extension. If a pi update breaks one, turn it off with `pi.workarounds`. See [workarounds/README.md](workarounds/README.md).
 
 ## Built-in slash commands
 
@@ -75,13 +76,13 @@ VS Code apps opened from the Dock often do not get your shell `PATH`. For this r
 | `pi.resumeLastSession` | `true` | Reopen the last session of the workspace. |
 | `pi.useLoginShellEnv` | `true` | Load the environment of your login shell. |
 | `pi.terminalLocation` | `"editor"` | Where terminals open: as an editor tab or in the terminal panel. |
-| `pi.workarounds` | `{}` | Turn off a workaround for a gap in RPC mode, for example `{ "<name>": false }`. All are on by default. |
+| `pi.workarounds` | `{}` | Turn off a workaround for a gap in RPC mode, for example `{ "factory-widgets": false }`. All are on by default. |
 
 Extensions can check `process.env.PI_VSCODE === "1"` to know that they run inside VS Code.
 
 ## Limitations (from RPC mode)
 
-TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. Commands that open a composer or overlay in the TUI show their notice instead. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` works through the bridge extension. For everything else, open the session in the terminal.
+TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. Commands that open a composer or overlay in the TUI show their notice instead. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` works through the bridge extension, and factory widgets through a workaround. Widgets are read-only: their keys (for example in the pi-subagents fleet list) do nothing. For everything else, open the session in the terminal.
 
 ## Development
 
