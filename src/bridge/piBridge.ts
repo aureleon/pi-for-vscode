@@ -13,6 +13,9 @@
  *  - pi-btw queues its display-only note as a follow-up that starts a model turn with
  *    no new user message (see `patchBtwFollowUp`).
  *
+ * And it reports work that RPC events do not show: agent sessions that extensions run in
+ * this process, such as subagents (see `trackChildRuns`). The host keeps such a process.
+ *
  * Kept dependency-free: only the few API shapes used here are typed locally.
  */
 
@@ -34,11 +37,13 @@ type WidgetFactory = (tui: unknown, theme: unknown) => WidgetComponent;
 interface UiContext {
   notify(message: string, level?: "info" | "warning" | "error"): void;
   setWidget(key: string, content: string[] | WidgetFactory | undefined, options?: WidgetOptions): void;
+  setStatus(key: string, text: string | undefined): void;
   theme?: unknown;
 }
 
 interface EventContext {
   ui: UiContext;
+  sessionManager?: unknown;
   mode?: string;
   hasUI?: boolean;
 }
@@ -158,8 +163,14 @@ let widgetColumns = Math.max(20, Number(process.env.PI_VSCODE_WIDGET_COLUMNS) ||
  * extension. The bridge loads first (`-e` paths come before installed ones), so this runs before
  * other extensions register widgets in their own session_start handlers.
  */
+/**
+ * The RPC host's own session. Extensions can load the bridge into child sessions too (subagents);
+ * those have no UI (`hasUI` false) and must not take over the shared state.
+ */
+const isRpcHost = (ctx: EventContext) => ctx.mode === "rpc" || (ctx.mode === undefined && ctx.hasUI === true);
+
 function installWidgetHost(ctx: EventContext) {
-  if (ctx.mode !== undefined && ctx.mode !== "rpc") return;
+  if (!isRpcHost(ctx)) return;
   const ui = ctx.ui as UiContext & { [PATCHED]?: RpcWidgetHost };
   if (!ui || typeof ui.setWidget !== "function") return;
   if (ui[PATCHED]) {
@@ -191,18 +202,7 @@ const BTW_PATCHED = Symbol.for("pi-vscode.btwFollowUp");
  * so the request ends with an assistant message. Providers without assistant prefill reject it.
  * Force `triggerTurn: false`: pi then appends the note at the end of the turn with no model call.
  */
-async function patchBtwFollowUp() {
-  let mod: any;
-  try {
-    // A plain `import("@earendil-works/pi-coding-agent")` does not resolve from this file. pi's
-    // own entry (`dist/.../cli.js`) sits next to `index.js`, and importing that file URL gives
-    // the same module instance that the running session uses.
-    const cli = process.argv[1] ? realpathSync(process.argv[1]) : "";
-    if (!/cli\.[cm]?js$/.test(cli)) return;
-    mod = await import(new URL("./index.js", pathToFileURL(cli)).href);
-  } catch {
-    return;
-  }
+function patchBtwFollowUp(mod: any) {
   const proto = mod?.AgentSession?.prototype;
   if (!proto || typeof proto.sendCustomMessage !== "function" || proto[BTW_PATCHED]) return;
   const original = proto.sendCustomMessage;
@@ -215,12 +215,102 @@ async function patchBtwFollowUp() {
   proto[BTW_PATCHED] = true;
 }
 
+// ------------------------------------------------------------------ child runs
+
+/** Status key the host reads (and does not show): `{ count, files }` of running child sessions. */
+const WORK_KEY = "vscode:work";
+const RUNS_PATCHED = Symbol.for("pi-vscode.childRuns");
+
+/** Shared on globalThis, so a bridge loaded again by /reload keeps counting the same runs. */
+interface RunState {
+  runs: Map<any, number>;
+  main?: unknown;
+  ui?: UiContext;
+  last?: string;
+}
+const runState: RunState = ((globalThis as any)[RUNS_PATCHED] ??= { runs: new Map() });
+
+/**
+ * Extensions run their own AgentSessions in this process (subagents, side threads). RPC events
+ * only describe the main session, so the host saw the process as idle while they worked, and
+ * stopped it on a session switch. Count prompts that are in flight on other AgentSessions
+ * and report them, with their session files, through a hidden status.
+ */
+function trackChildRuns(mod: any) {
+  const proto = mod?.AgentSession?.prototype;
+  if (!proto || typeof proto.prompt !== "function" || proto[RUNS_PATCHED]) return;
+  const original = proto.prompt;
+  proto.prompt = async function (this: any, ...args: unknown[]) {
+    runState.runs.set(this, (runState.runs.get(this) ?? 0) + 1);
+    reportChildRuns();
+    try {
+      return await original.apply(this, args);
+    } finally {
+      const n = (runState.runs.get(this) ?? 1) - 1;
+      if (n > 0) runState.runs.set(this, n);
+      else runState.runs.delete(this);
+      reportChildRuns();
+    }
+  };
+  proto[RUNS_PATCHED] = true;
+}
+
+function reportChildRuns() {
+  let count = 0;
+  const files: string[] = [];
+  for (const session of runState.runs.keys()) {
+    if (!runState.main || session.sessionManager === runState.main) continue;
+    count++;
+    try {
+      const file = session.sessionFile;
+      if (typeof file === "string" && file) files.push(file);
+    } catch {
+      /* ignore */
+    }
+  }
+  const text = count ? JSON.stringify({ count, files }) : undefined;
+  if (text === runState.last) return;
+  runState.last = text;
+  try {
+    runState.ui?.setStatus(WORK_KEY, text);
+  } catch {
+    /* the UI context may be stale after a session switch */
+  }
+}
+
+// ------------------------------------------------------------------ pi module
+
+/**
+ * A plain `import("@earendil-works/pi-coding-agent")` does not resolve from this file. pi's own
+ * entry (`dist/.../cli.js`) sits next to `index.js`, and importing that file URL gives the same
+ * module instance that the running session uses. Undefined when pi runs some other way.
+ */
+async function loadPiModule(): Promise<any> {
+  try {
+    const cli = process.argv[1] ? realpathSync(process.argv[1]) : "";
+    if (!/cli\.[cm]?js$/.test(cli)) return undefined;
+    return await import(new URL("./index.js", pathToFileURL(cli)).href);
+  } catch {
+    return undefined;
+  }
+}
+
 // ------------------------------------------------------------------ commands
 
 export default function piVscodeBridge(pi: PiApi) {
-  void patchBtwFollowUp();
+  void loadPiModule().then((mod) => {
+    patchBtwFollowUp(mod);
+    trackChildRuns(mod);
+  });
 
-  pi.on("session_start", (_e, ctx) => installWidgetHost(ctx));
+  pi.on("session_start", (_e, ctx) => {
+    if (!isRpcHost(ctx)) return;
+    installWidgetHost(ctx);
+    runState.main = ctx.sessionManager;
+    runState.ui = ctx.ui;
+    runState.last = undefined;
+    reportChildRuns();
+  });
   // Drop the old session's widgets; the wrapper stays on the UI context in case pi reuses it.
   pi.on("session_shutdown", () => widgetHost?.dispose());
 

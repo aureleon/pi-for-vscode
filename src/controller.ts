@@ -82,6 +82,9 @@ function nestSessions(sessions: SessionSummary[]) {
   return out;
 }
 
+/** Hidden status key the bridge uses to report child sessions (see `trackChildRuns` in piBridge.ts). */
+const CHILD_RUNS_KEY = "vscode:work";
+
 /** Event types that make up in-progress output; replayed after a transcript snapshot. */
 const TAIL_EVENTS = new Set(["message_start", "message_update", "tool_execution_start", "tool_execution_update", "tool_execution_end"]);
 
@@ -127,6 +130,11 @@ interface Session {
   widgetColumns?: number;
   /** The bridge's `vscode:widget-columns` command is loaded (seen in `get_commands`). */
   canSetColumns?: boolean;
+  /**
+   * Agent sessions that extensions run inside this process (for example subagents), as the
+   * bridge reports them. RPC events do not show them, so the process can look idle while they work.
+   */
+  childRuns?: { count: number; files: string[] };
 }
 
 interface StartOptions {
@@ -192,7 +200,19 @@ export class PiController implements vscode.Disposable {
   }
 
   get isRunning(): boolean {
-    return !!this.state.isStreaming;
+    return !!this.active && this.isBusy(this.active);
+  }
+
+  /** The main agent runs, or extensions run agent sessions in the process. Stopping it loses that work. */
+  private isBusy(s: Session): boolean {
+    return !!s.state.isStreaming || (s.childRuns?.count ?? 0) > 0;
+  }
+
+  /** Session files that a running child session writes to, in any of this chat's processes. */
+  private childRunFiles(): Set<string> {
+    const files = new Set<string>();
+    for (const s of [this.active, ...this.background]) for (const f of s?.childRuns?.files ?? []) files.add(path.resolve(f));
+    return files;
   }
 
   /** Id of a session in the session list: its file, else (for `--no-session`) its id. */
@@ -215,7 +235,7 @@ export class PiController implements vscode.Disposable {
   private async doStart(sessionFile?: string, sessionId?: string, opts: StartOptions = {}) {
     const prev = this.active;
     if (prev) {
-      if (opts.keepRunning && prev.state.isStreaming && prev.pi.running) this.sendToBackground(prev);
+      if (opts.keepRunning && this.isBusy(prev) && prev.pi.running) this.sendToBackground(prev);
       else prev.pi.stop();
       this.active = undefined;
     }
@@ -260,6 +280,7 @@ export class PiController implements vscode.Disposable {
     pi.on("exit", (code: number | null, signal: string | null, err?: Error) => {
       this.output.appendLine(`[pi] exited code=${code} signal=${signal} ${err?.message ?? ""}`);
       s.state.isStreaming = false;
+      s.childRuns = undefined;
       if (this.background.delete(s)) {
         this.updateStatus();
         vscode.window.showWarningMessage(`Pi: the background session "${this.titleOf(s)}" exited (code ${code ?? signal}).`);
@@ -288,7 +309,7 @@ export class PiController implements vscode.Disposable {
     const prev = this.active;
     this.background.delete(s);
     if (prev && prev !== s) {
-      if (prev.state.isStreaming && prev.pi.running) this.sendToBackground(prev);
+      if (this.isBusy(prev) && prev.pi.running) this.sendToBackground(prev);
       else prev.pi.stop();
     }
     this.active = s;
@@ -315,12 +336,12 @@ export class PiController implements vscode.Disposable {
 
   /** Show the spinner while any session of this chat is working. */
   private updateStatus() {
-    const busy = [this.active, ...this.background].filter((s) => s?.state.isStreaming).length;
+    const busy = [this.active, ...this.background].filter((s) => s && this.isBusy(s)).length;
     if (!busy) {
       this.statusItem.hide();
       return;
     }
-    const bg = [...this.background].filter((s) => s.state.isStreaming).length;
+    const bg = [...this.background].filter((s) => this.isBusy(s)).length;
     this.statusItem.text = busy > 1 ? `$(loading~spin) Pi (${busy})` : "$(loading~spin) Pi";
     this.statusItem.tooltip = bg
       ? `Pi is working… (${bg} session${bg === 1 ? "" : "s"} in the background)`
@@ -455,6 +476,7 @@ export class PiController implements vscode.Disposable {
     if (TAIL_EVENTS.has(e.type)) s.tail.push(e);
     switch (e.type) {
       case "extension_ui_request":
+        if (e.method === "setStatus" && e.statusKey === CHILD_RUNS_KEY) return this.onChildRuns(s, e.statusText);
         this.handleExtensionUi(s, e);
         break;
       case "agent_start":
@@ -468,7 +490,7 @@ export class PiController implements vscode.Disposable {
         s.runStartedAt = undefined;
         s.tail = [];
         s.ui.delete("queue");
-        if (this.background.has(s)) {
+        if (this.background.has(s) && !this.isBusy(s)) {
           this.onBackgroundSettled(s);
           return;
         }
@@ -502,6 +524,21 @@ export class PiController implements vscode.Disposable {
         break;
     }
     this.emit(s, { type: "event", event: e });
+  }
+
+  /** The bridge's hidden status: child sessions that run in the process. Not shown in the webview. */
+  private onChildRuns(s: Session, text: string | undefined) {
+    let runs: Session["childRuns"];
+    try {
+      const p = text ? JSON.parse(text) : undefined;
+      if (p && p.count > 0) runs = { count: Number(p.count), files: Array.isArray(p.files) ? p.files.map(String) : [] };
+    } catch {}
+    s.childRuns = runs;
+    if (this.background.has(s) && !this.isBusy(s)) {
+      this.onBackgroundSettled(s);
+      return;
+    }
+    this.updateStatus();
   }
 
   private handleExtensionUi(s: Session, e: RpcRecord) {
@@ -861,7 +898,7 @@ export class PiController implements vscode.Disposable {
       this.terminal.show();
       return;
     }
-    if (this.state.isStreaming) {
+    if (this.isRunning) {
       const choice = await vscode.window.showWarningMessage(
         "Pi is still working. Stop it and continue in the terminal?",
         { modal: true },
@@ -933,7 +970,7 @@ export class PiController implements vscode.Disposable {
       case "new": {
         this.assertNoTerminal();
         // A busy session keeps working in the background; the new one gets its own process.
-        if (this.state.isStreaming) {
+        if (this.isRunning) {
           await this.start(undefined, undefined, { keepRunning: true, fresh: true });
           break;
         }
@@ -1075,6 +1112,7 @@ export class PiController implements vscode.Disposable {
     const archived = this.archivedSessions;
     const bg = [...this.background];
     const bgKeys = new Set(bg.map((b) => this.sessionKey(b)));
+    const childFiles = this.childRunFiles();
     const sessions = listed.filter((s) => (s.messageCount > 0 || s.file === this.state.sessionFile) && !bgKeys.has(s.file));
     const running = bg.map((b) => {
       const summary = listed.find((s) => s.file === b.state.sessionFile);
@@ -1082,10 +1120,10 @@ export class PiController implements vscode.Disposable {
       return {
         id: this.sessionKey(b),
         label: this.titleOf(b),
-        cols: [b.state.isStreaming ? "working" : "idle", n != null ? `${n} msg${n === 1 ? "" : "s"}` : ""],
+        cols: [this.isBusy(b) ? "working" : "idle", n != null ? `${n} msg${n === 1 ? "" : "s"}` : ""],
         group: "Running in background",
         search: [this.titleOf(b), summary?.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
-        running: !!b.state.isStreaming,
+        running: this.isBusy(b),
         busy: true,
       };
     });
@@ -1103,7 +1141,7 @@ export class PiController implements vscode.Disposable {
         search: [s.name, s.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
         current: s.file === this.state.sessionFile,
         archived: s.file !== this.state.sessionFile && archived.has(s.file),
-        running: s.file === this.state.sessionFile && !!this.state.isStreaming,
+        running: (s.file === this.state.sessionFile && !!this.state.isStreaming) || childFiles.has(path.resolve(s.file)),
         parent,
         depth,
       }))],
@@ -1138,8 +1176,14 @@ export class PiController implements vscode.Disposable {
     if (bg) return this.showBackground(bg);
     if (id === this.state.sessionFile && this.pi?.running) return;
     if (id.startsWith("bg:")) return; // a background session without a file that has since gone away
+    // Another pi process must not write to a file that a running child session (a subagent) writes to.
+    if (this.childRunFiles().has(path.resolve(id))) {
+      vscode.window.showWarningMessage("Pi: this session is still running inside another session (for example as a subagent). Open it when it finishes.");
+      return;
+    }
     if (!this.pi?.running) return this.start(id);
-    if (this.state.isStreaming) return this.start(id, undefined, { keepRunning: true });
+    // switch_session would end the extensions' work (session_shutdown), so a busy process gets replaced instead.
+    if (this.isRunning) return this.start(id, undefined, { keepRunning: true });
     const r = await this.req({ type: "switch_session", sessionPath: id });
     if (!r?.cancelled) await this.sendInit("reset");
   }
