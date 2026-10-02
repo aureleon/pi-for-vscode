@@ -41,6 +41,11 @@ export interface HostIntegration {
   id: string;
   /** Is the pi extension loaded in this session? The integration is active only then. */
   matches(commands: PiCommand[]): boolean;
+  /**
+   * Optional pi side: a pi extension that pi loads with `-e` in every session (it must do nothing
+   * when its pi extension is not loaded). Path relative to `dist/`, built from `integrations/<name>/pi.ts`.
+   */
+  piExtension?: string;
   /** `customType`s of custom entries on the active branch. The webview side gets them with each snapshot. */
   entryTypes?: string[];
   /** Called once for each chat. */
@@ -52,6 +57,11 @@ export const HOST_INTEGRATIONS: HostIntegration[] = LIST;
 /** Entry types that some integration needs in the snapshot. */
 export function integrationEntryTypes(): Set<string> {
   return new Set(HOST_INTEGRATIONS.flatMap((i) => i.entryTypes ?? []));
+}
+
+/** Pi extensions of the integrations, as paths relative to `dist/`. */
+export function integrationPiExtensions(): string[] {
+  return HOST_INTEGRATIONS.flatMap((i) => (i.piExtension ? [i.piExtension] : []));
 }
 
 /** Ids of the integrations whose pi extension is loaded. */

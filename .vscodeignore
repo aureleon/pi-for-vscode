@@ -2,6 +2,7 @@
 !dist/extension.js
 !dist/webview.js
 !dist/pi-bridge.mjs
+!dist/integrations/*.mjs
 !webview/styles.css
 !media/**
 !package.json

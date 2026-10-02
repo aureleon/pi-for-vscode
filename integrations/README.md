@@ -6,7 +6,7 @@ An integration adds support for one pi extension beyond pi's RPC protocol. The c
 
 - `host.ts`: the host sides of the integrations in this build.
 - `web.ts`: the webview sides of the integrations in this build.
-- `<name>/`: one integration. Usually `profile.ts` (plain data that both sides use), `host.ts`, `web.ts` and `styles.css`.
+- `<name>/`: one integration. Usually `profile.ts` (plain data that both sides use), `host.ts`, `web.ts` and `styles.css`. Optional: `pi.ts`, a pi extension (see below).
 
 To build without an integration, remove it from `host.ts` and `web.ts`.
 
@@ -22,6 +22,13 @@ To build without an integration, remove it from `host.ts` and `web.ts`.
 4. Import styles as text (`import css from "./styles.css"`) and add them to the page in `create()`. Use the theme tokens of `webview/styles.css`.
 
 The two sides talk with `{ type: "ext", id, payload }`. The payload is free-form.
+
+## Pi side (optional)
+
+Some workarounds must run inside pi. Put them in `integrations/<name>/pi.ts` as a pi extension (default export that takes the extension API). The build writes it to `dist/integrations/<name>.mjs`. Set `piExtension: "integrations/<name>.mjs"` in the `HostIntegration`, and the controller loads it with `-e` in every session.
+
+- pi loads it before it knows which extensions the session has. It must do nothing when its pi extension is not loaded.
+- Keep it free of dependencies, like `src/bridge/piBridge.ts`.
 
 ## Rules
 

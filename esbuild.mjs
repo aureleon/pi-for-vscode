@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as esbuild from "esbuild";
 
 const watch = process.argv.includes("--watch");
@@ -34,6 +35,19 @@ const configs = [
     target: "node18",
   },
 ];
+
+// Pi sides of integrations: integrations/<name>/pi.ts → dist/integrations/<name>.mjs, loaded via `pi -e`.
+for (const name of fs.readdirSync("integrations")) {
+  if (!fs.existsSync(`integrations/${name}/pi.ts`)) continue;
+  configs.push({
+    entryPoints: [`integrations/${name}/pi.ts`],
+    bundle: true,
+    outfile: `dist/integrations/${name}.mjs`,
+    platform: "node",
+    format: "esm",
+    target: "node18",
+  });
+}
 
 if (watch) {
   for (const c of configs) (await esbuild.context(c)).watch();
