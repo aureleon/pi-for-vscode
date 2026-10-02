@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { PiProcess, type RpcRecord } from "./piProcess";
-import { defaultSessionDir, listSessions, relativeTime } from "./sessions";
+import { defaultSessionDir, listSessions, relativeTime, SessionSummary } from "./sessions";
 import { getShellEnv } from "./shellEnv";
 import { agentDir, scopeModels } from "./modelScope";
 import { slimTree } from "./treeData";
@@ -35,6 +35,51 @@ function dayGroup(ms: number): string {
   if (ms >= startOfToday.getTime() - day) return "Yesterday";
   if (ms >= startOfToday.getTime() - 6 * day) return "This week";
   return "Older";
+}
+
+/**
+ * Order sessions as a tree, as pi's /resume does: a session whose header names a listed parent
+ * session (forks, clones, sessions that extensions start, such as subagents) goes under it.
+ * Roots and siblings are sorted by the newest activity in their subtree, so a parent with a
+ * fresh child moves up. A session whose parent is not listed is a root.
+ */
+function nestSessions(sessions: SessionSummary[]) {
+  const key = (f: string) => path.resolve(f);
+  const byFile = new Map(sessions.map((s) => [key(s.file), s]));
+  const children = new Map<string, SessionSummary[]>();
+  const roots: SessionSummary[] = [];
+  for (const s of sessions) {
+    const p = s.parent && key(s.parent);
+    if (p && p !== key(s.file) && byFile.has(p)) {
+      if (!children.has(p)) children.set(p, []);
+      children.get(p)!.push(s);
+    } else roots.push(s);
+  }
+  const latest = new Map<string, number>();
+  const latestOf = (s: SessionSummary, seen = new Set<string>()): number => {
+    const k = key(s.file);
+    if (latest.has(k)) return latest.get(k)!;
+    seen.add(k);
+    let t = s.mtime;
+    for (const c of children.get(k) ?? []) if (!seen.has(key(c.file))) t = Math.max(t, latestOf(c, seen));
+    latest.set(k, t);
+    return t;
+  };
+  const byLatest = (a: SessionSummary, b: SessionSummary) => latestOf(b) - latestOf(a);
+  const out: { s: SessionSummary; depth: number; parent?: string; latest: number }[] = [];
+  const visited = new Set<string>();
+  const walk = (s: SessionSummary, depth: number, parent: string | undefined, rootLatest: number) => {
+    const k = key(s.file);
+    if (visited.has(k)) return;
+    visited.add(k);
+    const kids = [...(children.get(k) ?? [])].sort(byLatest);
+    out.push({ s, depth, parent, latest: rootLatest });
+    for (const c of kids) walk(c, depth + 1, s.file, rootLatest);
+  };
+  for (const r of [...roots].sort(byLatest)) walk(r, 0, undefined, latestOf(r));
+  // Parent loops have no root; list what is left at the top level.
+  for (const s of sessions) if (!visited.has(key(s.file))) walk(s, 0, undefined, latestOf(s));
+  return out;
 }
 
 /** Event types that make up in-progress output; replayed after a transcript snapshot. */
@@ -1026,15 +1071,17 @@ export class PiController implements vscode.Disposable {
       kind: "session",
       placeholder: "Resume a Pi session",
       empty: "No previous sessions for this folder",
-      items: [...running, ...sessions.map((s) => ({
+      items: [...running, ...nestSessions(sessions).map(({ s, depth, parent, latest }) => ({
         id: s.file,
         label: s.name || s.firstMessage?.split("\n")[0].slice(0, 200) || "(empty session)",
         cols: [relativeTime(s.mtime), `${s.messageCount} msg${s.messageCount === 1 ? "" : "s"}`],
-        group: dayGroup(s.mtime),
+        group: dayGroup(latest),
         search: [s.name, s.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
         current: s.file === this.state.sessionFile,
         archived: s.file !== this.state.sessionFile && archived.has(s.file),
         running: s.file === this.state.sessionFile && !!this.state.isStreaming,
+        parent,
+        depth,
       }))],
       refresh,
     });

@@ -1717,15 +1717,20 @@ interface ListItem {
   running?: boolean;
   /** Open in a background process; can't be archived. */
   busy?: boolean;
+  /** Id of the item this one is nested under (a forked or extension-started session). */
+  parent?: string;
+  depth?: number;
 }
 
 const ARCHIVE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13v3.5h-1V14h-11V5.5h-1V2zm1 1v1.5h11V3h-11zm1 2.5V13h9V5.5h-9zM6 7h4v1H6V7z"/></svg>`;
+const CHEVRON_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="m6 3.6 4.4 4.4L6 12.4l-.7-.7L9 8 5.3 4.3z"/></svg>`;
 const UNARCHIVE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13v3.5h-1V14h-11V5.5h-1V2zm1 1v1.5h11V3h-11zm1 2.5V13h9V5.5h-9zM8 6.3l2.4 2.4-.7.7L8.5 8.2V12h-1V8.2L6.3 9.4l-.7-.7L8 6.3z"/></svg>`;
 
 /**
  * Header-anchored navigator for sessions (/resume) and /fork. Shares its look with the
  * tree navigator (webview/treeMenu.ts): same box, search field, row metrics and footer.
  * Sessions can be archived: hidden from the list (kept on disk, still resumable by pi).
+ * Sessions that came from another one (forks, subagents) are nested under it and collapsed.
  */
 class ListMenu {
   open = false;
@@ -1742,6 +1747,11 @@ class ListMenu {
   private sel = 0;
   private emptyText = "";
   private showArchived = false;
+  /** Ids of nested items whose children are shown. */
+  private expanded = new Set<string>();
+  private byId = new Map<string, ListItem>();
+  /** Number of visible items nested directly under each item (archived ones count only when shown). */
+  private kids = new Map<string, number>();
 
   constructor() {
     this.root.innerHTML =
@@ -1763,6 +1773,17 @@ class ListMenu {
       else if (e.key === "PageDown" && n) { this.sel = Math.min(n - 1, this.sel + 10); this.render(); e.preventDefault(); }
       else if (e.key === "PageUp" && n) { this.sel = Math.max(0, this.sel - 10); this.render(); e.preventDefault(); }
       else if (e.key === "Enter") { const it = this.flat[this.sel]; if (it) this.choose(it); e.preventDefault(); }
+      else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && !this.search.value && this.flat[this.sel]) {
+        const it = this.flat[this.sel];
+        const kids = this.kids.get(it.id);
+        if (e.key === "ArrowRight" && kids && !this.expanded.has(it.id)) this.toggle(it);
+        else if (e.key === "ArrowLeft" && kids && this.expanded.has(it.id)) this.toggle(it);
+        else if (e.key === "ArrowLeft" && it.parent && this.byId.has(it.parent)) {
+          this.sel = Math.max(0, this.flat.findIndex((x) => x.id === it.parent));
+          this.render();
+        }
+        e.preventDefault();
+      }
       else if (e.key === "Backspace" && (e.metaKey || e.ctrlKey) && this.kind === "session") {
         const it = this.flat[this.sel];
         if (it && !it.current && !it.busy) this.act(it, it.archived ? "unarchive" : "archive");
@@ -1782,11 +1803,15 @@ class ListMenu {
     const keepId = refresh ? this.flat[this.sel]?.id : undefined;
     this.kind = kind;
     this.items = items;
+    this.byId = new Map(items.map((it) => [it.id, it]));
     this.emptyText = empty;
     if (!refresh) {
       this.search.value = "";
       this.sel = 0;
       this.showArchived = false;
+      this.expanded.clear();
+      // Show where the current session is, if it is nested.
+      for (let p = items.find((it) => it.current)?.parent; p && !this.expanded.has(p); p = this.byId.get(p)?.parent) this.expanded.add(p);
     }
     this.search.placeholder = placeholder;
     this.open = true;
@@ -1805,11 +1830,30 @@ class ListMenu {
   private render(keepId?: string) {
     const q = this.search.value.trim().toLowerCase();
     const words = q.split(/\s+/).filter(Boolean);
-    this.flat = this.items.filter((it) => {
-      if (it.archived && !this.showArchived) return false;
+    const ancestors = (it: ListItem) => {
+      const out: ListItem[] = [];
+      for (let p = it.parent && this.byId.get(it.parent); p && !out.includes(p); p = p.parent && this.byId.get(p.parent)) out.push(p);
+      return out;
+    };
+    const hidden = (it: ListItem) => !!it.archived && !this.showArchived;
+    const matches = new Set(this.items.filter((it) => {
+      if (hidden(it) || ancestors(it).some(hidden)) return false;
       const hay = `${it.label} ${it.search ?? ""} ${it.meta ?? ""} ${(it.cols ?? []).join(" ")}`.toLowerCase();
       return words.every((w) => hay.includes(w));
-    });
+    }));
+    // With a query, show each match with the sessions it is nested under; without one, follow the folds.
+    const shown = new Set<ListItem>();
+    for (const it of matches) {
+      const up = ancestors(it);
+      if (words.length) [it, ...up].forEach((x) => shown.add(x));
+      else if (up.every((p) => this.expanded.has(p.id))) shown.add(it);
+    }
+    this.flat = this.items.filter((it) => shown.has(it));
+    this.kids.clear();
+    for (const it of this.items) {
+      if (it.parent && !hidden(it)) this.kids.set(it.parent, (this.kids.get(it.parent) ?? 0) + 1);
+    }
+    const nested = this.kids.size > 0;
     if (keepId) {
       const i = this.flat.findIndex((it) => it.id === keepId);
       if (i >= 0) this.sel = i;
@@ -1823,17 +1867,29 @@ class ListMenu {
     const archivable = this.kind === "session";
     let group: string | undefined;
     this.flat.forEach((it, i) => {
-      if (it.group && it.group !== group) {
+      if (it.group && it.group !== group && !it.depth) {
         group = it.group;
         this.list.appendChild(el("div", "lm-group", escapeHtml(group)));
       }
-      const row = el("div", `mp-item lm-item${i === this.sel ? " active" : ""}${it.current ? " current" : ""}${it.archived ? " archived" : ""}${archivable ? " has-action" : ""}`);
+      const row = el("div", `mp-item lm-item${i === this.sel ? " active" : ""}${it.current ? " current" : ""}${it.archived ? " archived" : ""}${archivable ? " has-action" : ""}${it.depth ? " nested" : ""}`);
       row.title = it.search || it.label;
       const cols = it.cols ?? (it.meta ? [it.meta] : []);
+      const open = this.expanded.has(it.id) || (!!words.length && this.flat.some((x) => x.parent === it.id));
+      const kids = this.kids.get(it.id) ?? 0;
+      const twisty = !nested ? "" : kids
+        ? `<button class="lm-twisty${open ? " open" : ""}" title="${open ? "Hide" : "Show"} ${kids} nested session${kids === 1 ? "" : "s"} (${open ? "←" : "→"})">${CHEVRON_ICON}</button>`
+        : `<span class="lm-twisty"></span>`;
       row.innerHTML =
         `<span class="lm-dot${it.running ? " lm-running" : ""}">${it.running ? SPINNER : it.current ? "●" : ""}</span>` +
-        `<span class="lm-label">${escapeHtml(it.label)}</span>` +
+        `<span class="lm-main" style="padding-left:${(it.depth ?? 0) * 16}px">${twisty}<span class="lm-label">${escapeHtml(it.label)}</span>` +
+        (kids && !open ? `<span class="lm-kids">${kids}</span>` : "") + `</span>` +
         cols.map((c, j) => `<span class="lm-col lm-col-${j}">${escapeHtml(c)}</span>`).join("");
+      row.querySelector("button.lm-twisty")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.sel = i;
+        this.toggle(it);
+        this.search.focus();
+      });
       if (archivable) {
         const b = el("button", "lm-action", it.archived ? UNARCHIVE_ICON : ARCHIVE_ICON);
         b.title = it.current ? "The current session can't be archived" : it.busy ? "A running session can't be archived" : it.archived ? "Unarchive (⌘⌫)" : "Archive: hide from this list (⌘⌫)";
@@ -1856,7 +1912,8 @@ class ListMenu {
     f.innerHTML = "";
     const hint = el("div", "menu-hint");
     const archivedCount = this.items.filter((it) => it.archived).length;
-    hint.textContent = this.kind === "session" ? "Enter to open · ⌘⌫ to archive" : this.kind === "fork" ? "Enter to fork from this message" : "";
+    const nested = this.kids.size > 0;
+    hint.textContent = this.kind === "session" ? `Enter to open${nested ? " · → to expand" : ""} · ⌘⌫ to archive` : this.kind === "fork" ? "Enter to fork from this message" : "";
     f.appendChild(hint);
     if (this.kind === "session" && archivedCount) {
       const t = el("button", "link menu-toggle", this.showArchived ? "Hide archived" : `Show archived (${archivedCount})`);
@@ -1868,6 +1925,12 @@ class ListMenu {
       });
       f.appendChild(t);
     }
+  }
+
+  private toggle(it: ListItem) {
+    if (this.expanded.has(it.id)) this.expanded.delete(it.id);
+    else this.expanded.add(it.id);
+    this.render(it.id);
   }
 
   private act(it: ListItem, action: "archive" | "unarchive") {
