@@ -18,6 +18,7 @@ In Pi's TUI, pi-btw opens an overlay composer. In RPC mode it cannot open it. Th
 
 - `profile.ts`: pi-btw's commands, modes, actions, entry types and notice texts.
 - `host.ts`: runs panel commands in pi and filters their notices.
+- `pi.ts`: a pi extension with a workaround for pi-btw notes (see Notes).
 - `web.ts`: the toggle button, the badge and the transcript links.
 - `sidePanel.ts`: the panel.
 - `styles.css`: styles of the panel, the button and the links.
@@ -26,3 +27,4 @@ In Pi's TUI, pi-btw opens an overlay composer. In RPC mode it cannot open it. Th
 
 - The integration is active when the session has the extension commands `/btw` and `/btw:inject`.
 - The panel sends each command as a normal prompt. pi responds when the command is done, so the response marks the end of a side request.
+- **Notes during a run:** pi-btw 0.7.1 queues its display-only `btw-note` as a follow-up that starts a model turn. pi-btw removes the note from the context, so the request ends with an assistant message, and providers without prefill (for example Claude on Bedrock) reject it. `pi.ts` queues these notes without a turn. Remove it when pi-btw fixes this.

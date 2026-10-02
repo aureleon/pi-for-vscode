@@ -10,7 +10,7 @@ import { slimTree } from "./treeData";
 import { createPiTerminal, piTerminalName } from "./piTerminal";
 import { completePath } from "./pathComplete";
 import { openDirectory, openPath } from "./openPath";
-import { activeIntegrations, HOST_INTEGRATIONS, integrationEntryTypes, type HostIntegrationInstance } from "./integrations";
+import { activeIntegrations, HOST_INTEGRATIONS, integrationEntryTypes, integrationPiExtensions, type HostIntegrationInstance } from "./integrations";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
 const RECENT_MODELS_KEY = "pi.recentModels";
@@ -229,6 +229,8 @@ export class PiController implements vscode.Disposable {
     if (opts.keepRunning) args = withoutSessionArgs(args);
     // Bridge extension: adds tree navigation (/tree) and labels, which RPC lacks.
     args.push("-e", path.join(this.context.extensionPath, "dist", "pi-bridge.mjs"));
+    // Pi sides of integrations (workarounds that must run inside pi).
+    for (const p of integrationPiExtensions()) args.push("-e", path.join(this.context.extensionPath, "dist", p));
 
     const resume = opts.fresh ? undefined : sessionFile ?? this.options.sessionFile ??
       (this.options.primary && cfg.get<boolean>("resumeLastSession", true)

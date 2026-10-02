@@ -9,6 +9,7 @@ import { COMPOSER_REFUSAL, hasPiBtw, HIDDEN_NOTICES, RESET_ENTRY, THREAD_ENTRY }
 export const btwHost: HostIntegration = {
   id: "pi-btw",
   matches: hasPiBtw,
+  piExtension: "integrations/pi-btw.mjs",
   entryTypes: [THREAD_ENTRY, RESET_ENTRY],
   create(api) {
     /** Panel commands that pi has not answered yet. */
