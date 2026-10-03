@@ -15,10 +15,11 @@ To build without an integration, remove it from `host.ts` and `web.ts`.
 1. Make `integrations/<name>/host.ts`. Export a `HostIntegration` (see `src/integrations.ts`):
    - `id`: the same on both sides.
    - `matches(commands)`: true when the session loads the pi extension. Use the commands from `get_commands`.
+   - `hiddenWidgets`: widget keys that the chat does not show while the integration is active.
    - `entryTypes`: `customType`s of session entries that the webview side needs in each snapshot.
    - `create(api)`: the hooks for one chat. `api.prompt()` runs a command in pi, `api.post()` sends to the webview side, `api.setBadge()` sets the badge of the Pi view.
-2. Make `integrations/<name>/web.ts`. Export a `WebIntegration` (see `webview/integrations.ts`). Its hooks get snapshots, appended entries, custom messages, notices and slash commands. `api.addToolbarButton()` adds a button to the header row, or to the composer toolbar in editor tabs.
-3. Add both to `integrations/host.ts` and `integrations/web.ts`.
+2. If the integration needs the webview, make `integrations/<name>/web.ts`. Export a `WebIntegration` (see `webview/integrations.ts`). Its hooks get snapshots, appended entries, custom messages, notices and slash commands. `api.addToolbarButton()` adds a button to the header row, or to the composer toolbar in editor tabs.
+3. Add the sides to `integrations/host.ts` and `integrations/web.ts`.
 4. Import styles as text (`import css from "./styles.css"`) and add them to the page in `create()`. Use the theme tokens of `webview/styles.css`.
 
 The two sides talk with `{ type: "ext", id, payload }`. The payload is free-form.
