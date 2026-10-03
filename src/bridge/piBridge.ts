@@ -75,6 +75,13 @@ const MAX_WIDGET_LINES = 25;
 const RENDER_THROTTLE_MS = 250;
 const DEFAULT_COLUMNS = 80;
 
+/**
+ * Factory widgets that are only a key-driven menu (they read `onTerminalInput`, which RPC mode does
+ * not have). They are not sent, because another widget already shows the same data:
+ *  - `fleet` (pi-subagents): the ↑↓/Enter agent picker below the editor. The `agents` widget shows the same rows.
+ */
+const TERMINAL_ONLY_WIDGETS = new Set(["fleet"]);
+
 /** Marks a UI context whose setWidget the bridge already wrapped (pi makes a new one on rebind). */
 const PATCHED = Symbol.for("pi-vscode.widgetHost");
 
@@ -159,16 +166,16 @@ let widgetHost: RpcWidgetHost | undefined;
 let widgetColumns = Math.max(20, Number(process.env.PI_VSCODE_WIDGET_COLUMNS) || DEFAULT_COLUMNS);
 
 /**
- * All extensions share one UI context object, so wrapping its `setWidget` once covers every
- * extension. The bridge loads first (`-e` paths come before installed ones), so this runs before
- * other extensions register widgets in their own session_start handlers.
- */
-/**
  * The RPC host's own session. Extensions can load the bridge into child sessions too (subagents);
  * those have no UI (`hasUI` false) and must not take over the shared state.
  */
 const isRpcHost = (ctx: EventContext) => ctx.mode === "rpc" || (ctx.mode === undefined && ctx.hasUI === true);
 
+/**
+ * All extensions share one UI context object, so wrapping its `setWidget` once covers every
+ * extension. The bridge loads first (`-e` paths come before installed ones), so this runs before
+ * other extensions register widgets in their own session_start handlers.
+ */
 function installWidgetHost(ctx: EventContext) {
   if (!isRpcHost(ctx)) return;
   const ui = ctx.ui as UiContext & { [PATCHED]?: RpcWidgetHost };
@@ -182,7 +189,7 @@ function installWidgetHost(ctx: EventContext) {
   const original = ui.setWidget.bind(ui);
   const host = new RpcWidgetHost(original, () => ui.theme, widgetColumns);
   ui.setWidget = (key, content, options) => {
-    if (typeof content === "function") return host.set(key, content, options);
+    if (typeof content === "function") return TERMINAL_ONLY_WIDGETS.has(key) ? undefined : host.set(key, content, options);
     host.drop(key);
     original(key, content, options);
   };

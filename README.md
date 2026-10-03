@@ -75,7 +75,7 @@ Extensions can check `process.env.PI_VSCODE === "1"` to know that they run insid
 
 ## Limitations (from RPC mode)
 
-TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` and factory widgets work through the bridge extension. Widgets are read-only: their keys (for example in the pi-subagents fleet list) do nothing. For everything else, open the session in the terminal.
+TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` and factory widgets work through the bridge extension. Widgets are read-only. The bridge hides the pi-subagents fleet list (the agent picker below the editor), because its keys do nothing here and the agents widget shows the same rows. For everything else, open the session in the terminal.
 
 ## Development
 
