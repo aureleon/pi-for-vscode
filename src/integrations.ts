@@ -20,7 +20,8 @@ export interface PiCommand {
   name: string;
   description?: string;
   source: string;
-  sourceInfo?: { path?: string };
+  /** `source` is the package (for example `npm:pi-btw`) or `auto` for a file in an extensions folder. */
+  sourceInfo?: { path?: string; source?: string };
 }
 
 /** One pi process of the chat, as the hooks see it. The same object for the life of the process. */
@@ -83,6 +84,11 @@ export interface HostIntegration {
    * `integrations/<name>/pi.ts` or `workarounds/<name>/pi.ts`.
    */
   piExtension?: string;
+  /**
+   * Widget keys (`ctx.ui.setWidget`) that the chat does not show while the module is active, for
+   * example a key-driven menu that does nothing without terminal input.
+   */
+  hiddenWidgets?: string[];
   /** `customType`s of custom entries on the active branch. The webview side gets them with each snapshot. */
   entryTypes?: string[];
   /** Called once for each chat. */
@@ -105,6 +111,11 @@ export function moduleEntryTypes(modules: HostIntegration[]): Set<string> {
 /** Pi extensions of the modules, as paths relative to `dist/`. */
 export function modulePiExtensions(modules: HostIntegration[]): string[] {
   return modules.flatMap((i) => (i.piExtension ? [i.piExtension] : []));
+}
+
+/** Widget keys that the active modules hide. */
+export function hiddenWidgets(modules: HostIntegration[], active: Set<string>): Set<string> {
+  return new Set(modules.filter((i) => active.has(i.id)).flatMap((i) => i.hiddenWidgets ?? []));
 }
 
 /** Ids of the active modules: integrations whose pi extension is loaded, and every workaround. */

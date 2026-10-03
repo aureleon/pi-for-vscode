@@ -10,7 +10,7 @@ import { slimTree } from "./treeData";
 import { createPiTerminal, piTerminalName } from "./piTerminal";
 import { completePath } from "./pathComplete";
 import { openDirectory, openPath } from "./openPath";
-import { activeModules, hostModules, moduleEntryTypes, modulePiExtensions, type ExtSession, type HostIntegration, type HostIntegrationInstance } from "./integrations";
+import { activeModules, hiddenWidgets, hostModules, moduleEntryTypes, modulePiExtensions, type ExtSession, type HostIntegration, type HostIntegrationInstance } from "./integrations";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
 const RECENT_MODELS_KEY = "pi.recentModels";
@@ -117,6 +117,8 @@ interface Session {
   queueBusy?: boolean;
   /** Ids of the active modules: integrations whose pi extension this session loaded (from `get_commands`), and the workarounds. */
   ext: Set<string>;
+  /** Widget keys that the active modules hide. */
+  hiddenWidgets?: Set<string>;
   /** What the hooks of integrations and workarounds see of this session. */
   handle: ExtSession;
 }
@@ -466,14 +468,28 @@ export class PiController implements vscode.Disposable {
     } finally {
       const queued = s.queue ?? [];
       s.queue = undefined;
-      if (this.active === s) for (const m of queued) this.post(m);
+      if (this.active === s) for (const m of queued) if (!(m.type === "event" && this.isHiddenWidget(s, m.event))) this.post(m);
     }
   }
 
-  /** Update the modules that are active in session `s`, from its commands. */
+  /**
+   * Update the modules that are active in session `s`, from its commands. Widgets that an active
+   * module hides can arrive before the first `get_commands` answer; forget them.
+   */
   private setActiveModules(s: Session, commands: any[] | undefined) {
     s.ext = activeModules(this.modules, commands);
+    s.hiddenWidgets = hiddenWidgets(this.modules, s.ext);
+    for (const key of s.hiddenWidgets) {
+      // Outside a snapshot (for example after /reload), also clear a widget the webview shows already.
+      if (s.ui.delete(`widget:${key}`) && s === this.active && !s.queue) {
+        this.post({ type: "event", event: { type: "extension_ui_request", method: "setWidget", widgetKey: key } });
+      }
+    }
     for (const h of this.hooks(s)) h.onCommands?.(s.handle, commands ?? []);
+  }
+
+  private isHiddenWidget(s: Session, e: RpcRecord | undefined) {
+    return e?.type === "extension_ui_request" && e.method === "setWidget" && !!s.hiddenWidgets?.has(e.widgetKey);
   }
 
   /** Send a message for session `s` to the webview, if it is the one shown. */
@@ -514,6 +530,7 @@ export class PiController implements vscode.Disposable {
     switch (e.type) {
       case "extension_ui_request":
         if (e.method === "setStatus" && this.hooks(s).some((h) => h.onStatus?.(s.handle, e.statusKey, e.statusText))) return;
+        if (this.isHiddenWidget(s, e)) return;
         this.handleExtensionUi(s, e);
         break;
       case "agent_start":
