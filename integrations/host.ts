@@ -4,5 +4,6 @@
  */
 import type { HostIntegration } from "../src/integrations";
 import { btwHost } from "./pi-btw/host";
+import { subagentsHost } from "./pi-subagents/host";
 
-export const HOST_INTEGRATIONS: HostIntegration[] = [btwHost];
+export const HOST_INTEGRATIONS: HostIntegration[] = [btwHost, subagentsHost];
