@@ -86,7 +86,7 @@ export function highlightMarkdown(src: string): string {
       return;
     }
     if (fence) {
-      out.push(blockLine(n, `<span class="md-codeblock">${esc(line)}</span>`));
+      out.push(blockLine(n, line ? `<span class="md-codeblock">${esc(line)}</span>` : ""));
       return;
     }
     let m: RegExpMatchArray | null;
