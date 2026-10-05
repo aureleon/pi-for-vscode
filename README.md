@@ -10,6 +10,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - Replies, thinking and tool calls stream in as a timeline. Tool cards show input and output, and edits show a diff.
 - Markdown renders in replies and in your sent prompts. It is also styled live as you type.
 - While Pi works: <kbd>Enter</kbd> steers, <kbd>⌥ Enter</kbd> queues a follow-up, <kbd>Esc</kbd> stops.
+- Queued messages show at the end of the chat. Drag to reorder them, or remove or send one now.
 - `/` for commands, `@` for file paths, `!cmd` for shell commands. Paste or drop images.
 - The context pill shows how full the context is. Click it to compact.
 
@@ -40,6 +41,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Nested sessions** use the `parentSession` field of the session header, the same as pi's `/resume`. A session whose parent is not in the list shows at the top level.
 - **Archived sessions** stay on disk. Only the list in VS Code hides them, so the pi TUI can still resume them.
 - **`/tree`** needs a command that RPC mode does not have. The extension adds it by loading a small bridge extension into pi (`dist/pi-bridge.mjs`).
+- **Queue edits** take the whole queue out of pi and queue it again, because RPC mode can only add to the queue or clear it. Images in queued messages are not kept. **Send now** stops the run and sends the message as the next run.
 - **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.
 
 ## Built-in slash commands

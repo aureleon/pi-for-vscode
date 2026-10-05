@@ -83,6 +83,29 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 .user-msg.collapsed .user-text { max-height: 120px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); cursor: pointer; }
 .user-images { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
 .user-images img { max-height: 80px; border-radius: 4px; border: 1px solid var(--border); }
+/* Queued messages: dimmed user messages at the end of the transcript, one line each. */
+.queue { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.queued-msg {
+  display: flex; align-items: center; gap: 8px; margin: 0; padding: 4px 6px 4px 4px; min-height: 30px;
+  white-space: nowrap; border-style: dashed; color: var(--muted); cursor: grab;
+}
+.queued-msg.dragging { opacity: .4; }
+.queued-msg.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+.queued-msg.drop-after { box-shadow: 0 2px 0 var(--accent); }
+.queued-msg .tag {
+  flex: none; font-size: 0.75em; text-transform: uppercase; letter-spacing: .03em; padding: 0 4px; border-radius: 3px;
+  border: 1px solid var(--border); cursor: help;
+}
+.queued-grip { flex: none; display: inline-flex; margin-right: -4px; color: var(--muted); opacity: .6; }
+.queued-grip svg { width: 14px; height: 14px; }
+.queued-msg:hover .queued-grip { opacity: 1; }
+.queued-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.queued-actions { flex: none; display: inline-flex; gap: 2px; visibility: hidden; }
+.queued-actions .icon-btn { padding: 3px; color: var(--muted); }
+.queued-actions .icon-btn:hover { color: var(--vscode-foreground); }
+.queued-actions svg { width: 14px; height: 14px; }
+.queued-msg:hover .queued-actions, .queued-msg:focus-within .queued-actions { visibility: visible; }
+.queue-clear { align-self: flex-end; font-size: 0.9em; }
 
 /* timeline: each item gets a dot and a connecting line */
 .item { position: relative; padding: 4px 0 6px 22px; }
@@ -222,12 +245,6 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 .widget {
   font-family: var(--mono); font-size: 12px; white-space: pre; overflow-x: auto; padding: 4px 8px; margin-bottom: 6px;
   border: 1px solid var(--border); border-radius: 6px; background: var(--card-bg);
-}
-.queue { margin-bottom: 6px; font-size: 0.92em; }
-.queued { color: var(--muted); padding: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.queued .tag {
-  font-size: 0.8em; text-transform: uppercase; margin-right: 6px; padding: 0 4px; border-radius: 3px;
-  border: 1px solid var(--border);
 }
 
 .composer {

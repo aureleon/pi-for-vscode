@@ -36,6 +36,7 @@ const I = {
   image: `<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor"/><circle cx="5.5" cy="6" r="1.2" fill="currentColor"/><path d="m2 12 4-4 3 3 2-2 3 3" fill="none" stroke="currentColor"/></svg>`,
   send: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 2.5 13.5 8l-.7.7L8.5 4.4V14h-1V4.4L3.2 8.7l-.7-.7z"/></svg>`,
   stop: `<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg>`,
+  grip: `<svg viewBox="0 0 16 16"><g fill="currentColor"><circle cx="6" cy="4" r="1.1"/><circle cx="10" cy="4" r="1.1"/><circle cx="6" cy="8" r="1.1"/><circle cx="10" cy="8" r="1.1"/><circle cx="6" cy="12" r="1.1"/><circle cx="10" cy="12" r="1.1"/></g></svg>`,
   close: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="m8 7.3 3.6-3.6.7.7L8.7 8l3.6 3.6-.7.7L8 8.7l-3.6 3.6-.7-.7L7.3 8 3.7 4.4l.7-.7z"/></svg>`,
   terminal: `<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor"/><path d="m4 6 2 2-2 2M7.5 10.5h4" fill="none" stroke="currentColor"/></svg>`,
   tree: `<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" d="M2.5 3.5h5M4.5 3.5v8h3M4.5 7.5h3M9.5 7.5h4M9.5 11.5h4"/></svg>`,
@@ -66,6 +67,7 @@ app.innerHTML = `
   <div id="banner" class="banner hidden"></div>
   <main id="scroll" class="scroll">
     <div id="messages" class="messages"></div>
+    <div id="queue" class="queue hidden"></div>
     <div id="empty" class="empty">
       <img class="logo" id="empty-logo" alt="pi">
       <div>Ask Pi anything about your code.</div>
@@ -76,7 +78,6 @@ app.innerHTML = `
   <div id="dialogs"></div>
   <div class="bottom">
     <div id="widgets-above" class="widgets"></div>
-    <div id="queue" class="queue hidden"></div>
     <div class="composer" id="composer">
       <div id="popup" class="popup hidden"></div>
       <div id="model-picker" class="model-picker hidden"></div>
@@ -926,16 +927,91 @@ function updateWorking() {
   $("working-text").textContent = `${verb}… (${fmtDuration(Date.now() - runStart)}${toks} · esc to interrupt)`;
 }
 
+type QueueKind = "steer" | "followUp";
+const QUEUE_TAG: Record<QueueKind, { label: string; title: string }> = {
+  steer: { label: "steer", title: "Steer: pi reads it after the current tool call" },
+  followUp: { label: "follow-up", title: "Follow-up: pi reads it when the run ends" },
+};
+/** The queued message being dragged, to reorder it among messages of the same kind. */
+let queueDrag: { kind: QueueKind; index: number } | undefined;
+
+/**
+ * Queued messages show as dimmed user messages at the end of the transcript, in the order pi
+ * delivers them (steering first). Each one can be removed, sent now, or dragged to reorder.
+ */
 function renderQueue(steering: string[], followUp: string[]) {
   const q = $("queue");
-  const items = [...steering.map((t) => ({ t, k: "steer" })), ...followUp.map((t) => ({ t, k: "follow-up" }))];
+  const items = [
+    ...steering.map((text, index) => ({ text, index, kind: "steer" as QueueKind })),
+    ...followUp.map((text, index) => ({ text, index, kind: "followUp" as QueueKind })),
+  ];
   q.classList.toggle("hidden", !items.length);
-  q.innerHTML = items.map((i) => `<div class="queued"><span class="tag">${i.k}</span>${escapeHtml(i.t.split("\n")[0])}</div>`).join("");
-  if (items.length) {
-    const clear = el("button", "link", "Clear queue");
+  q.innerHTML = "";
+  for (const it of items) {
+    const op = (name: "remove" | "sendNow" | "move", to?: number) =>
+      post({ type: "queueOp", op: name, kind: it.kind, index: it.index, text: it.text, to });
+    const row = el("div", "user-msg queued-msg");
+    row.draggable = true;
+    const tag = el("span", "tag", QUEUE_TAG[it.kind].label);
+    tag.title = QUEUE_TAG[it.kind].title;
+    const text = el("span", "queued-text");
+    text.textContent = it.text.replace(/\s+/g, " ").trim();
+    text.title = it.text;
+    const actions = el("span", "queued-actions");
+    const btn = (icon: string, title: string, fn: () => void) => {
+      const b = el("button", "icon-btn", icon);
+      b.title = title;
+      b.setAttribute("aria-label", title);
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        fn();
+      });
+      actions.appendChild(b);
+    };
+    btn(I.send, "Send now (stops the current run)", () => op("sendNow"));
+    btn(I.close, "Remove", () => op("remove"));
+    const grip = el("span", "queued-grip", I.grip);
+    grip.title = "Drag to reorder";
+    row.append(grip, tag, text, actions);
+    row.addEventListener("dragstart", (e) => {
+      queueDrag = { kind: it.kind, index: it.index };
+      e.dataTransfer!.effectAllowed = "move";
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => {
+      queueDrag = undefined;
+      row.classList.remove("dragging");
+      q.querySelectorAll(".drop-before, .drop-after").forEach((n) => n.classList.remove("drop-before", "drop-after"));
+    });
+    // Drop on the top half to go before this message, on the bottom half to go after it.
+    const after = (e: DragEvent) => e.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2;
+    row.addEventListener("dragover", (e) => {
+      if (!queueDrag || queueDrag.kind !== it.kind) return;
+      e.preventDefault();
+      row.classList.toggle("drop-after", after(e));
+      row.classList.toggle("drop-before", !after(e));
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after"));
+    row.addEventListener("drop", (e) => {
+      if (!queueDrag || queueDrag.kind !== it.kind) return;
+      e.preventDefault();
+      const from = queueDrag.index;
+      let to = it.index + (after(e) ? 1 : 0);
+      if (from < to) to--; // the list is one shorter once the message is taken out
+      if (to !== from) {
+        const list = it.kind === "steer" ? steering : followUp;
+        post({ type: "queueOp", op: "move", kind: it.kind, index: from, text: list[from], to });
+      }
+    });
+    q.appendChild(row);
+  }
+  if (items.length > 1) {
+    const clear = el("button", "link queue-clear", "Clear queue");
+    clear.title = "Move all queued messages back to the input box";
     clear.addEventListener("click", () => post({ type: "clearQueue" }));
     q.appendChild(clear);
   }
+  scrollNow();
 }
 
 // Sidebar header row: session name + session actions (replaces the native view toolbar).
