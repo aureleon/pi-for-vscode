@@ -273,8 +273,9 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0;
   background: none; color: var(--vscode-icon-foreground, var(--vscode-foreground));
 }
-.widget-toggle svg { width: 16px; height: 16px; }
-.widget:not(.minimized) .widget-toggle svg { transform: rotate(180deg); }
+/* Like VS Code trees: down when open, right when minimized. */
+.widget-toggle svg { width: 16px; height: 16px; transform: rotate(180deg); }
+.widget.minimized .widget-toggle svg { transform: rotate(90deg); }
 .widget:hover .widget-toggle, .widget-toggle:focus-visible { opacity: 1; }
 .widget.minimized .widget-toggle { opacity: .6; }
 .widget.minimized:hover .widget-toggle { opacity: 1; }
