@@ -270,7 +270,7 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
   background: var(--card-bg); color: var(--vscode-icon-foreground, var(--vscode-foreground));
 }
 .widget-toggle svg { width: 16px; height: 16px; }
-.widget.minimized .widget-toggle svg { transform: rotate(180deg); }
+.widget:not(.minimized) .widget-toggle svg { transform: rotate(180deg); }
 .widget:hover .widget-toggle, .widget-toggle:focus-visible { opacity: 1; }
 .widget.minimized .widget-toggle { opacity: .6; }
 .widget.minimized:hover .widget-toggle { opacity: 1; }
