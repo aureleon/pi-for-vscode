@@ -837,8 +837,12 @@ function renderWidgets() {
     const box = el("div", min ? "widget minimized" : "widget");
     box.dataset.key = key;
     const body = el("div", "widget-body");
-    // Minimized: only the first line with text (the heading of a todo list, for example).
-    const lines = min ? [w.lines.find((l) => stripAnsi(l).trim()) ?? w.lines[0] ?? ""] : w.lines;
+    // TUI widgets pad themselves with blank rows; the box has its own padding. Minimized: only the first line.
+    const blank = (l: string) => !stripAnsi(l).trim();
+    let lines = w.lines.slice();
+    while (lines.length > 1 && blank(lines[0])) lines.shift();
+    while (lines.length > 1 && blank(lines[lines.length - 1])) lines.pop();
+    if (min) lines = lines.slice(0, 1);
     body.innerHTML = lines.map((l) => `<div>${ansiToHtml(l) || "&nbsp;"}</div>`).join("");
     const t = el("button", "widget-toggle", I.chevron);
     t.title = min ? "Expand" : "Minimize";
@@ -2133,8 +2137,8 @@ function watchWidgetColumns() {
     document.body.appendChild(probe);
     const charWidth = probe.getBoundingClientRect().width / 100;
     probe.remove();
-    // .bottom padding (10px each side) plus the widget's own padding and border.
-    const inner = bottom.clientWidth - 20 - 18;
+    // .bottom padding (10px each side), the widget border (2px), body padding (12px) and the toggle with its margin (23px).
+    const inner = bottom.clientWidth - 20 - 2 - 12 - 23;
     const columns = charWidth > 0 ? Math.floor(inner / charWidth) : 0;
     if (columns >= 20 && columns !== last) {
       last = columns;

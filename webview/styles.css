@@ -260,14 +260,18 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 .bottom { flex: none; padding: 4px 10px 8px; }
 .widgets:empty { display: none; }
 .widget {
-  position: relative; margin-bottom: 6px;
+  display: flex; align-items: flex-start; margin-bottom: 6px;
   border: 1px solid var(--border); border-radius: 6px; background: var(--card-bg);
 }
-.widget-body { font-family: var(--mono); font-size: 12px; white-space: pre; overflow-x: auto; padding: 4px 8px; }
+/* Fixed line height, so the toggle can sit centred on the first line. */
+.widget-body {
+  flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; line-height: 18px;
+  white-space: pre; overflow-x: auto; padding: 4px 4px 4px 8px;
+}
 .widget-toggle {
-  position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; padding: 2px; border: none; border-radius: 4px;
+  flex: none; width: 20px; height: 20px; margin: 3px 3px 0 0; padding: 2px; border: none; border-radius: 4px;
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0;
-  background: var(--card-bg); color: var(--vscode-icon-foreground, var(--vscode-foreground));
+  background: none; color: var(--vscode-icon-foreground, var(--vscode-foreground));
 }
 .widget-toggle svg { width: 16px; height: 16px; }
 .widget:not(.minimized) .widget-toggle svg { transform: rotate(180deg); }
