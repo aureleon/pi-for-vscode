@@ -111,6 +111,8 @@ interface Session {
   runStartedAt?: number;
   /** Title reported by the webview (first prompt), used when there is no session name. */
   webTitle?: string;
+  /** While a queue edit takes the queue out and puts it back, its in-between queue updates are not shown. */
+  queueBusy?: boolean;
 }
 
 interface StartOptions {
@@ -432,6 +434,7 @@ export class PiController implements vscode.Disposable {
         break;
       case "queue_update":
         s.ui.set("queue", e);
+        if (s.queueBusy) return;
         break;
       case "compaction_start":
         s.ui.set("compaction", e);
@@ -596,6 +599,9 @@ export class PiController implements vscode.Disposable {
         case "pickImage":
           await this.pickImage();
           break;
+        case "queueOp":
+          await this.queueOp(m);
+          break;
         case "clearQueue": {
           const q = await this.req({ type: "clear_queue" });
           this.post({ type: "restoreQueue", text: [...q.steering, ...q.followUp].join("\n\n") });
@@ -627,6 +633,41 @@ export class PiController implements vscode.Disposable {
         this.post({ type: "commands", commands: c.commands });
       } catch {}
     }, 300);
+  }
+
+  /**
+   * Change one queued message. RPC can only add to the queue or clear all of it, so take the queue
+   * out, change it, and queue the messages again in the new order. The webview sends the text it
+   * shows, so the edit finds the right message even when pi delivered one in the meantime.
+   */
+  private async queueOp(m: { op: "remove" | "sendNow" | "move"; kind: "steer" | "followUp"; index: number; text: string; to?: number }) {
+    const s = this.active;
+    if (!s || !this.pi?.running) return;
+    s.queueBusy = true;
+    try {
+      const q = await this.req({ type: "clear_queue" });
+      const steering: string[] = [...(q?.steering ?? [])];
+      const followUp: string[] = [...(q?.followUp ?? [])];
+      const list = m.kind === "steer" ? steering : followUp;
+      const i = list[m.index] === m.text ? m.index : list.indexOf(m.text);
+      let item: string | undefined;
+      if (i >= 0) {
+        [item] = list.splice(i, 1);
+        if (m.op === "move") list.splice(Math.max(0, Math.min(m.to ?? i, list.length)), 0, item);
+      }
+      if (item !== undefined && m.op === "sendNow") {
+        // abort resolves once pi is idle, so this prompt starts the next run.
+        await this.req({ type: "abort" }).catch(() => {});
+        await this.req({ type: "prompt", message: item });
+      }
+      // If the run ended meanwhile, the first message starts a new run and the rest queue behind it.
+      for (const message of steering) await this.req({ type: "prompt", message, streamingBehavior: "steer" });
+      for (const message of followUp) await this.req({ type: "prompt", message, streamingBehavior: "followUp" });
+    } finally {
+      s.queueBusy = false;
+      const last = s.ui.get("queue") ?? { type: "queue_update", steering: [], followUp: [] };
+      this.emit(s, { type: "event", event: last });
+    }
   }
 
   /**
