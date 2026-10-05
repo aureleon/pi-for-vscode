@@ -38,6 +38,7 @@ const I = {
   send: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 2.5 13.5 8l-.7.7L8.5 4.4V14h-1V4.4L3.2 8.7l-.7-.7z"/></svg>`,
   stop: `<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg>`,
   grip: `<svg viewBox="0 0 16 16"><g fill="currentColor"><circle cx="6" cy="4" r="1.1"/><circle cx="10" cy="4" r="1.1"/><circle cx="6" cy="8" r="1.1"/><circle cx="10" cy="8" r="1.1"/><circle cx="6" cy="12" r="1.1"/><circle cx="10" cy="12" r="1.1"/></g></svg>`,
+  chevron: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="m8 5.3 5 5-.7.7L8 6.7 3.7 11l-.7-.7z"/></svg>`,
   close: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="m8 7.3 3.6-3.6.7.7L8.7 8l3.6 3.6-.7.7L8 8.7l-3.6 3.6-.7-.7L7.3 8 3.7 4.4l.7-.7z"/></svg>`,
   terminal: `<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor"/><path d="m4 6 2 2-2 2M7.5 10.5h4" fill="none" stroke="currentColor"/></svg>`,
   tree: `<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" d="M2.5 3.5h5M4.5 3.5v8h3M4.5 7.5h3M9.5 7.5h4M9.5 11.5h4"/></svg>`,
@@ -150,6 +151,8 @@ let outputTokens = 0;
 let images: { image: any; name: string }[] = [];
 const statuses = new Map<string, string>();
 const widgets = new Map<string, { lines: string[]; placement: string }>();
+/** Widgets the user minimized to their first line. They stay minimized while their lines change. */
+const minimizedWidgets = new Set<string>();
 const toolCards = new Map<string, ToolCard>();
 /** Integrations, with their hooks for this webview (see "integrations" at the end of the file). */
 const integrations: { def: WebIntegration; hooks: WebIntegrationInstance; active: boolean }[] = [];
@@ -830,9 +833,23 @@ function renderWidgets() {
   const below = $("widgets-below");
   above.innerHTML = below.innerHTML = "";
   for (const [key, w] of widgets) {
-    const box = el("div", "widget");
+    const min = minimizedWidgets.has(key);
+    const box = el("div", min ? "widget minimized" : "widget");
     box.dataset.key = key;
-    box.innerHTML = w.lines.map((l) => `<div>${ansiToHtml(l) || "&nbsp;"}</div>`).join("");
+    const body = el("div", "widget-body");
+    // Minimized: only the first line with text (the heading of a todo list, for example).
+    const lines = min ? [w.lines.find((l) => stripAnsi(l).trim()) ?? w.lines[0] ?? ""] : w.lines;
+    body.innerHTML = lines.map((l) => `<div>${ansiToHtml(l) || "&nbsp;"}</div>`).join("");
+    const t = el("button", "widget-toggle", I.chevron);
+    t.title = min ? "Expand" : "Minimize";
+    t.setAttribute("aria-label", t.title);
+    t.setAttribute("aria-expanded", String(!min));
+    t.addEventListener("click", () => {
+      if (min) minimizedWidgets.delete(key);
+      else minimizedWidgets.add(key);
+      renderWidgets();
+    });
+    box.append(body, t);
     (w.placement === "belowEditor" ? below : above).appendChild(box);
   }
 }
@@ -2107,7 +2124,7 @@ const widgetColumnListeners: ((columns: number) => void)[] = [];
 /** Count the monospace characters that fit in a widget box, and tell the listeners when it changes. */
 function watchWidgetColumns() {
   const bottom = document.querySelector<HTMLElement>(".bottom")!;
-  const probe = el("div", "widget");
+  const probe = el("div", "widget-body");
   probe.style.cssText = "position:absolute;visibility:hidden;left:0;top:0;padding:0;border:0;";
   probe.textContent = "0".repeat(100);
   let last = 0;

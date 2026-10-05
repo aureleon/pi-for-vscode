@@ -29,7 +29,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - The last session reopens automatically. *Open in New Tab* starts another chat.
 
 ### Pi extensions
-- Extension commands, dialogs, notifications, status text and widgets work in the chat.
+- Extension commands, dialogs, notifications, status text and widgets work in the chat. Minimize a widget to its first line with its chevron button.
 - The core uses only pi's RPC protocol. Support for one pi extension is a separate integration in `integrations/`.
 - **pi-btw:** `/btw` and the other pi-btw commands open a side panel next to the chat. The panel shows the side thread, restores it from the session, and has Inject, Summarize and Clear buttons. A toggle button shows when the session loads pi-btw. See [integrations/pi-btw](integrations/pi-btw/README.md).
 
@@ -82,7 +82,7 @@ Extensions can check `process.env.PI_VSCODE === "1"` to know that they run insid
 
 ## Limitations (from RPC mode)
 
-TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. Commands that open a composer or overlay in the TUI show their notice instead. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` works through the bridge extension, and factory widgets through a workaround. Widgets are read-only. The pi-subagents integration hides its fleet list (the agent picker below the editor), because its keys do nothing here and the agents widget shows the same rows. For everything else, open the session in the terminal.
+TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. Commands that open a composer or overlay in the TUI show their notice instead. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` works through the bridge extension, and factory widgets through a workaround. Widgets are read-only, but you can minimize them. The pi-subagents integration hides its fleet list (the agent picker below the editor), because its keys do nothing here and the agents widget shows the same rows. For everything else, open the session in the terminal.
 
 ## Development
 
