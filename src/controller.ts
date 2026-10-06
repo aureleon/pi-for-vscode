@@ -618,7 +618,10 @@ export class PiController implements vscode.Disposable {
     if (!this.pi?.running) await this.start();
     const cmd: RpcRecord = { type: "prompt", message: text };
     if (images?.length) cmd.images = images;
-    if (this.state.isStreaming) cmd.streamingBehavior = mode ?? "steer";
+    // Always set: pi ignores it when idle. Our isStreaming can lag behind pi (a get_state reply from
+    // before a run started, or a run that a queued message just started), and without it pi refuses
+    // the prompt with "Agent is already processing".
+    cmd.streamingBehavior = mode ?? "steer";
     const res = await this.req(cmd);
     if (res?.disposition === "handled") this.sendCommandsSoon();
   }
