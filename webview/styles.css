@@ -161,6 +161,7 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 .file-link { cursor: pointer; color: var(--vscode-textLink-foreground); }
 .file-link:hover { text-decoration: underline; }
 
+.item.empty-thinking { display: none; }
 .thinking details summary { cursor: pointer; color: var(--muted); list-style: none; }
 .thinking details summary::-webkit-details-marker { display: none; }
 .thinking details[open] summary { margin-bottom: 4px; }

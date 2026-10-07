@@ -327,6 +327,7 @@ class AssistantView {
     } else if (type === "thinking") {
       const item = addItem("thinking");
       item.innerHTML = `<details><summary>Thinking</summary><div class="thinking-body md"></div></details>`;
+      item.classList.add("empty-thinking"); // hidden until the model sends thinking text
       b = { type, el: item, text: "" };
     } else {
       const card = getToolCard(id!, name ?? "tool");
@@ -370,7 +371,7 @@ class AssistantView {
         b.text = c.text;
         this.renderBlock(b);
       } else if (c.type === "thinking") {
-        if (!c.thinking?.trim() && c.redacted) return;
+        if (!c.thinking?.trim()) return;
         const b = this.block(i, "thinking");
         b.text = c.thinking;
         this.renderBlock(b);
