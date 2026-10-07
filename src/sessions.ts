@@ -54,37 +54,38 @@ export async function listSessions(dir: string, limit = 60): Promise<SessionSumm
     .sort((a, b) => b.mtime - a.mtime)
     .slice(0, limit);
 
-  return Promise.all(
-    recent.map(async ({ file, mtime }) => {
-      const summary: SessionSummary = { file, mtime, messageCount: 0 };
+  return Promise.all(recent.map(({ file, mtime }) => summarizeSession(file, mtime)));
+}
+
+/** Read one session file. A file that is missing or unreadable gives an empty summary. */
+export async function summarizeSession(file: string, mtime = 0): Promise<SessionSummary> {
+  const summary: SessionSummary = { file, mtime, messageCount: 0 };
+  try {
+    const data = await fs.promises.readFile(file, "utf8");
+    for (const line of data.split("\n")) {
+      if (!line) continue;
+      if (line.startsWith('{"type":"session"')) {
+        try {
+          const h = JSON.parse(line);
+          if (typeof h.parentSession === "string" && h.parentSession) summary.parent = path.resolve(h.parentSession);
+        } catch {}
+        continue;
+      }
+      const isInfo = line.includes('"session_info"');
+      const isMsg = line.startsWith('{"type":"message"');
+      if (!isInfo && !isMsg) continue;
       try {
-        const data = await fs.promises.readFile(file, "utf8");
-        for (const line of data.split("\n")) {
-          if (!line) continue;
-          if (line.startsWith('{"type":"session"')) {
-            try {
-              const h = JSON.parse(line);
-              if (typeof h.parentSession === "string" && h.parentSession) summary.parent = path.resolve(h.parentSession);
-            } catch {}
-            continue;
-          }
-          const isInfo = line.includes('"session_info"');
-          const isMsg = line.startsWith('{"type":"message"');
-          if (!isInfo && !isMsg) continue;
-          try {
-            const e = JSON.parse(line);
-            if (e.type === "session_info") summary.name = e.name || undefined;
-            else if (e.type === "message") {
-              const role = e.message?.role;
-              if (role === "user" || role === "assistant") summary.messageCount++;
-              if (role === "user" && !summary.firstMessage) summary.firstMessage = textOf(e.message.content).trim();
-            }
-          } catch {}
+        const e = JSON.parse(line);
+        if (e.type === "session_info") summary.name = e.name || undefined;
+        else if (e.type === "message") {
+          const role = e.message?.role;
+          if (role === "user" || role === "assistant") summary.messageCount++;
+          if (role === "user" && !summary.firstMessage) summary.firstMessage = textOf(e.message.content).trim();
         }
       } catch {}
-      return summary;
-    }),
-  );
+    }
+  } catch {}
+  return summary;
 }
 
 export function relativeTime(ms: number): string {
