@@ -3,6 +3,7 @@
  * `host.ts`) to build without that workaround.
  */
 import type { WebIntegration } from "../webview/integrations";
+import { childRunsWeb } from "./child-runs/web";
 import { factoryWidgetsWeb } from "./factory-widgets/web";
 
-export const WEB_WORKAROUNDS: WebIntegration[] = [factoryWidgetsWeb];
+export const WEB_WORKAROUNDS: WebIntegration[] = [factoryWidgetsWeb, childRunsWeb];
