@@ -15,7 +15,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - Queued messages show at the end of the chat. Drag to reorder them, or remove or send one now.
 - `/` for commands, `@` for file paths, `!cmd` for shell commands. Paste or drop images.
 - The context pill shows how full the context is. Click it to compact.
-- A spinning π with a count shows next to the context pill while sessions run inside the chat (for example subagents or workflow agents). Click it to see them.
+- A π with a count shows next to the context pill while sessions run inside the chat (for example subagents or workflow agents). Click it to see them.
 
 ### Models
 - The model menu lists the models in Pi's `enabledModels`, or all models if the setting is empty.
