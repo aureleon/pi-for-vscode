@@ -199,13 +199,14 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 
 /* ---------------------------------------------------------------- working */
 .working { display: flex; gap: 8px; align-items: center; padding: 10px 2px; color: var(--muted); }
-/* A π glyph spinning about its centre: fixed square box, centred, line-height 1. */
-.spinner {
-  display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; flex: none;
-  font-family: Georgia, "Times New Roman", serif; font-size: 15px; line-height: 1; font-weight: 600;
-  color: var(--vscode-foreground); opacity: .85; animation: spin 1.6s cubic-bezier(.45,.05,.55,.95) infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
+.working .spinner { width: 12px; height: 12px; margin: 0 1px; }
+/* The block π from the logo; its three blocks light up in turn. */
+.spinner { display: inline-block; width: 14px; height: 14px; flex: none; color: var(--vscode-foreground); }
+.spinner path { fill: currentColor; opacity: .25; animation: pi-pulse 2.4s ease-in-out infinite; }
+.spinner path:nth-child(2) { animation-delay: .4s; }
+.spinner path:nth-child(3) { animation-delay: .8s; }
+@keyframes pi-pulse { 0%, 100% { opacity: .25; } 30% { opacity: .9; } 60% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .spinner path { animation: none; opacity: .7; } }
 
 /* ---------------------------------------------------------------- dialogs */
 #dialogs { flex: none; padding: 0 10px; max-height: 50vh; overflow-y: auto; }
@@ -478,7 +479,7 @@ button.lm-twisty:hover { background: var(--vscode-toolbar-hoverBackground); colo
 .mp-item.active .lm-col { color: inherit; opacity: .75; }
 .lm-dot { font-size: 8px; line-height: 20px; text-align: center; color: var(--vscode-textLink-foreground); }
 .lm-dot.lm-running { font-size: 11px; display: flex; align-items: center; justify-content: center; }
-.lm-dot .spinner { width: 12px; height: 12px; font-size: 12px; }
+.lm-dot .spinner { width: 12px; height: 12px; }
 .lm-group { font-size: 11.5px; color: var(--muted); padding: 8px 10px 3px 28px; opacity: .8; }
 .lm-group:first-child { padding-top: 4px; }
 .lm-item.archived .lm-label { opacity: .6; font-style: italic; }

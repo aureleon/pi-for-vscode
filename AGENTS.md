@@ -41,7 +41,7 @@ The UI looks like Claude Code for VS Code and uses the VS Code theme.
 
 - Colours: use only `--vscode-*` theme variables, through the tokens in `:root` (`--border`, `--muted`, `--accent`, `--card-bg`, `--ok`, `--err`, `--mono`). Give a fallback when a theme variable can be missing. Do not use fixed colours.
 - Sizes: `--gap: 10px` and `--radius: 8px`. Rows in menus and lists are compact (about 20–28px). Toolbar rows match VS Code's 28px header height.
-- Icons: 16×16 inline SVG with `fill="currentColor"`, in the `I` object in `main.ts`, or VS Code codicons (`$(name)`) in native UI. The busy indicator is the spinning π (`SPINNER` in `webview/spinner.ts`). Do not add other spinners.
+- Icons: 16×16 inline SVG with `fill="currentColor"`, in the `I` object in `main.ts`, or VS Code codicons (`$(name)`) in native UI. The busy indicator is the pulsing block π (`SPINNER` in `webview/spinner.ts`). Do not add other spinners.
 - Menus and navigators (sessions, fork, tree, model picker) are anchored to the header and look the same: a search field with a close (X) button, `mp-item` rows, `lm-group` group headings, and a `menu-footer` with a key hint. Reuse these classes when you add a list.
 - Prefer native VS Code UI where it fits (status bar, notifications, quick picks for files). Use the webview for chat and navigators.
 - Notices: errors and warnings from pi go to VS Code notifications.
