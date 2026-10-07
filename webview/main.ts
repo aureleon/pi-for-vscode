@@ -828,33 +828,55 @@ function renderStatus() {
   const s = $("statusline");
   s.innerHTML = [...statuses.values()].map((t) => `<span class="status-item">${ansiToHtml(t)}</span>`).join("");
 }
+/** One DOM box per widget key. Boxes are updated in place: a rebuild between mousedown and mouseup would drop the click. */
+const widgetBoxes = new Map<string, { box: HTMLElement; body: HTMLElement; toggle: HTMLElement; html: string }>();
 function renderWidgets() {
   const above = $("widgets-above");
   const below = $("widgets-below");
-  above.innerHTML = below.innerHTML = "";
+  for (const [key, v] of widgetBoxes) {
+    if (widgets.has(key)) continue;
+    v.box.remove();
+    widgetBoxes.delete(key);
+  }
+  const order: Record<string, HTMLElement[]> = { above: [], below: [] };
   for (const [key, w] of widgets) {
     const min = minimizedWidgets.has(key);
-    const box = el("div", min ? "widget minimized" : "widget");
-    box.dataset.key = key;
-    const body = el("div", "widget-body");
+    let v = widgetBoxes.get(key);
+    if (!v) {
+      const box = el("div", "widget");
+      box.dataset.key = key;
+      const body = el("div", "widget-body");
+      const toggle = el("button", "widget-toggle", I.chevron);
+      toggle.addEventListener("click", () => {
+        if (minimizedWidgets.has(key)) minimizedWidgets.delete(key);
+        else minimizedWidgets.add(key);
+        renderWidgets();
+      });
+      box.append(body, toggle);
+      v = { box, body, toggle, html: "" };
+      widgetBoxes.set(key, v);
+    }
     // TUI widgets pad themselves with blank rows; the box has its own padding. Minimized: only the first line.
     const blank = (l: string) => !stripAnsi(l).trim();
     let lines = w.lines.slice();
     while (lines.length > 1 && blank(lines[0])) lines.shift();
     while (lines.length > 1 && blank(lines[lines.length - 1])) lines.pop();
     if (min) lines = lines.slice(0, 1);
-    body.innerHTML = lines.map((l) => `<div>${ansiToHtml(l) || "&nbsp;"}</div>`).join("");
-    const t = el("button", "widget-toggle", I.chevron);
-    t.title = min ? "Expand" : "Minimize";
-    t.setAttribute("aria-label", t.title);
-    t.setAttribute("aria-expanded", String(!min));
-    t.addEventListener("click", () => {
-      if (min) minimizedWidgets.delete(key);
-      else minimizedWidgets.add(key);
-      renderWidgets();
-    });
-    box.append(body, t);
-    (w.placement === "belowEditor" ? below : above).appendChild(box);
+    const html = lines.map((l) => `<div>${ansiToHtml(l) || "&nbsp;"}</div>`).join("");
+    if (html !== v.html) {
+      v.body.innerHTML = html;
+      v.html = html;
+    }
+    v.box.classList.toggle("minimized", min);
+    v.toggle.title = min ? "Expand" : "Minimize";
+    v.toggle.setAttribute("aria-label", v.toggle.title);
+    v.toggle.setAttribute("aria-expanded", String(!min));
+    order[w.placement === "belowEditor" ? "below" : "above"].push(v.box);
+  }
+  // Append only when the order or parent differs, so boxes that stay put are not detached.
+  for (const [parent, boxes] of [[above, order.above], [below, order.below]] as const) {
+    if (parent.children.length === boxes.length && boxes.every((b, i) => parent.children[i] === b)) continue;
+    parent.replaceChildren(...boxes);
   }
 }
 
