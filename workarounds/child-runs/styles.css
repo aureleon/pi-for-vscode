@@ -1,7 +1,7 @@
 /* Child-runs workaround: the running-sessions button in the composer toolbar and its list.
    Loaded by workarounds/child-runs/web.ts. Uses the theme tokens of webview/styles.css. */
 
-/* Sessions that run inside this chat (subagents): spinning π + count, and "running" when the toolbar has room.
+/* Sessions that run inside this chat (subagents): block π + count, and "running" when the toolbar has room.
    Not on hover: the label would push the model chip narrower under the pointer. */
 .runs {
   display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 6px 0 4px; flex: none;
@@ -9,7 +9,9 @@
   background: none; border: 1px solid transparent; border-radius: 11px;
   transition: background .12s ease, border-color .12s ease, color .12s ease;
 }
-.runs .spinner { width: 12px; height: 12px; font-size: 13px; color: inherit; }
+.runs .spinner { width: 12px; height: 12px; color: inherit; }
+/* Still in the toolbar, so it does not compete with the working line; the list animates. */
+.runs .spinner path { animation: none; opacity: .8; }
 .runs-label { display: none; }
 .toolbar { container-type: inline-size; }
 @container (min-width: 440px) { .runs-label { display: inline; } }
@@ -18,5 +20,6 @@
 .runs-menu .lm-head { margin: 4px 4px 2px 12px; }
 .runs-title { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; }
 .runs-menu .mp-list { max-height: 40vh; }
-.runs-item { cursor: default; min-height: 28px; }
-.runs-item .spinner { width: 12px; height: 12px; font-size: 13px; }
+/* Rows only show what runs; they have no action. */
+.runs-menu .runs-item { cursor: default; min-height: 28px; }
+.runs-item .spinner { width: 12px; height: 12px; }
