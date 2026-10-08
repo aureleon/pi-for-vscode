@@ -1,5 +1,6 @@
 import { marked } from "marked";
 import { ansiToHtml, escapeHtml, stripAnsi } from "./ansi";
+import { WEB_INTEGRATIONS } from "./integrations";
 import { TreeMenu } from "./treeMenu";
 import { SPINNER } from "./spinner";
 import { highlightMarkdown } from "./mdHighlight";
@@ -561,6 +562,7 @@ function renderMessage(msg: any) {
       break;
     }
     case "custom":
+      if (WEB_INTEGRATIONS.some((i) => i.renderCustomMessage?.(msg))) break;
       if (msg.display) {
         const n = renderNote(textOf(msg.content), "custom");
         n.dataset.type = msg.customType;
@@ -685,6 +687,7 @@ function onEvent(e: any) {
       onExtensionUi(e);
       break;
     case "entry_appended":
+      for (const i of WEB_INTEGRATIONS) i.onEntry?.(e.entry);
       break;
   }
 }
@@ -710,8 +713,11 @@ function onExtensionUi(r: any) {
       break;
     case "setTitle":
       break;
-    case "notify":
-      break; // shown natively by the host
+    case "notify": {
+      const text = stripAnsi(r.message ?? "");
+      for (const i of WEB_INTEGRATIONS) i.onNotice?.(text, r.notifyType ?? "info");
+      break; // the host shows it as a VS Code notification
+    }
     case "select":
     case "confirm":
     case "input":
@@ -1116,6 +1122,10 @@ function submit(mode?: "steer" | "followUp") {
 
   // Builtin slash commands (unless an extension/prompt/skill shadows them)
   const m = trimmed.match(/^\/(\S+)\s*([\s\S]*)$/);
+  if (m && !images.length && WEB_INTEGRATIONS.some((i) => i.interceptCommand?.(m[1], m[2]))) {
+    clearInput();
+    return;
+  }
   if (m && !images.length) {
     const builtin = BUILTINS.find((b) => b.name === m[1]);
     const shadowed = commands.some((c) => c.name === m[1]);
@@ -2009,6 +2019,7 @@ window.addEventListener("message", (ev) => {
   switch (m.type) {
     case "init":
     case "reset":
+      for (const i of WEB_INTEGRATIONS) i.onSnapshot?.(m.extEntries ?? []);
       // The host replays the session's statuses, widgets, queue and open dialogs after the snapshot.
       statuses.clear();
       renderStatus();
@@ -2085,6 +2096,9 @@ window.addEventListener("message", (ev) => {
       else if (listMenu.open && m.kind === listMenu.kindOpen) listMenu.hide();
       else if (!m.refresh) listMenu.show(m.kind, m.placeholder, m.items ?? [], m.empty);
       break;
+    case "ext":
+      WEB_INTEGRATIONS.find((i) => i.id === m.id)?.onMessage?.(m.payload);
+      break;
     case "openEffortPicker":
       picker.show("", true);
       break;
@@ -2114,6 +2128,28 @@ window.addEventListener("message", (ev) => {
     }
   }
 });
+
+// ------------------------------------------------------------------ integrations
+
+for (const i of WEB_INTEGRATIONS) {
+  i.init?.({
+    post: (payload) => post({ type: "ext", id: i.id, payload }),
+    addItem: (cls) => addItem(cls),
+    addToolbarButton: ({ icon, title, onClick }) => {
+      if (!document.body.dataset.header) return undefined;
+      const b = el("button", "sp-icon", icon);
+      b.title = title;
+      b.setAttribute("aria-label", title);
+      b.addEventListener("click", onClick);
+      $("tb-tree").before(b);
+      return b;
+    },
+    insertText: (text) => insertText(text),
+    md,
+    escapeHtml,
+    linkify,
+  });
+}
 
 updateEmpty();
 resizeInput();

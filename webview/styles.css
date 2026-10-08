@@ -432,6 +432,21 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 }
 .mp-effort.dragging .slider-knob, .mp-effort.dragging .slider-fill { transition: none; }
 
+/* ---------------------------------------------------------------- header and menu buttons */
+.sp-btn {
+  height: 22px; padding: 0 7px; border: none; border-radius: 5px; background: none; cursor: pointer;
+  color: var(--vscode-icon-foreground, var(--vscode-foreground)); font: inherit; font-size: 12px; white-space: nowrap;
+}
+.sp-btn:hover:not([disabled]) { background: var(--vscode-toolbar-hoverBackground); }
+.sp-btn[disabled] { opacity: .45; cursor: default; }
+.sp-icon {
+  width: 22px; height: 22px; padding: 3px; flex: none; border: none; border-radius: 5px; background: none; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--vscode-icon-foreground, var(--vscode-foreground));
+}
+.sp-icon svg { width: 16px; height: 16px; }
+.sp-icon:hover:not([disabled]) { background: var(--vscode-toolbar-hoverBackground); }
+.sp-icon[disabled] { opacity: .45; cursor: default; }
+
 /* ---------------------------------------------------------------- navigators: sessions (/resume, /fork) and tree (/tree)
    Both share one look: full-height box under the header, 13px rows (28px tall),
    11.5px muted metadata, the same search field and footer. */
@@ -507,20 +522,6 @@ button.lm-twisty:hover { background: var(--vscode-toolbar-hoverBackground); colo
 .menu-footer:empty { display: none; }
 .menu-hint { flex: 1 1 auto; color: var(--muted); display: flex; gap: 6px; align-items: center; min-width: 0; }
 .menu-toggle { margin-left: auto; font-size: 12px; }
-/* Small text and icon buttons in headers, menus and navigators. */
-.sp-btn {
-  height: 22px; padding: 0 7px; border: none; border-radius: 5px; background: none; cursor: pointer;
-  color: var(--vscode-icon-foreground, var(--vscode-foreground)); font: inherit; font-size: 12px; white-space: nowrap;
-}
-.sp-btn:hover:not([disabled]) { background: var(--vscode-toolbar-hoverBackground); }
-.sp-btn[disabled] { opacity: .45; cursor: default; }
-.sp-icon {
-  width: 22px; height: 22px; padding: 3px; flex: none; border: none; border-radius: 5px; background: none; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center; color: var(--vscode-icon-foreground, var(--vscode-foreground));
-}
-.sp-icon svg { width: 16px; height: 16px; }
-.sp-icon:hover:not([disabled]) { background: var(--vscode-toolbar-hoverBackground); }
-.sp-icon[disabled] { opacity: .45; cursor: default; }
 .menu-footer .sp-btn { font-size: 12px; padding: 0 10px; }
 .tm-guide { font-family: var(--mono); font-size: 11px; white-space: pre; color: var(--muted); opacity: .6; }
 .tm-mark { text-align: center; color: var(--muted); font-size: 11px; }

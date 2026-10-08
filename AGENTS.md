@@ -10,6 +10,7 @@ Notes for coding agents that work on Pi for VS Code.
 - `src/bridge/piBridge.ts`: pi extension loaded with `pi -e`. It adds hidden `vscode:*` commands (tree navigation, labels). Keep it free of dependencies.
 - `webview/main.ts`: the chat UI, in plain TypeScript and DOM (no framework). `webview/styles.css` holds all styles.
 - `webview/treeMenu.ts`, `webview/streamMd.ts`: `/tree` navigator, streaming markdown.
+- `src/integrations.ts`, `webview/integrations.ts`: hooks for integrations, which add support for one pi extension. The two sides talk with `{ type: "ext", id, payload }`. Put code for one extension in an integration, never in `controller.ts` or `main.ts`. The 0.1 release has none.
 - `tools/build-icon-font.mjs`: builds `media/pi-icons.woff`. Run `npm run build:icons`.
 
 ## Checks
@@ -44,7 +45,7 @@ The UI looks like Claude Code for VS Code and uses the VS Code theme.
 - Icons: 16×16 inline SVG with `fill="currentColor"`, in the `I` object in `main.ts`, or VS Code codicons (`$(name)`) in native UI. The busy indicator is the pulsing block π (`SPINNER` in `webview/spinner.ts`). Do not add other spinners.
 - Menus and navigators (sessions, fork, tree, model picker) are anchored to the header and look the same: a search field with a close (X) button, `mp-item` rows, `lm-group` group headings, and a `menu-footer` with a key hint. Reuse these classes when you add a list.
 - Prefer native VS Code UI where it fits (status bar, notifications, quick picks for files). Use the webview for chat and navigators.
-- Notices: errors and warnings from pi go to VS Code notifications.
+- Notices: errors and warnings from pi go to VS Code notifications. An integration can keep its own notices in the webview (`filterNotice`).
 - Keep chrome quiet: use subdued text (`--muted`) for metadata, and show actions on hover where possible.
 
 ## Writing style (README, UI text, comments)
