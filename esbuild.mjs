@@ -21,6 +21,8 @@ const configs = [
     format: "iife",
     target: "es2020",
     sourcemap: true,
+    // Integrations (integrations/*) import their styles as text and add them to the page.
+    loader: { ".css": "text" },
   },
   {
     // pi-side bridge loaded via `pi -e` (adds tree navigation to RPC mode)

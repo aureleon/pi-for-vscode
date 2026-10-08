@@ -1,6 +1,6 @@
 import { marked } from "marked";
 import { ansiToHtml, escapeHtml, stripAnsi } from "./ansi";
-import { WEB_INTEGRATIONS } from "./integrations";
+import { WEB_INTEGRATIONS, type PiCommand, type WebIntegration, type WebIntegrationInstance } from "./integrations";
 import { TreeMenu } from "./treeMenu";
 import { SPINNER } from "./spinner";
 import { highlightMarkdown } from "./mdHighlight";
@@ -151,6 +151,10 @@ let images: { image: any; name: string }[] = [];
 const statuses = new Map<string, string>();
 const widgets = new Map<string, { lines: string[]; placement: string }>();
 const toolCards = new Map<string, ToolCard>();
+/** Integrations, with their hooks for this webview (see "integrations" at the end of the file). */
+const integrations: { def: WebIntegration; hooks: WebIntegrationInstance; active: boolean }[] = [];
+/** Hooks of the integrations whose pi extension is loaded. */
+const activeHooks = () => integrations.filter((x) => x.active).map((x) => x.hooks);
 const bashCards = new Map<string, ToolCard>();
 let firstUserText = "";
 
@@ -652,7 +656,7 @@ function renderMessage(msg: any) {
       break;
     }
     case "custom":
-      if (WEB_INTEGRATIONS.some((i) => i.renderCustomMessage?.(msg))) break;
+      if (activeHooks().some((i) => i.renderCustomMessage?.(msg))) break;
       if (msg.display) {
         const n = renderNote(textOf(msg.content), "custom");
         n.dataset.type = msg.customType;
@@ -777,7 +781,7 @@ function onEvent(e: any) {
       onExtensionUi(e);
       break;
     case "entry_appended":
-      for (const i of WEB_INTEGRATIONS) i.onEntry?.(e.entry);
+      for (const i of activeHooks()) i.onEntry?.(e.entry);
       break;
   }
 }
@@ -805,7 +809,7 @@ function onExtensionUi(r: any) {
       break;
     case "notify": {
       const text = stripAnsi(r.message ?? "");
-      for (const i of WEB_INTEGRATIONS) i.onNotice?.(text, r.notifyType ?? "info");
+      for (const i of activeHooks()) i.onNotice?.(text, r.notifyType ?? "info");
       break; // the host shows it as a VS Code notification
     }
     case "select":
@@ -1212,7 +1216,7 @@ function submit(mode?: "steer" | "followUp") {
 
   // Builtin slash commands (unless an extension/prompt/skill shadows them)
   const m = trimmed.match(/^\/(\S+)\s*([\s\S]*)$/);
-  if (m && !images.length && WEB_INTEGRATIONS.some((i) => i.interceptCommand?.(m[1], m[2]))) {
+  if (m && !images.length && activeHooks().some((i) => i.interceptCommand?.(m[1], m[2]))) {
     clearInput();
     return;
   }
@@ -2134,7 +2138,8 @@ window.addEventListener("message", (ev) => {
         );
         break;
       }
-      for (const i of WEB_INTEGRATIONS) i.onSnapshot?.(m.extEntries ?? []);
+      if (m.commands) updateIntegrations(m.commands);
+      for (const i of activeHooks()) i.onSnapshot?.(m.extEntries ?? []);
       // The host replays the session's statuses, widgets, queue and open dialogs after the snapshot.
       statuses.clear();
       renderStatus();
@@ -2154,6 +2159,7 @@ window.addEventListener("message", (ev) => {
       break;
     case "commands":
       commands = visibleCommands(m.commands) ?? commands;
+      if (m.commands) updateIntegrations(m.commands);
       break;
     case "event":
       onEvent(m.event);
@@ -2217,7 +2223,7 @@ window.addEventListener("message", (ev) => {
       else if (!m.refresh) listMenu.show(m.kind, m.placeholder, m.items ?? [], m.empty);
       break;
     case "ext":
-      WEB_INTEGRATIONS.find((i) => i.id === m.id)?.onMessage?.(m.payload);
+      integrations.find((x) => x.def.id === m.id)?.hooks.onMessage?.(m.payload);
       break;
     case "openEffortPicker":
       picker.show("", true);
@@ -2251,24 +2257,45 @@ window.addEventListener("message", (ev) => {
 
 // ------------------------------------------------------------------ integrations
 
-for (const i of WEB_INTEGRATIONS) {
-  i.init?.({
-    post: (payload) => post({ type: "ext", id: i.id, payload }),
+/** Turn integrations on or off when the commands change (a new session or /restart can load other extensions). */
+function updateIntegrations(list: PiCommand[]) {
+  for (const x of integrations) {
+    const active = x.def.matches(list);
+    if (active === x.active) continue;
+    x.active = active;
+    x.hooks.onActiveChange?.(active);
+  }
+}
+
+for (const def of WEB_INTEGRATIONS) {
+  const key = `ext:${def.id}`;
+  const hooks = def.create({
+    post: (payload) => post({ type: "ext", id: def.id, payload }),
     addItem: (cls) => addItem(cls),
     addToolbarButton: ({ icon, title, onClick }) => {
-      if (!document.body.dataset.header) return undefined;
-      const b = el("button", "sp-icon", icon);
+      const header = !!document.body.dataset.header;
+      const b = el("button", header ? "sp-icon" : "icon-btn", icon);
       b.title = title;
       b.setAttribute("aria-label", title);
       b.addEventListener("click", onClick);
-      $("tb-tree").before(b);
+      if (header) $("tb-tree").before(b);
+      else {
+        // Do not take focus from the input, like the other composer toolbar buttons.
+        b.addEventListener("mousedown", (e) => e.preventDefault());
+        $("btn-slash").after(b);
+      }
       return b;
     },
     insertText: (text) => insertText(text),
+    focusComposer: () => input.focus(),
     md,
+    mdUser,
     escapeHtml,
     linkify,
+    loadState: <T>() => vscode.getState()?.[key] as T | undefined,
+    saveState: (value) => vscode.setState({ ...(vscode.getState() ?? {}), [key]: value }),
   });
+  integrations.push({ def, hooks, active: false });
 }
 
 updateEmpty();

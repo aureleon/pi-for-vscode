@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["node", "vscode"]
   },
-  "include": ["src", "webview"]
+  "include": ["src", "webview", "integrations"]
 }

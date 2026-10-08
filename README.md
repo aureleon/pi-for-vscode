@@ -30,7 +30,8 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 
 ### Pi extensions
 - Extension commands, dialogs, notifications, status text and widgets work in the chat.
-- The extension uses only pi's RPC protocol. It has no code for a specific pi extension.
+- The core uses only pi's RPC protocol. Support for one pi extension is a separate integration in `integrations/`.
+- **pi-btw:** `/btw` and the other pi-btw commands open a side panel next to the chat. The panel shows the side thread, restores it from the session, and has Inject, Summarize and Clear buttons. A toggle button shows when the session loads pi-btw. See [integrations/pi-btw](integrations/pi-btw/README.md).
 
 ### Terminal
 - *Pi: Open in Terminal* starts a new pi TUI session.
@@ -49,7 +50,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **`/tree`** needs a command that RPC mode does not have. The extension adds it by loading a small bridge extension into pi (`dist/pi-bridge.mjs`).
 - **Queue edits** take the whole queue out of pi and queue it again, because RPC mode can only add to the queue or clear it. Images in queued messages are not kept. **Send now** stops the run and sends the message as the next run.
 - **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.
-- **Integrations** add support for one pi extension beyond pi's RPC protocol. The hooks are in `src/integrations.ts` (host) and `webview/integrations.ts` (webview). Version 0.1 has no integrations.
+- **Integrations** add support for one pi extension beyond pi's RPC protocol. Each one is in `integrations/<name>/`, and `integrations/host.ts` and `integrations/web.ts` list them. An integration is active only in sessions that load its pi extension. See [integrations/README.md](integrations/README.md).
 
 ## Built-in slash commands
 
@@ -87,7 +88,7 @@ npm install
 npm run build        # or: npm run watch
 npm run typecheck
 npm run package      # creates pi-for-vscode-<version>.vsix
-code --install-extension pi-for-vscode-0.1.0.vsix
+code --install-extension pi-for-vscode-0.2.0.vsix
 ```
 
 To debug, press <kbd>F5</kbd> with `.vscode/launch.json` ("Run Extension"). Logs from pi's stderr go to the **Pi** output channel.
