@@ -103,6 +103,12 @@ app.innerHTML = `
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const LOGO = document.body.dataset.logo ?? "";
+/** Read-only session viewer: no pi process and no composer. The host sends the transcript from the session file. */
+const READONLY = !!document.body.dataset.readonly;
+if (READONLY) {
+  document.body.classList.add("readonly");
+  $("empty").querySelector("div")!.textContent = "This session has no messages yet.";
+}
 $<HTMLImageElement>("empty-logo").src = LOGO;
 const scrollEl = $("scroll");
 const messagesEl = $("messages");
@@ -1821,6 +1827,7 @@ interface ListItem {
 
 const ARCHIVE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13v3.5h-1V14h-11V5.5h-1V2zm1 1v1.5h11V3h-11zm1 2.5V13h9V5.5h-9zM6 7h4v1H6V7z"/></svg>`;
 const CHEVRON_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="m6 3.6 4.4 4.4L6 12.4l-.7-.7L9 8 5.3 4.3z"/></svg>`;
+const VIEW_ICON = `<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor"/></svg>`;
 const UNARCHIVE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13v3.5h-1V14h-11V5.5h-1V2zm1 1v1.5h11V3h-11zm1 2.5V13h9V5.5h-9zM8 6.3l2.4 2.4-.7.7L8.5 8.2V12h-1V8.2L6.3 9.4l-.7-.7L8 6.3z"/></svg>`;
 
 /**
@@ -1869,6 +1876,11 @@ class ListMenu {
       else if (e.key === "ArrowUp" && n) { this.sel = (this.sel - 1 + n) % n; this.render(); e.preventDefault(); }
       else if (e.key === "PageDown" && n) { this.sel = Math.min(n - 1, this.sel + 10); this.render(); e.preventDefault(); }
       else if (e.key === "PageUp" && n) { this.sel = Math.max(0, this.sel - 10); this.render(); e.preventDefault(); }
+      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && this.kind === "session") {
+        const it = this.flat[this.sel];
+        if (it && !it.id.startsWith("bg:")) this.act(it, "view");
+        e.preventDefault();
+      }
       else if (e.key === "Enter") { const it = this.flat[this.sel]; if (it) this.choose(it); e.preventDefault(); }
       else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && !this.search.value && this.flat[this.sel]) {
         const it = this.flat[this.sel];
@@ -1988,14 +2000,23 @@ class ListMenu {
         this.search.focus();
       });
       if (archivable) {
-        const b = el("button", "lm-action", it.archived ? UNARCHIVE_ICON : ARCHIVE_ICON);
+        const actions = el("span", "lm-actions");
+        const v = el("button", "lm-action", VIEW_ICON);
+        v.title = "View read-only in a new tab (⌘↵). It shows new messages as they are written.";
+        v.disabled = it.id.startsWith("bg:");
+        v.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.act(it, "view");
+        });
+        const b = el("button", "lm-action lm-archive", it.archived ? UNARCHIVE_ICON : ARCHIVE_ICON);
         b.title = it.current ? "The current session can't be archived" : it.busy ? "A running session can't be archived" : it.archived ? "Unarchive (⌘⌫)" : "Archive: hide from this list (⌘⌫)";
         b.disabled = !!it.current || !!it.busy;
         b.addEventListener("click", (e) => {
           e.stopPropagation();
           this.act(it, it.archived ? "unarchive" : "archive");
         });
-        row.appendChild(b);
+        actions.append(v, b);
+        row.appendChild(actions);
       }
       row.addEventListener("click", () => this.choose(it));
       this.list.appendChild(row);
@@ -2010,7 +2031,7 @@ class ListMenu {
     const hint = el("div", "menu-hint");
     const archivedCount = this.items.filter((it) => it.archived).length;
     const nested = this.kids.size > 0;
-    hint.textContent = this.kind === "session" ? `Enter to open${nested ? " · → to expand" : ""} · ⌘⌫ to archive` : this.kind === "fork" ? "Enter to fork from this message" : "";
+    hint.textContent = this.kind === "session" ? `Enter to open${nested ? " · → to expand" : ""} · ⌘↵ to view · ⌘⌫ to archive` : this.kind === "fork" ? "Enter to fork from this message" : "";
     f.appendChild(hint);
     if (this.kind === "session" && archivedCount) {
       const t = el("button", "link menu-toggle", this.showArchived ? "Hide archived" : `Show archived (${archivedCount})`);
@@ -2030,7 +2051,8 @@ class ListMenu {
     this.render(it.id);
   }
 
-  private act(it: ListItem, action: "archive" | "unarchive") {
+  private act(it: ListItem, action: "archive" | "unarchive" | "view") {
+    if (action === "view") this.hide();
     post({ type: "listAction", kind: this.kind, id: it.id, action });
   }
 
@@ -2103,6 +2125,15 @@ window.addEventListener("message", (ev) => {
   switch (m.type) {
     case "init":
     case "reset":
+      if (READONLY) {
+        applySnapshot(m);
+        showBanner(
+          `<b>Read-only view of this session.</b><div class="dim">New messages show when pi writes them to the session file.</div>`,
+          [{ label: "Open in Chat", fn: () => post({ type: "openInChat" }) }],
+          "info",
+        );
+        break;
+      }
       for (const i of WEB_INTEGRATIONS) i.onSnapshot?.(m.extEntries ?? []);
       // The host replays the session's statuses, widgets, queue and open dialogs after the snapshot.
       statuses.clear();
@@ -2126,6 +2157,11 @@ window.addEventListener("message", (ev) => {
       break;
     case "event":
       onEvent(m.event);
+      break;
+    case "appendMessages":
+      // Read-only viewer: entries that pi wrote to the session file since the last update.
+      for (const msg of m.messages ?? []) renderMessage(msg);
+      autoscroll();
       break;
     case "terminalAttached":
       setRunning(false);

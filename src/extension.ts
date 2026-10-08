@@ -1,16 +1,23 @@
 import * as crypto from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { PiController, type ChatHost } from "./controller";
 import { createPiTerminal } from "./piTerminal";
+import { SessionViewer } from "./sessionViewer";
+import { defaultSessionDir } from "./sessions";
 
 let output: vscode.OutputChannel;
 const controllers = new Set<PiController>();
 let sidebar: PiController | undefined;
 let lastActive: PiController | undefined;
 
-/** `header`: render the in-webview session row (sidebar only; editor tabs use their own title bar). */
-function html(webview: vscode.Webview, extUri: vscode.Uri, header = false): string {
+/**
+ * `header`: render the in-webview session row (sidebar only; editor tabs use their own title bar).
+ * `readonly`: the session viewer, with no composer.
+ */
+function html(webview: vscode.Webview, extUri: vscode.Uri, opts: { header?: boolean; readonly?: boolean } = {}): string {
   const nonce = crypto.randomBytes(16).toString("base64");
   const script = webview.asWebviewUri(vscode.Uri.joinPath(extUri, "dist", "webview.js"));
   const style = webview.asWebviewUri(vscode.Uri.joinPath(extUri, "webview", "styles.css"));
@@ -31,7 +38,7 @@ function html(webview: vscode.Webview, extUri: vscode.Uri, header = false): stri
 <link rel="stylesheet" href="${style}">
 <title>Pi</title>
 </head>
-<body data-logo="${logo}"${header ? ' data-header="1"' : ""}>
+<body data-logo="${logo}"${opts.header ? ' data-header="1"' : ""}${opts.readonly ? ' data-readonly="1"' : ""}>
 <div id="app"></div>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
@@ -70,7 +77,7 @@ class SidebarProvider implements vscode.WebviewViewProvider {
       controllers.delete(c);
       if (sidebar === c) sidebar = undefined;
     });
-    view.webview.html = html(view.webview, this.context.extensionUri, true);
+    view.webview.html = html(view.webview, this.context.extensionUri, { header: true });
   }
 }
 
@@ -95,6 +102,32 @@ function openPanel(context: vscode.ExtensionContext, sessionFile?: string) {
     if (lastActive === c) lastActive = sidebar;
   });
   panel.webview.html = html(panel.webview, context.extensionUri);
+}
+
+const workspaceCwd = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+
+/** Open a session file read-only in a new tab. The tab shows new entries as pi writes them. */
+function openSessionViewer(context: vscode.ExtensionContext, file: string) {
+  const panel = vscode.window.createWebviewPanel("pi.sessionView", path.basename(file), vscode.ViewColumn.Beside, {
+    ...webviewOptions(context.extensionUri),
+    retainContextWhenHidden: true,
+  });
+  panel.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "pi-logo.svg");
+  const viewer = new SessionViewer(panel, file, workspaceCwd(), async (f) => {
+    // A session that changed a moment ago probably has a pi process that still writes it.
+    const recent = Date.now() - fs.statSync(f).mtimeMs < 10_000;
+    if (recent) {
+      const pick = await vscode.window.showWarningMessage(
+        "This session changed a few seconds ago. Another pi process can still write it. Open it in a chat anyway?",
+        { modal: true },
+        "Open",
+      );
+      if (pick !== "Open") return;
+    }
+    openPanel(context, f);
+  });
+  panel.onDidDispose(() => viewer.dispose());
+  panel.webview.html = html(panel.webview, context.extensionUri, { readonly: true });
 }
 
 async function target(): Promise<PiController | undefined> {
@@ -132,6 +165,18 @@ export function activate(context: vscode.ExtensionContext) {
   cmd("pi.selectModel", async () => (await target())?.runBuiltin("model", ""));
   cmd("pi.selectThinking", async () => (await target())?.runBuiltin("thinking", ""));
   cmd("pi.abort", async () => (await target())?.abort());
+  cmd("pi.viewSession", async (arg?: vscode.Uri | string) => {
+    let file = typeof arg === "string" ? arg : arg?.fsPath;
+    if (!file) {
+      const picked = await vscode.window.showOpenDialog({
+        defaultUri: vscode.Uri.file(defaultSessionDir(workspaceCwd())),
+        filters: { "Pi sessions": ["jsonl"] },
+        openLabel: "View Session",
+      });
+      file = picked?.[0]?.fsPath;
+    }
+    if (file) openSessionViewer(context, file);
+  });
 
   cmd("pi.addSelection", async () => {
     const ed = vscode.window.activeTextEditor;

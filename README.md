@@ -8,6 +8,8 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 
 ### Chat
 - Replies, thinking and tool calls stream in as a timeline. Tool cards show input and output, and edits show a diff.
+- Tool calls that a tool makes (for example from codemode or a subagent tool) show under that tool's card.
+- Cards of extension tools also show the tool's `details` (DATA), including partial results while the tool runs.
 - Markdown renders in replies and in your sent prompts. It is also styled live as you type.
 - While Pi works: <kbd>Enter</kbd> steers, <kbd>⌥ Enter</kbd> queues a follow-up, <kbd>Esc</kbd> stops.
 - Queued messages show at the end of the chat. Drag to reorder them, or remove or send one now.
@@ -22,6 +24,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - Resume or fork from a searchable list. Archive a session to hide it from the list.
 - Forks and sessions that extensions start (for example subagents) are nested under the session they came from. They are collapsed until you expand them.
 - Sessions run in parallel. If you start a new session or open another one while Pi works, the busy session continues in the background. It shows at the top of the session list, and a notification tells you when it finishes or needs an answer.
+- *View* (the eye button in the session list, or *Pi: View Session File*) opens a session read-only in a new tab. It starts no pi process and shows new messages as pi writes them. Use it to follow a session that an extension runs, for example a subagent.
 - `/tree` moves between branches of a session. It can summarize the branch you leave and label entries.
 - The last session reopens automatically. *Open in New Tab* starts another chat.
 
@@ -40,6 +43,8 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 ## Notes
 
 - **Nested sessions** use the `parentSession` field of the session header, the same as pi's `/resume`. A session whose parent is not in the list shows at the top level.
+- **Nested tool calls** come from `parentToolCallId` on `tool_execution_*` events. After a reload, pi keeps only a record of them (`nestedCalls`: names, arguments, status, errors), so their outputs are not shown.
+- **The session viewer** reads the session file and checks it for changes every second. It shows the branch of the last entry in the file.
 - **Archived sessions** stay on disk. Only the list in VS Code hides them, so the pi TUI can still resume them.
 - **`/tree`** needs a command that RPC mode does not have. The extension adds it by loading a small bridge extension into pi (`dist/pi-bridge.mjs`).
 - **Queue edits** take the whole queue out of pi and queue it again, because RPC mode can only add to the queue or clear it. Images in queued messages are not kept. **Send now** stops the run and sends the message as the next run.
