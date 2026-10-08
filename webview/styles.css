@@ -197,6 +197,21 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 .dl.ctx { opacity: .75; }
 .diff-sep { color: var(--muted); text-align: center; }
 .tool-image { max-width: 100%; display: block; margin: 6px; border-radius: 4px; }
+.tool-content pre.muted { color: var(--muted); font-style: italic; }
+.tool-row.data .tool-content pre { max-height: 3.9em; }
+/* Nested tool calls (ctx.executeTool, e.g. from codemode): a small timeline under the calling card. */
+.tool-nested { margin-top: 4px; }
+.tool-nested-toggle {
+  display: flex; align-items: center; gap: 4px; height: 22px; padding: 0 4px 0 0; border: none; background: none;
+  color: var(--muted); font-size: 12px; cursor: pointer;
+}
+.tool-nested-toggle:hover { color: var(--vscode-foreground); }
+.tool-nested-toggle svg { width: 12px; height: 12px; transition: transform .1s; }
+.tool-nested.open .tool-nested-toggle svg { transform: rotate(90deg); }
+.tool-nested-list { display: none; }
+.tool-nested.open .tool-nested-list { display: block; }
+.item.tool.nested { padding-top: 2px; padding-bottom: 2px; }
+.item.tool.unfinished::before { background: var(--muted); opacity: .5; }
 
 /* ---------------------------------------------------------------- working */
 .working { display: flex; gap: 8px; align-items: center; padding: 10px 2px; color: var(--muted); }
