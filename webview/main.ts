@@ -148,6 +148,8 @@ let state: any = {};
 let running = false;
 let runStart = 0;
 let outputTokens = 0;
+/** Output tokens of assistant messages that finished in this run. `usage` on events is per message, so the run total is summed here. */
+let runOutputDone = 0;
 let images: { image: any; name: string }[] = [];
 const statuses = new Map<string, string>();
 const widgets = new Map<string, { lines: string[]; placement: string }>();
@@ -696,7 +698,7 @@ function onEvent(e: any) {
     case "message_update": {
       const ev = e.assistantMessageEvent;
       if (!current) current = new AssistantView();
-      if (e.usage?.output) outputTokens = e.usage.output;
+      if (e.usage?.output != null) outputTokens = runOutputDone + e.usage.output;
       switch (ev.type) {
         case "text_start":
           current.block(ev.contentIndex, "text");
@@ -723,6 +725,10 @@ function onEvent(e: any) {
     }
     case "message_end":
       if (e.message.role === "assistant") {
+        if (running) {
+          runOutputDone += e.message.usage?.output ?? 0;
+          outputTokens = runOutputDone;
+        }
         (current ?? new AssistantView()).finalize(e.message);
         current = undefined;
       } else if (e.message.role === "toolResult") {
@@ -1053,6 +1059,7 @@ function setRunning(r: boolean) {
   if (r) {
     runStart = Date.now();
     outputTokens = 0;
+    runOutputDone = 0;
     verb = VERBS[Math.floor(Math.random() * VERBS.length)];
     clearInterval(workingTimer);
     workingTimer = window.setInterval(updateWorking, 1000);
@@ -2207,6 +2214,11 @@ function applySnapshot(m: any) {
   // A run that started before this snapshot (e.g. a session shown again after running in the background).
   if (running && m.runStartedAt) {
     runStart = m.runStartedAt;
+    // Count output of the assistant messages that this run already finished.
+    runOutputDone = (m.messages ?? [])
+      .filter((x: any) => x.role === "assistant" && (x.timestamp ?? 0) >= runStart)
+      .reduce((n: number, x: any) => n + (x.usage?.output ?? 0), 0);
+    outputTokens = runOutputDone;
     updateWorking();
   }
   updateTitle();
