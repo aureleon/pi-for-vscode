@@ -9,6 +9,7 @@ import { agentDir, scopeModels } from "./modelScope";
 import { slimTree } from "./treeData";
 import { createPiTerminal, piTerminalName } from "./piTerminal";
 import { completePath } from "./pathComplete";
+import { openDirectory, openPath } from "./openPath";
 import { HOST_INTEGRATIONS, integrationEntryTypes } from "./integrations";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
@@ -559,7 +560,7 @@ export class PiController implements vscode.Disposable {
           await this.bash(m.command, m.exclude);
           break;
         case "openFile":
-          await this.openFile(m.path, m.line);
+          await openPath(m.path, m.line, this.cwd);
           break;
         case "openExternal":
           if (/^(https?|mailto):/i.test(String(m.url))) await vscode.env.openExternal(vscode.Uri.parse(String(m.url)));
@@ -605,7 +606,9 @@ export class PiController implements vscode.Disposable {
           vscode.window.setStatusBarMessage("Pi: copied to clipboard", 1500);
           break;
         case "listAction":
-          if (m.kind === "session" && (m.action === "archive" || m.action === "unarchive")) {
+          if (m.kind === "session" && m.action === "view") {
+            await vscode.commands.executeCommand("pi.viewSession", vscode.Uri.file(m.id));
+          } else if (m.kind === "session" && (m.action === "archive" || m.action === "unarchive")) {
             await this.setArchived(m.id, m.action === "archive");
             await this.pickSession(true);
           }
@@ -749,54 +752,6 @@ export class PiController implements vscode.Disposable {
     } catch (err: any) {
       this.post({ type: "bashEnd", id, result: { output: err.message, exitCode: 1 } });
     }
-  }
-
-  private async openFile(p: string, line?: number) {
-    const expanded = p.replace(/^~(?=\/|$)/, os.homedir()).replace(/(.)\/+$/, "$1");
-    const file = path.isAbsolute(expanded) ? expanded : path.join(this.cwd, expanded);
-    let stat: fs.Stats;
-    try {
-      stat = fs.statSync(file);
-    } catch {
-      vscode.window.setStatusBarMessage(`Pi: not found: ${p}`, 3000);
-      return;
-    }
-    // Build the URI on the extension host, so under Remote-SSH it points at the remote file.
-    const uri = vscode.Uri.file(file);
-    if (stat.isDirectory()) return this.openDirectory(uri);
-    const opts: vscode.TextDocumentShowOptions = { preview: true, viewColumn: vscode.ViewColumn.One };
-    if (line && line > 0) opts.selection = new vscode.Range(line - 1, 0, line - 1, 0);
-    // vscode.open (not openTextDocument) so images and binaries get their proper editor.
-    await vscode.commands.executeCommand("vscode.open", uri, opts);
-  }
-
-  /**
-   * Folders can't be opened in an editor. Inside the workspace, reveal them in the
-   * Explorer; elsewhere, show a quick pick of the folder's entries to open or descend into.
-   */
-  private async openDirectory(uri: vscode.Uri, reveal?: vscode.Uri): Promise<void> {
-    if (vscode.workspace.getWorkspaceFolder(uri)) {
-      await vscode.commands.executeCommand("revealInExplorer", reveal ?? uri);
-      return;
-    }
-    let entries: [string, vscode.FileType][];
-    try {
-      entries = await vscode.workspace.fs.readDirectory(uri);
-    } catch (err: any) {
-      vscode.window.showErrorMessage(`Pi: cannot read ${uri.fsPath}: ${err.message}`);
-      return;
-    }
-    const isDir = (t: vscode.FileType) => (t & vscode.FileType.Directory) !== 0;
-    entries.sort(([a, at], [b, bt]) => Number(isDir(bt)) - Number(isDir(at)) || a.localeCompare(b));
-    const items = [
-      ...(path.dirname(uri.fsPath) !== uri.fsPath ? [{ label: "$(arrow-up) ..", name: "..", dir: true }] : []),
-      ...entries.map(([name, t]) => ({ label: `${isDir(t) ? "$(folder)" : "$(file)"} ${name}`, name, dir: isDir(t) })),
-    ];
-    const pick = await vscode.window.showQuickPick(items, { title: uri.fsPath, placeHolder: "Open a file or folder" });
-    if (!pick) return;
-    const target = vscode.Uri.file(path.join(uri.fsPath, pick.name));
-    if (pick.dir) return this.openDirectory(target);
-    await vscode.commands.executeCommand("vscode.open", target, { preview: true, viewColumn: vscode.ViewColumn.One });
   }
 
   /** Render a self-contained HTML file (a session export) in a webview tab. */
@@ -957,7 +912,7 @@ export class PiController implements vscode.Disposable {
         const uri = vscode.Uri.file(r.path);
         if (pick === "Open") this.showHtmlFile(r.path);
         else if (pick === "Open in Browser") vscode.env.openExternal(uri);
-        else if (pick === "Reveal") this.openDirectory(vscode.Uri.file(path.dirname(r.path)), uri);
+        else if (pick === "Reveal") openDirectory(vscode.Uri.file(path.dirname(r.path)), uri);
         break;
       }
       case "fork": {

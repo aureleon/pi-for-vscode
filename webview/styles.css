@@ -447,6 +447,9 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 }
 .mp-effort.dragging .slider-knob, .mp-effort.dragging .slider-fill { transition: none; }
 
+/* ---------------------------------------------------------------- read-only session viewer */
+body.readonly .bottom, body.readonly #empty .hint { display: none; }
+
 /* ---------------------------------------------------------------- header and menu buttons */
 .sp-btn {
   height: 22px; padding: 0 7px; border: none; border-radius: 5px; background: none; cursor: pointer;
@@ -490,7 +493,8 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 
 /* Session rows: [current dot | title | time | count | archive] */
 .lm-item { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; column-gap: 12px; align-items: center; padding-left: 6px !important; }
-.lm-item.has-action { grid-template-columns: 10px minmax(0, 1fr) auto auto 22px; }
+.lm-item.has-action { grid-template-columns: 10px minmax(0, 1fr) auto auto auto; }
+.lm-actions { display: flex; gap: 2px; }
 .lm-main { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .lm-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lm-twisty {
@@ -519,7 +523,7 @@ button.lm-twisty:hover { background: var(--vscode-toolbar-hoverBackground); colo
   display: inline-flex; align-items: center; justify-content: center; color: inherit; opacity: 0;
 }
 .lm-action svg { width: 16px; height: 16px; }
-.mp-item:hover .lm-action, .mp-item.active .lm-action, .lm-item.archived .lm-action { opacity: .75; }
+.mp-item:hover .lm-action, .mp-item.active .lm-action, .lm-item.archived .lm-archive { opacity: .75; }
 .lm-action:hover:not([disabled]) { opacity: 1 !important; background: var(--vscode-toolbar-hoverBackground); }
 .lm-action[disabled] { opacity: 0 !important; cursor: default; }
 

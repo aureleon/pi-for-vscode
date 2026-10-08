@@ -80,6 +80,10 @@
         "title": "Pi: Add File to Chat"
       },
       {
+        "command": "pi.viewSession",
+        "title": "Pi: View Session File (Read-Only)\u2026"
+      },
+      {
         "command": "pi.tree",
         "title": "Pi: Session Tree (/tree)",
         "icon": "$(list-tree)"
