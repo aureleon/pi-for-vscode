@@ -2,7 +2,7 @@
   "name": "pi-for-vscode",
   "displayName": "Pi Coding Agent",
   "description": "Use the Pi coding agent (with all your Pi extensions, skills and prompts) from the VS Code sidebar.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "dhguz",
   "license": "MIT",
   "engines": {

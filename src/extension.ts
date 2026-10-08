@@ -62,6 +62,9 @@ class SidebarProvider implements vscode.WebviewViewProvider {
       // The native title is just "Pi Coding Agent"; the webview's own header row shows
       // the session name next to the session actions.
       setTitle: () => {},
+      setBadge: (count, tooltip) => {
+        view.badge = count > 0 ? { value: count, tooltip: tooltip ?? String(count) } : undefined;
+      },
       reveal: () => view.show(true),
     };
     // A re-resolved view (e.g. moved to another container) gets a fresh controller

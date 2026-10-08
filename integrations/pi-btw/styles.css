@@ -1,0 +1,76 @@
+/* pi-btw integration: side panel, its toggle button, and links in the main transcript.
+   Loaded by integrations/pi-btw/web.ts. Uses the theme tokens of webview/styles.css. */
+
+/* The panel is a sibling of #app in <body>. Wide views split left/right. */
+@media (min-width: 640px) { body { flex-direction: row; } }
+
+/* ---------------------------------------------------------------- toggle button */
+.btw-toggle { position: relative; }
+.btw-toggle.active { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
+.btw-badge {
+  position: absolute; top: -3px; right: -3px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 7px;
+  font-size: 9px; line-height: 13px; text-align: center; font-weight: 600;
+  background: var(--vscode-activityBarBadge-background, var(--accent)); color: var(--vscode-activityBarBadge-foreground, #fff);
+}
+
+/* ---------------------------------------------------------------- side panel */
+/* Split layout: [#app | .side-splitter | .side-panel]. Narrow → top/bottom, wide → left/right. */
+.side-panel {
+  flex: 0 0 var(--side-h, 45%); min-height: 0; min-width: 0;
+  display: flex; flex-direction: column;
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+.side-splitter {
+  flex: 0 0 5px; cursor: row-resize; position: relative; z-index: 5;
+  background: transparent; border-top: 1px solid var(--border); margin-top: -2px;
+  touch-action: none;
+}
+.side-splitter:hover, body.side-resizing .side-splitter { background: var(--accent); opacity: .6; }
+body.side-resizing { user-select: none; cursor: row-resize; }
+@media (min-width: 640px) {
+  .side-panel { flex-basis: var(--side-w, min(42%, 520px)); }
+  .side-splitter { cursor: col-resize; border-top: none; border-left: 1px solid var(--border); margin: 0 0 0 -2px; }
+  body.side-resizing { cursor: col-resize; }
+}
+/* Side panel header: one row at VS Code's title-bar height. Title left; text actions,
+   icon actions and the close button right-aligned with toolbar-sized hit areas. */
+.sp-header {
+  display: flex; align-items: center; gap: 2px; height: 35px; flex: none;
+  padding: 0 6px 0 12px; border-bottom: 1px solid var(--border);
+}
+.sp-title-wrap { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; }
+.sp-title { font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-mode { font-size: 10.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sp-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.sp-sep { width: 1px; height: 16px; margin: 0 4px; background: var(--border); flex: none; }
+.sp-close { margin-left: 4px; }
+.sp-body { flex: 1; overflow-y: auto; padding: 10px 12px; }
+.sp-empty { color: var(--muted); text-align: center; margin-top: 30%; line-height: 1.6; padding: 0 10px; }
+.sp-empty .dim { font-size: .9em; opacity: .8; }
+.sp-q {
+  background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 6px 10px; margin: 10px 0 6px; white-space: pre-wrap; word-break: break-word;
+}
+.sp-q:first-child { margin-top: 0; }
+.sp-a { padding: 2px 2px 8px; }
+.sp-thinking summary { cursor: pointer; color: var(--muted); margin-bottom: 4px; }
+.sp-thinking .md { color: var(--muted); font-style: italic; border-left: 2px solid var(--border); padding-left: 8px; margin-bottom: 6px; }
+.sp-note { color: var(--muted); font-style: italic; margin: 4px 0; }
+.sp-error { color: var(--err); margin: 4px 0; }
+.sp-pending { color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.sp-meta { color: var(--muted); font-size: .8em; margin-top: 6px; }
+.sp-status { flex: none; padding: 0 12px; font-size: .85em; color: var(--muted); }
+.sp-status:empty { display: none; }
+.sp-status.warning { color: var(--vscode-editorWarning-foreground, #cca700); }
+.sp-status.error { color: var(--err); }
+.sp-composer { flex: none; padding: 8px 10px 10px; }
+.sp-composer textarea {
+  width: 100%; resize: none; border-radius: 10px; padding: 8px 10px; font: inherit; line-height: 1.45; outline: none;
+  background: var(--input-bg); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--border));
+}
+.sp-composer textarea:focus { border-color: var(--accent); }
+.item.btw-link { cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+.item.btw-link::before { background: var(--vscode-charts-purple, #a371f7); }
+.btw-tag { font-size: .75em; font-weight: 600; letter-spacing: .04em; padding: 0 5px; border-radius: 3px; background: var(--vscode-charts-purple, #a371f7); color: #fff; flex: none; }
+.btw-q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item.btw-link:hover .btw-q { text-decoration: underline; }

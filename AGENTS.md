@@ -11,7 +11,8 @@ Notes for coding agents that work on Pi for VS Code.
 - `src/bridge/piBridge.ts`: pi extension loaded with `pi -e`. It adds hidden `vscode:*` commands (tree navigation, labels). Keep it free of dependencies.
 - `webview/main.ts`: the chat UI, in plain TypeScript and DOM (no framework). `webview/styles.css` holds all styles.
 - `webview/treeMenu.ts`, `webview/streamMd.ts`: `/tree` navigator, streaming markdown.
-- `src/integrations.ts`, `webview/integrations.ts`: hooks for integrations, which add support for one pi extension. The two sides talk with `{ type: "ext", id, payload }`. Put code for one extension in an integration, never in `controller.ts` or `main.ts`. The 0.1 release has none.
+- `src/integrations.ts`, `webview/integrations.ts`: hooks for integrations, which add support for one pi extension. The two sides talk with `{ type: "ext", id, payload }`.
+- `integrations/<name>/`: one integration (`host.ts`, `web.ts`, styles). `integrations/host.ts` and `integrations/web.ts` list them. Put code for one pi extension here, never in `src/` or `webview/`. Code in `integrations/` can import from the core; the core imports only the two lists.
 - `tools/build-icon-font.mjs`: builds `media/pi-icons.woff`. Run `npm run build:icons`.
 
 ## Checks

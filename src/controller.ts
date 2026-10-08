@@ -10,7 +10,7 @@ import { slimTree } from "./treeData";
 import { createPiTerminal, piTerminalName } from "./piTerminal";
 import { completePath } from "./pathComplete";
 import { openDirectory, openPath } from "./openPath";
-import { HOST_INTEGRATIONS, integrationEntryTypes } from "./integrations";
+import { activeIntegrations, HOST_INTEGRATIONS, integrationEntryTypes, type HostIntegrationInstance } from "./integrations";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
 const RECENT_MODELS_KEY = "pi.recentModels";
@@ -115,6 +115,8 @@ interface Session {
   webTitle?: string;
   /** While a queue edit takes the queue out and puts it back, its in-between queue updates are not shown. */
   queueBusy?: boolean;
+  /** Ids of the integrations whose pi extension this session loaded (from `get_commands`). */
+  ext: Set<string>;
 }
 
 interface StartOptions {
@@ -128,6 +130,8 @@ interface StartOptions {
 export interface ChatHost {
   webview: vscode.Webview;
   setTitle(title: string | undefined): void;
+  /** Optional: a badge on the native view (integrations use it for unread items). */
+  setBadge?(count: number, tooltip?: string): void;
   reveal(): void;
 }
 
@@ -150,6 +154,8 @@ export class PiController implements vscode.Disposable {
   private args: string[] = [];
   /** Integrated terminal running the pi TUI on this chat's session, while it owns the session. */
   private terminal?: vscode.Terminal;
+  /** The hooks of each integration for this chat. */
+  private integrations = new Map<string, HostIntegrationInstance>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -161,6 +167,16 @@ export class PiController implements vscode.Disposable {
     this.statusItem.command = "pi.focus";
     this.disposables.push(this.statusItem);
     this.disposables.push(host.webview.onDidReceiveMessage((m) => this.onWebviewMessage(m)));
+    for (const i of HOST_INTEGRATIONS) {
+      this.integrations.set(i.id, i.create({
+        prompt: async (text) => {
+          if (!this.pi?.running) await this.start();
+          return this.req({ type: "prompt", message: text });
+        },
+        post: (payload) => this.post({ type: "ext", id: i.id, payload }),
+        setBadge: (count, tooltip) => this.host.setBadge?.(count, tooltip),
+      }));
+    }
   }
 
   get cwd(): string {
@@ -237,7 +253,7 @@ export class PiController implements vscode.Disposable {
   private spawn(command: string, args: string[], env: NodeJS.ProcessEnv): Session {
     this.output.appendLine(`[pi] starting: ${command} --mode rpc ${args.join(" ")} (cwd ${this.cwd})`);
     const pi = new PiProcess(command, args, this.cwd, env);
-    const s: Session = { pi, state: {}, tail: [], dialogs: new Map(), ui: new Map() };
+    const s: Session = { pi, state: {}, tail: [], dialogs: new Map(), ui: new Map(), ext: new Set() };
     pi.on("event", (e: RpcRecord) => this.onPiEvent(s, e));
     pi.on("stderr", (t: string) => this.output.append(t));
     pi.on("exit", (code: number | null, signal: string | null, err?: Error) => {
@@ -367,6 +383,7 @@ export class PiController implements vscode.Disposable {
       ]);
       if (this.active !== s) return;
       s.state = state;
+      s.ext = activeIntegrations(commands.commands);
       if (state.sessionFile && this.options.primary) {
         this.context.workspaceState.update(LAST_SESSION_KEY, state.sessionFile);
       }
@@ -495,7 +512,7 @@ export class PiController implements vscode.Disposable {
     switch (e.method) {
       case "notify": {
         const msg = stripAnsi(e.message);
-        if (shown && HOST_INTEGRATIONS.some((i) => i.filterNotice?.(msg, e.notifyType ?? "info"))) break;
+        if (shown && [...s.ext].some((id) => this.integrations.get(id)?.filterNotice?.(msg, e.notifyType ?? "info"))) break;
         const fn = e.notifyType === "error"
           ? vscode.window.showErrorMessage
           : e.notifyType === "warning"
@@ -657,14 +674,7 @@ export class PiController implements vscode.Disposable {
 
   /** Pass a payload from the webview side of an integration to its host side. */
   private async onIntegrationMessage(id: string, payload: any) {
-    const integration = HOST_INTEGRATIONS.find((i) => i.id === id);
-    await integration?.onMessage?.(payload, {
-      prompt: async (text) => {
-        if (!this.pi?.running) await this.start();
-        return this.req({ type: "prompt", message: text });
-      },
-      post: (p) => this.post({ type: "ext", id, payload: p }),
-    });
+    await this.integrations.get(id)?.onMessage?.(payload);
   }
 
   private sendCommandsSoon() {
@@ -672,7 +682,9 @@ export class PiController implements vscode.Disposable {
     setTimeout(async () => {
       await this.refreshState();
       try {
+        const s = this.active;
         const c = await this.req({ type: "get_commands" });
+        if (s) s.ext = activeIntegrations(c.commands);
         this.post({ type: "commands", commands: c.commands });
       } catch {}
     }, 300);
