@@ -395,18 +395,33 @@ let current: AssistantView | undefined;
 // ------------------------------------------------------------------ tool cards
 
 const TOOL_TITLES: Record<string, string> = { bash: "Bash", read: "Read", edit: "Edit", write: "Write", grep: "Grep", find: "Find", ls: "List" };
+/** pi's own tools. Their `details` are internal (diffs, truncation), so cards do not show them. */
+const BUILTIN_TOOLS = new Set(Object.keys(TOOL_TITLES));
+/** Rows of a tool card, top to bottom. */
+const ROW_ORDER = ["in", "out", "data"] as const;
+type RowKind = (typeof ROW_ORDER)[number];
+const MAX_DETAILS_CHARS = 20_000;
 
 class ToolCard {
   item: HTMLElement;
   private head: HTMLElement;
   private body: HTMLElement;
-  private inRow?: HTMLElement;
-  private outRow?: HTMLElement;
+  private rows = new Map<RowKind, HTMLElement>();
+  /** Tool calls that this tool made while it ran (`ctx.executeTool()`, for example from codemode). */
+  private nestedBox?: HTMLElement;
+  private nestedList?: HTMLElement;
+  private nestedCount = 0;
+  private nestedFailed = 0;
+  private nestedIncomplete = false;
+  /** The user opened or closed the nested calls; do not change that on completion. */
+  private nestedToggled = false;
+  /** Called once with the outcome, so a parent card can count failed nested calls. */
+  onDone?: (isError: boolean) => void;
   args: any = {};
   done = false;
 
-  constructor(public id: string, public name: string) {
-    this.item = addItem("tool pending");
+  constructor(public id: string, public name: string, parent?: HTMLElement) {
+    this.item = addItem("tool pending", parent);
     this.head = el("div", "tool-head");
     this.body = el("div", "tool-body hidden");
     this.item.append(this.head, this.body);
@@ -449,20 +464,18 @@ class ToolCard {
     this.head.innerHTML = `<span class="tool-name">${escapeHtml(title)}</span><span class="tool-sub">${sub}</span>`;
   }
 
-  private setRow(which: "in" | "out", label: string, html: string, cls = "") {
+  private setRow(which: RowKind, label: string, html: string, cls = "") {
     this.body.classList.remove("hidden");
-    let row = which === "in" ? this.inRow : this.outRow;
+    let row = this.rows.get(which);
     if (!row) {
       row = el("div", `tool-row ${which}`);
       row.innerHTML = `<div class="tool-label"></div><div class="tool-content"><pre></pre></div>`;
       row.addEventListener("click", () => row!.classList.toggle("expanded"));
-      if (which === "in") {
-        this.inRow = row;
-        this.body.prepend(row);
-      } else {
-        this.outRow = row;
-        this.body.append(row);
-      }
+      const next = ROW_ORDER.slice(ROW_ORDER.indexOf(which) + 1).map((k) => this.rows.get(k)).find(Boolean);
+      if (next) this.body.insertBefore(row, next);
+      else if (this.rows.size) [...this.rows.values()].pop()!.after(row);
+      else this.body.prepend(row);
+      this.rows.set(which, row);
     }
     (row.querySelector(".tool-label") as HTMLElement).textContent = label;
     const pre = row.querySelector("pre")!;
@@ -475,12 +488,81 @@ class ToolCard {
   setPartial(result: any) {
     const t = resultText(result);
     if (t) this.setRow("out", "OUT", escapeHtml(tail(t)));
+    this.setDetails(result?.details);
+  }
+
+  /** Structured `details` of an extension tool, as JSON. Extensions often report progress here. */
+  private setDetails(details: any) {
+    if (BUILTIN_TOOLS.has(this.name) || details == null || details === "") return;
+    if (typeof details === "object" && !Object.keys(details).length) return;
+    let t = typeof details === "string" ? details : JSON.stringify(details, null, 2);
+    if (t.length > MAX_DETAILS_CHARS) t = t.slice(0, MAX_DETAILS_CHARS) + "\n…";
+    this.setRow("data", "DATA", escapeHtml(t));
+  }
+
+  /** Card for a tool call that this tool made. Nested calls show as a small timeline under the card. */
+  nested(id: string, name: string): ToolCard {
+    if (!this.nestedBox) {
+      this.nestedBox = el("div", `tool-nested${this.done ? "" : " open"}`);
+      const toggle = el("button", "tool-nested-toggle");
+      toggle.addEventListener("click", () => {
+        this.nestedToggled = true;
+        this.nestedBox!.classList.toggle("open");
+      });
+      this.nestedList = el("div", "tool-nested-list");
+      this.nestedBox.append(toggle, this.nestedList);
+      this.item.appendChild(this.nestedBox);
+    }
+    const c = new ToolCard(id, name, this.nestedList);
+    c.item.classList.add("nested");
+    c.onDone = (isError) => {
+      if (isError) this.nestedFailed++;
+      this.updateNested();
+    };
+    this.nestedCount++;
+    this.updateNested();
+    return c;
+  }
+
+  private updateNested() {
+    const t = this.nestedBox?.querySelector(".tool-nested-toggle");
+    if (!t) return;
+    const n = this.nestedCount;
+    const parts = [`${n} tool call${n === 1 ? "" : "s"}`];
+    if (this.nestedFailed) parts.push(`${this.nestedFailed} failed`);
+    if (this.nestedIncomplete) parts.push("record incomplete");
+    t.innerHTML = `${CHEVRON_ICON}<span>${escapeHtml(parts.join(" · "))}</span>`;
+  }
+
+  /**
+   * After a reload, only the tool result's `nestedCalls` record is left: names, arguments,
+   * status and errors, but no results. Live calls already have their cards.
+   */
+  private setNestedRecord(record: any) {
+    if (this.nestedCount || !Array.isArray(record?.calls) || !record.calls.length) return;
+    for (const r of record.calls) {
+      const c = this.nested(`${this.id}/record-${r.id}`, String(r.name ?? "tool"));
+      c.setArgs(r.arguments ?? (r.argumentsBytes ? { arguments: `(${r.argumentsBytes} bytes, not kept)` } : {}));
+      c.done = true;
+      c.item.classList.remove("pending");
+      c.item.classList.add(r.status === "error" ? "failed" : r.status === "ok" ? "ok" : "unfinished");
+      if (r.error) c.setRow("out", "ERR", escapeHtml(String(r.error)), "err");
+      else if (r.status === "unfinished") c.setRow("out", "", "Still running when the calling tool finished.", "muted");
+      if (r.status === "error") this.nestedFailed++;
+    }
+    this.nestedIncomplete = record.complete === false;
+    this.updateNested();
   }
 
   setResult(result: any, isError: boolean) {
+    const first = !this.done;
     this.done = true;
     this.item.classList.remove("pending");
     this.item.classList.add(isError ? "failed" : "ok");
+    this.setNestedRecord(result?.nestedCalls);
+    if (this.nestedBox && !this.nestedToggled) this.nestedBox.classList.remove("open");
+    if (first) this.onDone?.(isError);
+    this.setDetails(result?.details);
     const diff = result?.details?.diff;
     if (this.name === "edit" && diff && !isError) {
       this.setRow("out", "", renderDiff(diff), "diff");
@@ -521,10 +603,12 @@ function diffFromEdit(oldText = "", newText = ""): string {
   return [...del, ...add].join("");
 }
 
-function getToolCard(id: string, name: string): ToolCard {
+/** Card for a tool call. A nested call (`parentId` set) goes under the card of the call that made it. */
+function getToolCard(id: string, name: string, parentId?: string): ToolCard {
   let c = toolCards.get(id);
   if (!c) {
-    c = new ToolCard(id, name);
+    const parent = parentId ? toolCards.get(parentId) : undefined;
+    c = parent ? parent.nested(id, name) : new ToolCard(id, name);
     toolCards.set(id, c);
   }
   return c;
@@ -633,15 +717,15 @@ function onEvent(e: any) {
       }
       break;
     case "tool_execution_start": {
-      const c = getToolCard(e.toolCallId, e.toolName);
+      const c = getToolCard(e.toolCallId, e.toolName, e.parentToolCallId);
       if (e.args && !Object.keys(c.args).length) c.setArgs(e.args);
       break;
     }
     case "tool_execution_update":
-      getToolCard(e.toolCallId, e.toolName).setPartial(e.partialResult);
+      getToolCard(e.toolCallId, e.toolName, e.parentToolCallId).setPartial(e.partialResult);
       break;
     case "tool_execution_end":
-      getToolCard(e.toolCallId, e.toolName).setResult(e.result, e.isError);
+      getToolCard(e.toolCallId, e.toolName, e.parentToolCallId).setResult(e.result, e.isError);
       break;
     case "queue_update":
       renderQueue(e.steering ?? [], e.followUp ?? []);
