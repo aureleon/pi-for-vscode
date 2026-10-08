@@ -88,7 +88,7 @@ npm install
 npm run build        # or: npm run watch
 npm run typecheck
 npm run package      # creates pi-for-vscode-<version>.vsix
-code --install-extension pi-for-vscode-0.2.0.vsix
+code --install-extension pi-for-vscode-0.1.0.vsix
 ```
 
 To debug, press <kbd>F5</kbd> with `.vscode/launch.json` ("Run Extension"). Logs from pi's stderr go to the **Pi** output channel.
