@@ -9,6 +9,7 @@ import { agentDir, scopeModels } from "./modelScope";
 import { slimTree } from "./treeData";
 import { createPiTerminal, piTerminalName } from "./piTerminal";
 import { completePath } from "./pathComplete";
+import { HOST_INTEGRATIONS, integrationEntryTypes } from "./integrations";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
 const RECENT_MODELS_KEY = "pi.recentModels";
@@ -350,7 +351,7 @@ export class PiController implements vscode.Disposable {
     s.queue = [];
     let replay: RpcRecord[] = [];
     try {
-      const [state, commands, messages] = await Promise.all([
+      const [state, commands, messages, extEntries] = await Promise.all([
         this.req({ type: "get_state" }),
         this.req({ type: "get_commands" }).catch(() => ({ commands: [] })),
         this.req({ type: "get_messages" })
@@ -361,6 +362,7 @@ export class PiController implements vscode.Disposable {
             return r;
           })
           .catch(() => ({ messages: [] })),
+        this.getIntegrationEntries(),
       ]);
       if (this.active !== s) return;
       s.state = state;
@@ -372,6 +374,7 @@ export class PiController implements vscode.Disposable {
         state,
         commands: commands.commands,
         messages: messages.messages,
+        extEntries,
         cwd: this.cwd,
         runStartedAt: s.runStartedAt,
       });
@@ -395,6 +398,25 @@ export class PiController implements vscode.Disposable {
     else this.post(msg);
   }
 
+  /**
+   * Custom entries on the active branch that integrations asked for, oldest
+   * first, so they can restore their state after a reload or session switch.
+   */
+  private async getIntegrationEntries(): Promise<any[]> {
+    const types = integrationEntryTypes();
+    if (!types.size) return [];
+    try {
+      const { entries, leafId } = await this.req({ type: "get_entries" });
+      const byId = new Map<string, any>(entries.map((e: any) => [e.id, e]));
+      const branch: any[] = [];
+      for (let id = leafId; id && byId.has(id); id = byId.get(id).parentId) branch.push(byId.get(id));
+      return branch
+        .reverse()
+        .filter((e) => e.type === "custom" && types.has(String(e.customType)));
+    } catch {
+      return [];
+    }
+  }
 
   private updateTitle() {
     this.host.setTitle(this.state.sessionName || this.active?.webTitle);
@@ -472,6 +494,7 @@ export class PiController implements vscode.Disposable {
     switch (e.method) {
       case "notify": {
         const msg = stripAnsi(e.message);
+        if (shown && HOST_INTEGRATIONS.some((i) => i.filterNotice?.(msg, e.notifyType ?? "info"))) break;
         const fn = e.notifyType === "error"
           ? vscode.window.showErrorMessage
           : e.notifyType === "warning"
@@ -590,6 +613,9 @@ export class PiController implements vscode.Disposable {
         case "listPick":
           await this.onListPick(m.kind, m.id);
           break;
+        case "ext":
+          await this.onIntegrationMessage(String(m.id), m.payload);
+          break;
         case "editEnabledModels":
           await this.editEnabledModels();
           break;
@@ -626,6 +652,17 @@ export class PiController implements vscode.Disposable {
     if (res?.disposition === "handled") this.sendCommandsSoon();
   }
 
+  /** Pass a payload from the webview side of an integration to its host side. */
+  private async onIntegrationMessage(id: string, payload: any) {
+    const integration = HOST_INTEGRATIONS.find((i) => i.id === id);
+    await integration?.onMessage?.(payload, {
+      prompt: async (text) => {
+        if (!this.pi?.running) await this.start();
+        return this.req({ type: "prompt", message: text });
+      },
+      post: (p) => this.post({ type: "ext", id, payload: p }),
+    });
+  }
 
   private sendCommandsSoon() {
     // Extension commands may change session/model/commands; refresh lightly.
@@ -865,7 +902,6 @@ export class PiController implements vscode.Disposable {
   get terminalAttached() {
     return !!this.terminal;
   }
-
 
   insertText(text: string) {
     this.host.reveal();

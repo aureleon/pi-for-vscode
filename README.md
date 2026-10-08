@@ -27,6 +27,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 
 ### Pi extensions
 - Extension commands, dialogs, notifications, status text and widgets work in the chat.
+- The extension uses only pi's RPC protocol. It has no code for a specific pi extension.
 
 ### Terminal
 - *Pi: Open in Terminal* starts a new pi TUI session.
@@ -43,6 +44,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **`/tree`** needs a command that RPC mode does not have. The extension adds it by loading a small bridge extension into pi (`dist/pi-bridge.mjs`).
 - **Queue edits** take the whole queue out of pi and queue it again, because RPC mode can only add to the queue or clear it. Images in queued messages are not kept. **Send now** stops the run and sends the message as the next run.
 - **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.
+- **Integrations** add support for one pi extension beyond pi's RPC protocol. The hooks are in `src/integrations.ts` (host) and `webview/integrations.ts` (webview). Version 0.1 has no integrations.
 
 ## Built-in slash commands
 
@@ -71,7 +73,7 @@ Extensions can check `process.env.PI_VSCODE === "1"` to know that they run insid
 
 ## Limitations (from RPC mode)
 
-TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` works through the bridge extension. For everything else, open the session in the terminal.
+TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. Commands that open a composer or overlay in the TUI show their notice instead. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` works through the bridge extension. For everything else, open the session in the terminal.
 
 ## Development
 
