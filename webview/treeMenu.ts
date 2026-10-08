@@ -126,6 +126,11 @@ export class TreeMenu {
     this.deps.onClose();
   }
 
+  /** Esc from outside the navigator: closes it, but not while a tree action runs. */
+  escape() {
+    if (!this.busy) this.hide();
+  }
+
   setBusy(text: string) {
     this.busy = text;
     if (!text && this.open) this.hide();
@@ -296,6 +301,7 @@ export class TreeMenu {
     const n = this.rows.length;
     if (this.busy) {
       e.preventDefault();
+      if (e.key === "Escape") e.stopPropagation(); // keep Esc from aborting the run behind the navigator
       return;
     }
     if (e.key === "ArrowDown" && n) { this.sel = (this.sel + 1) % n; this.renderList(); e.preventDefault(); }
