@@ -1418,9 +1418,10 @@ input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     submit(e.altKey ? "followUp" : "steer");
-  } else if (e.key === "Escape" && running) {
+  } else if (e.key === "Escape") {
     e.preventDefault();
-    post({ type: "abort" });
+    e.stopPropagation();
+    if (!closeOverlay() && running) post({ type: "abort" });
   }
 });
 input.addEventListener("blur", () => {
@@ -1495,8 +1496,24 @@ $("btn-slash").addEventListener("click", () => {
   input.setSelectionRange(input.value.length, input.value.length);
   updateAutocomplete();
 });
+/**
+ * Closes the topmost open menu or navigator. Returns true if one was open, so Esc acts on it
+ * and does not abort the run (focus can leave a menu's search field, e.g. after a click on a row).
+ */
+function closeOverlay(): boolean {
+  if (treeMenu.open) { treeMenu.escape(); return true; }
+  if (listMenu.open) { listMenu.hide(); return true; }
+  if (picker.open) { picker.hide(); return true; }
+  const more = document.getElementById("tb-menu");
+  if (more && !more.classList.contains("hidden")) { more.classList.add("hidden"); $("tb-more").focus(); return true; }
+  if (!popup.classList.contains("hidden")) { hidePopup(); return true; }
+  return false;
+}
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && running && document.activeElement !== input && !$("dialogs").childElementCount) post({ type: "abort" });
+  if (e.key !== "Escape" || e.defaultPrevented) return;
+  if ($("dialogs").childElementCount) return;
+  if (closeOverlay()) { e.preventDefault(); return; }
+  if (running && document.activeElement !== input) post({ type: "abort" });
 });
 
 // ------------------------------------------------------------------ model picker
