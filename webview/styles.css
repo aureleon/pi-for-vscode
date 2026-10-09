@@ -5,10 +5,21 @@
   --muted: var(--vscode-descriptionForeground);
   --card-bg: var(--vscode-editor-background);
   --input-bg: var(--vscode-input-background);
-  --accent: var(--vscode-focusBorder);
+  /* Pi TUI palette (accent violet from pi's dark/light themes). High-contrast
+     themes keep VS Code's own colours, see below. */
+  --pi-violet: #a798d7;
+  --pi-violet-strong: #7459b4;
+  --accent: var(--pi-violet);
+  --accent-btn: var(--pi-violet-strong);
+  --accent-btn-fg: #fff;
   --ok: var(--vscode-testing-iconPassed, #3fb950);
   --err: var(--vscode-errorForeground, #f85149);
   --mono: var(--vscode-editor-font-family, monospace);
+}
+
+body.vscode-light { --pi-violet: #7459b4; --pi-violet-strong: #7459b4; }
+body.vscode-high-contrast, body.vscode-high-contrast-light {
+  --accent: var(--vscode-focusBorder); --accent-btn: var(--vscode-button-background); --accent-btn-fg: var(--vscode-button-foreground);
 }
 
 * { box-sizing: border-box; }
@@ -120,7 +131,7 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 .item.text::before { background: var(--vscode-foreground); }
 .item.tool.ok::before { background: var(--ok); }
 .item.tool.failed::before, .item.error::before { background: var(--err); }
-.item.tool.pending::before { animation: pulse 1s infinite ease-in-out; background: var(--vscode-progressBar-background, var(--accent)); }
+.item.tool.pending::before { animation: pulse 1s infinite ease-in-out; background: var(--accent); }
 @keyframes pulse { 50% { opacity: .25; } }
 
 .md { line-height: 1.55; word-wrap: break-word; }
@@ -249,7 +260,7 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 .dialog-timeout { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--accent); width: 100%; animation: shrink linear forwards; }
 @keyframes shrink { to { width: 0; } }
 .btn {
-  background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+  background: var(--accent-btn); color: var(--accent-btn-fg);
   border: none; border-radius: 4px; padding: 4px 12px; cursor: pointer;
 }
 .btn:hover { background: var(--vscode-button-hoverBackground); }
@@ -269,8 +280,8 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
   background: var(--input-bg);
 }
 .composer:focus-within { border-color: var(--accent); }
-/* While Pi works: pi-logo blue border with a soft glow (not an error-like red). */
-.running .composer { border-color: #4D9ABF; box-shadow: 0 0 0 1px rgba(77, 154, 191, .25); }
+/* While Pi works: pi violet border with a soft glow (not an error-like red). */
+.running .composer { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent); }
 .composer.drag { border-style: dashed; border-color: var(--accent); }
 /* Input = transparent-text <textarea> over a backdrop with the same metrics that renders
    the markdown styling (see webview/mdHighlight.ts). Only width-neutral styles are used. */
@@ -360,7 +371,7 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 .ctx .spinner { width: 12px; height: 12px; }
 .send {
   width: 28px; height: 28px; border-radius: 7px; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
-  background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+  background: var(--accent-btn); color: var(--accent-btn-fg);
 }
 .send[disabled] { opacity: .4; cursor: default; }
 .send.stop { background: #e5534b; color: #fff; }
@@ -435,12 +446,12 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
   --p: 0; position: relative; width: 112px; height: 16px; border-radius: 8px;
   background: var(--vscode-input-background); border: 1px solid var(--border); pointer-events: none;
 }
-.slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 8px; width: calc(16px + (100% - 16px) * var(--p)); background: var(--vscode-button-background); transition: width .1s ease; }
+.slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 8px; width: calc(16px + (100% - 16px) * var(--p)); background: var(--accent-btn); transition: width .1s ease; }
 .slider-dots i {
   position: absolute; top: 50%; left: calc(8px + (100% - 16px) * var(--p)); width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
   border-radius: 50%; background: var(--muted); opacity: .7;
 }
-.slider-dots i.on { background: var(--vscode-button-foreground); }
+.slider-dots i.on { background: var(--accent-btn-fg); }
 .slider-knob {
   position: absolute; top: 50%; left: calc(8px + (100% - 16px) * var(--p)); width: 12px; height: 12px; margin: -6px 0 0 -6px;
   border-radius: 50%; background: #e8e8e8; box-shadow: 0 1px 2px rgba(0, 0, 0, .4); transition: left .1s ease;
@@ -560,7 +571,7 @@ button.lm-twisty:hover { background: var(--vscode-toolbar-hoverBackground); colo
 }
 .tm-hint { flex: 1 1 100%; color: var(--muted); display: flex; gap: 6px; align-items: center; }
 .tm-actions { display: flex; gap: 4px; }
-.sp-btn.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.sp-btn.primary { background: var(--accent-btn); color: var(--accent-btn-fg); }
 .tm-edit { flex: 1 1 100%; }
 .tm-input {
   width: 100%; padding: 4px 8px; border-radius: 5px; font: inherit; font-size: 12px; outline: none;
