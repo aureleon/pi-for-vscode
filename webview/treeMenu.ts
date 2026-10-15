@@ -10,6 +10,8 @@ import { SPINNER } from "./spinner";
  * - Selecting an entry and pressing Enter moves the leaf there (via the pi
  *   bridge's /vscode:tree). A user prompt moves to its parent and puts the
  *   prompt back into the composer, so an edited resend starts a new branch.
+ * - "New" (Ctrl/Cmd+Enter) starts a new session from the entry instead. The
+ *   current session does not change.
  * - Shift+Enter summarizes the branch being left. Instructions for the
  *   summary and labels (bookmarks) can be edited inline.
  */
@@ -265,10 +267,11 @@ export class TreeMenu {
     };
     const atLeaf = n?.id === this.leafId;
     btn("Go", "Move here (Enter)", () => this.go(false), true);
+    btn("New", "Start a new session from this point; this session does not change (Ctrl+Enter)", () => this.fork());
     btn("Summarize & go", "Summarize the branch you are leaving, then move here (Shift+Enter)", () => this.go(true));
     btn("…", "Summarize with custom instructions (Alt+Enter)", () => this.setMode("instructions"));
     btn("Label", "Set or clear a label (Ctrl+L)", () => this.setMode("label"));
-    if (atLeaf) actions.querySelectorAll("button").forEach((b, i) => i < 3 && (b.disabled = true));
+    if (atLeaf) actions.querySelectorAll("button").forEach((b, i) => i !== 1 && i < 4 && (b.disabled = true));
     const toggle = document.createElement("button");
     toggle.className = "link tm-toggle menu-toggle";
     toggle.textContent = this.showAll ? "Hide tool/system entries" : "Show all entries";
@@ -293,6 +296,11 @@ export class TreeMenu {
     this.navigate(n, summarize);
   }
 
+  private fork() {
+    const n = this.current();
+    if (n) this.deps.post({ type: "treeFork", id: n.id });
+  }
+
   private navigate(n: TreeNode, summarize: boolean, instructions?: string) {
     this.deps.post({ type: "treeNavigate", id: n.id, summarize, instructions });
   }
@@ -308,6 +316,7 @@ export class TreeMenu {
     else if (e.key === "ArrowUp" && n) { this.sel = (this.sel - 1 + n) % n; this.renderList(); e.preventDefault(); }
     else if (e.key === "PageDown" && n) { this.sel = Math.min(n - 1, this.sel + 10); this.renderList(); e.preventDefault(); }
     else if (e.key === "PageUp" && n) { this.sel = Math.max(0, this.sel - 10); this.renderList(); e.preventDefault(); }
+    else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { this.fork(); e.preventDefault(); }
     else if (e.key === "Enter" && e.altKey) { this.setMode("instructions"); e.preventDefault(); }
     else if (e.key === "Enter") { this.go(e.shiftKey); e.preventDefault(); }
     else if ((e.key === "l" || e.key === "L") && e.ctrlKey) { this.setMode("label"); e.preventDefault(); }

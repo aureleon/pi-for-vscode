@@ -616,6 +616,9 @@ export class PiController implements vscode.Disposable {
         case "treeNavigate":
           await this.treeNavigate(m.id, !!m.summarize, m.instructions);
           break;
+        case "treeFork":
+          await this.treeFork(m.id);
+          break;
         case "treeLabel":
           await this.req({ type: "prompt", message: `/vscode:label ${JSON.stringify({ entryId: m.id, label: m.label ?? "" })}` });
           await this.openTree("", m.id, true);
@@ -975,6 +978,8 @@ export class PiController implements vscode.Disposable {
 
   /** Full text of prompt-like entries, for putting back into the composer after navigation. */
   private treeTexts = new Map<string, string>();
+  /** User prompts in the tree that the navigator shows. */
+  private treePrompts = new Set<string>();
 
   /**
    * Open the session tree (the TUI's /tree). Sends a slimmed-down tree: one
@@ -985,6 +990,7 @@ export class PiController implements vscode.Disposable {
     const { tree, leafId } = await this.req({ type: "get_tree" });
     const { nodes, texts } = slimTree(tree);
     this.treeTexts = texts;
+    this.treePrompts = new Set(nodes.filter((n) => n.kind === "user").map((n) => n.id));
     this.host.reveal();
     this.post({ type: "openTree", nodes, leafId, roots: tree.map((r: any) => r.entry.id), query, selectId, refresh });
   }
@@ -1007,6 +1013,28 @@ export class PiController implements vscode.Disposable {
     await this.sendInit("reset");
     // Like the TUI: selecting a prompt moves to its parent and puts the prompt back in the editor.
     if (text) this.post({ type: "insertText", text, replace: true });
+  }
+
+  /**
+   * Start a new session from entry `id` (pi's fork). The old session file does not change.
+   * Like "Go", a user prompt is left out and put back in the composer.
+   */
+  private async treeFork(id: string) {
+    if (this.state.isStreaming) {
+      this.post({ type: "error", message: "Wait for the current response to finish before you start a new session." });
+      return;
+    }
+    const prompt = this.treePrompts.has(id);
+    const text = prompt ? this.treeTexts.get(id) : undefined;
+    const before = this.state.sessionFile;
+    this.post({ type: "treeBusy", text: "Starting a new session…" });
+    try {
+      await this.req({ type: "prompt", message: `/vscode:fork ${JSON.stringify({ entryId: id, position: prompt ? "before" : "at" })}` });
+    } finally {
+      this.post({ type: "treeBusy", text: "" });
+    }
+    await this.sendInit("reset");
+    if (text && this.state.sessionFile !== before) this.post({ type: "insertText", text, replace: true });
   }
 
   /** Session files hidden from the resume list (VS Code-only; the files stay on disk). */
