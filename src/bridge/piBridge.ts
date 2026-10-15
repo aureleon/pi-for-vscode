@@ -6,6 +6,9 @@
  * bridge exposes that (plus entry labels) as hidden slash commands whose argument
  * is a JSON payload. The VS Code webview hides `vscode:*` commands from autocomplete.
  *
+ * `vscode:fork` does the same for `ctx.fork()`: RPC's `fork` command can only
+ * fork before a user prompt, but /tree can start a new session at any entry.
+ *
  * Kept dependency-free: only the few API shapes used here are typed locally.
  */
 
@@ -18,6 +21,7 @@ interface NavigateOptions {
 
 interface CommandContext {
   navigateTree(targetId: string, options?: NavigateOptions): Promise<{ cancelled: boolean }>;
+  fork(entryId: string, options?: { position?: "before" | "at" }): Promise<{ cancelled: boolean }>;
   ui: { notify(message: string, level?: "info" | "warning" | "error"): void };
   isIdle(): boolean;
 }
@@ -49,6 +53,20 @@ export default function piVscodeBridge(pi: PiApi) {
           label: p.label || undefined,
         });
         if (r.cancelled) ctx.ui.notify("Tree navigation was cancelled.", "warning");
+      } catch (err) {
+        ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
+      }
+    },
+  });
+
+  pi.registerCommand("vscode:fork", {
+    description: "(VS Code) Start a new session from an entry of the session tree",
+    handler: async (args, ctx) => {
+      const p = parse<{ entryId: string; position?: "before" | "at" }>(args);
+      try {
+        if (!ctx.isIdle()) throw new Error("Wait for the current response to finish before you start a new session.");
+        const r = await ctx.fork(p.entryId, { position: p.position ?? "at" });
+        if (r.cancelled) ctx.ui.notify("The new session was cancelled.", "warning");
       } catch (err) {
         ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
       }
