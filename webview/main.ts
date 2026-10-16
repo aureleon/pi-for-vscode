@@ -50,7 +50,7 @@ const I = {
 const app = document.getElementById("app")!;
 app.innerHTML = `
   <header id="topbar" class="topbar hidden">
-    <span id="topbar-title" class="topbar-title">New session</span>
+    <span id="topbar-title" class="topbar-title placeholder">Loading…</span>
     <span class="topbar-actions">
       <button class="sp-icon" id="tb-terminal" title="Continue Session in Terminal" aria-label="Continue session in terminal">${I.terminal}</button>
       <button class="sp-icon" id="tb-tree" title="Session Tree (/tree)" aria-label="Session tree">${I.tree}</button>
@@ -70,8 +70,9 @@ app.innerHTML = `
     <div id="messages" class="messages"></div>
     <div id="queue" class="queue hidden"></div>
     <div id="empty" class="empty">
+      <div class="empty-loading">${SPINNER}<span>Loading session…</span></div>
       <img class="logo" id="empty-logo" alt="pi">
-      <div>Ask Pi anything about your code.</div>
+      <div class="empty-text">Ask Pi anything about your code.</div>
       <div class="hint">Type <kbd>/</kbd> for commands, <kbd>@</kbd> to mention files, <kbd>!</kbd> to run a shell command.</div>
     </div>
     <div id="working" class="working hidden">${SPINNER}<span id="working-text">Working…</span></div>
@@ -107,8 +108,9 @@ const LOGO = document.body.dataset.logo ?? "";
 const READONLY = !!document.body.dataset.readonly;
 if (READONLY) {
   document.body.classList.add("readonly");
-  $("empty").querySelector("div")!.textContent = "This session has no messages yet.";
+  $("empty").querySelector(".empty-text")!.textContent = "This session has no messages yet.";
 }
+document.body.classList.add("loading"); // until the first snapshot (see setLoading)
 $<HTMLImageElement>("empty-logo").src = LOGO;
 const scrollEl = $("scroll");
 const messagesEl = $("messages");
@@ -179,6 +181,19 @@ function autoscroll() {
     scrollQueued = false;
     scrollEl.scrollTop = scrollEl.scrollHeight;
   });
+}
+/**
+ * Until the first snapshot arrives, the empty transcript shows a loading state instead of the
+ * new-session welcome, so a resumed session does not look like a new one while pi starts.
+ */
+function setLoading(on: boolean) {
+  document.body.classList.toggle("loading", on);
+  if (on) {
+    const titleEl = $("topbar-title");
+    titleEl.textContent = "Loading…";
+    titleEl.title = "";
+    titleEl.classList.add("placeholder");
+  } else updateTitle();
 }
 function updateEmpty() {
   $("empty").classList.toggle("hidden", messagesEl.childElementCount > 0);
@@ -2203,6 +2218,7 @@ function applySnapshot(m: any) {
   stick = true;
   autoscroll();
   hideBanner();
+  setLoading(false);
 }
 
 window.addEventListener("message", (ev) => {
@@ -2252,6 +2268,7 @@ window.addEventListener("message", (ev) => {
       break;
     case "terminalAttached":
       setRunning(false);
+      setLoading(false);
       document.body.classList.add("in-terminal");
       showBanner(
         `<b>This session is open in the terminal</b>${m.title ? ` (${escapeHtml(m.title)})` : ""}.<div class="dim">The chat is paused so both don't write to the same session. Close the terminal or reattach to continue here; everything done in the TUI will show up.</div>`,
@@ -2268,15 +2285,18 @@ window.addEventListener("message", (ev) => {
       break;
     case "starting":
       hideBanner();
+      setLoading(true);
       break;
     case "exited":
       setRunning(false);
+      setLoading(false);
       showBanner(
         `<b>Pi process exited</b> (code ${m.code ?? m.signal ?? "?"}).${m.hint ? `<div>${escapeHtml(m.hint)}</div>` : ""}${m.stderr ? `<pre>${escapeHtml(m.stderr)}</pre>` : ""}`,
         [{ label: "Restart", fn: () => post({ type: "restart" }) }],
       );
       break;
     case "error":
+      setLoading(false);
       renderNote(`**Error:** ${m.message}`, "error");
       break;
     case "insertText":
