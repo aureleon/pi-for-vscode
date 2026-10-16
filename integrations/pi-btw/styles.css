@@ -16,7 +16,9 @@
 /* ---------------------------------------------------------------- side panel */
 /* Split layout: [#app | .side-splitter | .side-panel]. Narrow → top/bottom, wide → left/right. */
 .side-panel {
-  flex: 0 0 var(--side-h, 45%); min-height: 0; min-width: 0;
+  /* A saved size is in px. Clamp it to the view so that the panel never pushes #app out
+     when the view gets smaller (for example after a maximized editor is restored). */
+  flex: 0 0 min(var(--side-h, 45%), max(0px, calc(100% - 180px))); min-height: 0; min-width: 0; overflow: hidden;
   display: flex; flex-direction: column;
   background: var(--vscode-sideBar-background, var(--vscode-editor-background));
 }
@@ -28,7 +30,7 @@
 .side-splitter:hover, body.side-resizing .side-splitter { background: var(--accent); opacity: .6; }
 body.side-resizing { user-select: none; cursor: row-resize; }
 @media (min-width: 640px) {
-  .side-panel { flex-basis: var(--side-w, min(42%, 520px)); }
+  .side-panel { flex-basis: min(var(--side-w, min(42%, 520px)), calc(100% - 260px)); }
   .side-splitter { cursor: col-resize; border-top: none; border-left: 1px solid var(--border); margin: 0 0 0 -2px; }
   body.side-resizing { cursor: col-resize; }
 }
