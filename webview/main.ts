@@ -1448,6 +1448,45 @@ $("btn-model").addEventListener("click", (e) => {
   picker.toggle();
 });
 $("btn-image").addEventListener("click", () => post({ type: "pickImage" }));
+
+// ------------------------------------------------------------------ image preview
+
+/** Images that open enlarged on click: user and tool images, composer attachments, markdown images. */
+const PREVIEWABLE = ".user-images img, img.tool-image, .attachment img, .md img";
+let lightbox: HTMLElement | null = null;
+
+function openLightbox(src: string, alt: string) {
+  closeLightbox();
+  const box = el("div", "lightbox");
+  box.tabIndex = -1;
+  const img = el("img") as HTMLImageElement;
+  img.src = src;
+  img.alt = alt;
+  const x = el("button", "icon-btn lightbox-close", I.close);
+  x.title = "Close (Esc)";
+  box.append(img, x);
+  // A click anywhere closes, so the preview never traps the user.
+  box.addEventListener("click", () => closeLightbox());
+  document.body.appendChild(box);
+  lightbox = box;
+  box.focus();
+}
+
+/** Returns true if a preview was open. */
+function closeLightbox(): boolean {
+  if (!lightbox) return false;
+  lightbox.remove();
+  lightbox = null;
+  return true;
+}
+
+document.addEventListener("click", (e) => {
+  const t = e.target as HTMLElement | null;
+  if (!(t instanceof HTMLImageElement) || !t.matches(PREVIEWABLE) || t.closest(".lightbox")) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openLightbox(t.src, t.alt || "");
+}, true);
 // Composer toolbar buttons must not steal focus from the input: a blur would schedule
 // hiding the "/" popup right after the click opened it (it then flashed and vanished).
 for (const b of document.querySelectorAll<HTMLElement>(".composer .toolbar button")) {
@@ -1465,6 +1504,7 @@ $("btn-slash").addEventListener("click", () => {
  * and does not abort the run (focus can leave a menu's search field, e.g. after a click on a row).
  */
 function closeOverlay(): boolean {
+  if (closeLightbox()) return true;
   if (treeMenu.open) { treeMenu.escape(); return true; }
   if (listMenu.open) { listMenu.hide(); return true; }
   if (picker.open) { picker.hide(); return true; }
