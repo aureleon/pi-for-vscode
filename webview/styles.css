@@ -82,6 +82,10 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 .empty { text-align: center; color: var(--muted); margin-top: 18vh; line-height: 1.7; }
 .empty .logo { width: 64px; height: 64px; display: block; margin: 0 auto 10px; }
 .empty .hint { font-size: 0.9em; margin-top: 6px; }
+.empty-loading { display: none; align-items: center; justify-content: center; gap: 8px; }
+.empty-loading .spinner { width: 12px; height: 12px; }
+body.loading .empty > :not(.empty-loading) { display: none; }
+body.loading .empty-loading { display: flex; }
 
 .user-msg {
   background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius);

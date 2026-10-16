@@ -428,6 +428,8 @@ export class PiController implements vscode.Disposable {
       this.refreshStats();
     } catch (err: any) {
       this.output.appendLine(`[pi] init failed: ${err.message}`);
+      // Ends the webview's loading state, which otherwise waits for the snapshot.
+      if (this.active === s) this.post({ type: "error", message: `Could not load the session: ${err.message}` });
     } finally {
       const queued = s.queue ?? [];
       s.queue = undefined;
