@@ -95,6 +95,20 @@ function withoutSessionArgs(args: string[]): string[] {
   return out;
 }
 
+/** A `prompt` command for a message. The mode is always set: pi ignores it when idle. */
+function promptCmd(m: { text: string; images?: any[]; mode: "steer" | "followUp" }): RpcRecord {
+  const cmd: RpcRecord = { type: "prompt", message: m.text, streamingBehavior: m.mode };
+  if (m.images?.length) cmd.images = m.images;
+  return cmd;
+}
+
+/** A message that waits in the chat's own queue (see `Session.compactionQueue`). */
+interface HeldMessage {
+  text: string;
+  images?: any[];
+  mode: "steer" | "followUp";
+}
+
 /**
  * One pi RPC process and the UI state the webview needs to show it. A chat
  * shows one session at a time; others can keep running in the background.
@@ -115,6 +129,16 @@ interface Session {
   webTitle?: string;
   /** While a queue edit takes the queue out and puts it back, its in-between queue updates are not shown. */
   queueBusy?: boolean;
+  /**
+   * Messages sent while pi compacts. pi refuses prompts during a manual compaction, so they wait
+   * here and go to pi when compaction ends (like the pi TUI). Set from `compaction_start` to
+   * `compaction_end`: an empty list still means "compacting".
+   */
+  compactionQueue?: HeldMessage[];
+  /** Last `queue_update` from pi. The webview gets it with the compaction queue added. */
+  piQueue?: RpcRecord;
+  /** Names of extension commands. pi runs them at once, also during compaction, so they are not held. */
+  extCommands?: Set<string>;
   /** Ids of the integrations whose pi extension this session loaded (from `get_commands`). */
   ext: Set<string>;
 }
@@ -385,7 +409,7 @@ export class PiController implements vscode.Disposable {
       ]);
       if (this.active !== s) return;
       s.state = state;
-      s.ext = activeIntegrations(commands.commands);
+      this.setCommands(s, commands.commands);
       if (state.sessionFile && this.options.primary) {
         this.context.workspaceState.update(LAST_SESSION_KEY, state.sessionFile);
       }
@@ -409,6 +433,12 @@ export class PiController implements vscode.Disposable {
       s.queue = undefined;
       if (this.active === s) for (const m of queued) this.post(m);
     }
+  }
+
+  /** Update the active integrations and the extension command names of session `s` from its commands. */
+  private setCommands(s: Session, commands: any[] | undefined) {
+    s.ext = activeIntegrations(commands);
+    s.extCommands = new Set((commands ?? []).filter((c) => c.source === "extension").map((c) => String(c.name)));
   }
 
   /** Send a message for session `s` to the webview, if it is the one shown. */
@@ -460,7 +490,9 @@ export class PiController implements vscode.Disposable {
         s.state.isStreaming = false;
         s.runStartedAt = undefined;
         s.tail = [];
-        s.ui.delete("queue");
+        s.piQueue = undefined;
+        if (s.compactionQueue?.length) s.ui.set("queue", this.queueRecord(s));
+        else s.ui.delete("queue");
         if (this.background.has(s)) {
           this.onBackgroundSettled(s);
           return;
@@ -475,14 +507,18 @@ export class PiController implements vscode.Disposable {
         s.tail = [];
         break;
       case "queue_update":
+        s.piQueue = e;
+        e = this.queueRecord(s);
         s.ui.set("queue", e);
         if (s.queueBusy) return;
         break;
       case "compaction_start":
         s.ui.set("compaction", e);
+        s.compactionQueue ??= [];
         break;
       case "compaction_end":
         s.ui.delete("compaction");
+        void this.flushCompactionQueue(s, !!e.willRetry);
         break;
       case "session_info_changed":
         s.state.sessionName = e.name;
@@ -654,8 +690,11 @@ export class PiController implements vscode.Disposable {
           await this.queueOp(m);
           break;
         case "clearQueue": {
-          const q = await this.req({ type: "clear_queue" });
-          this.post({ type: "restoreQueue", text: [...q.steering, ...q.followUp].join("\n\n") });
+          const s = this.active;
+          if (!s) break;
+          const q = await this.takeQueue(s);
+          this.post({ type: "restoreQueue", text: [...q.steering, ...q.followUp].map((x) => x.text).join("\n\n") });
+          this.showQueue(s);
           break;
         }
       }
@@ -667,13 +706,16 @@ export class PiController implements vscode.Disposable {
   async prompt(text: string, images: any[] | undefined, mode?: "steer" | "followUp") {
     if (this.terminal) throw new Error("This session is open in the terminal. Reattach to continue here.");
     if (!this.pi?.running) await this.start();
-    const cmd: RpcRecord = { type: "prompt", message: text };
-    if (images?.length) cmd.images = images;
-    // Always set: pi ignores it when idle. Our isStreaming can lag behind pi (a get_state reply from
-    // before a run started, or a run that a queued message just started), and without it pi refuses
-    // the prompt with "Agent is already processing".
-    cmd.streamingBehavior = mode ?? "steer";
-    const res = await this.req(cmd);
+    const s = this.active;
+    if (s?.compactionQueue && !this.isExtensionCommand(s, text)) {
+      s.compactionQueue.push({ text, images: images?.length ? images : undefined, mode: mode ?? "steer" });
+      this.showQueue(s);
+      return;
+    }
+    // Always set the mode: pi ignores it when idle. Our isStreaming can lag behind pi (a get_state reply
+    // from before a run started, or a run that a queued message just started), and without it pi
+    // refuses the prompt with "Agent is already processing".
+    const res = await this.req(promptCmd({ text, images, mode: mode ?? "steer" }));
     if (res?.disposition === "handled") this.sendCommandsSoon();
   }
 
@@ -689,7 +731,7 @@ export class PiController implements vscode.Disposable {
       try {
         const s = this.active;
         const c = await this.req({ type: "get_commands" });
-        if (s) s.ext = activeIntegrations(c.commands);
+        if (s) this.setCommands(s, c.commands);
         this.post({ type: "commands", commands: c.commands });
       } catch {}
     }, 300);
@@ -699,34 +741,36 @@ export class PiController implements vscode.Disposable {
    * Change one queued message. RPC can only add to the queue or clear all of it, so take the queue
    * out, change it, and queue the messages again in the new order. The webview sends the text it
    * shows, so the edit finds the right message even when pi delivered one in the meantime.
+   * During compaction, all messages go back into the compaction queue, and "send now" puts the
+   * message first: stopping would also stop the compaction.
    */
   private async queueOp(m: { op: "remove" | "sendNow" | "move"; kind: "steer" | "followUp"; index: number; text: string; to?: number }) {
     const s = this.active;
     if (!s || !this.pi?.running) return;
     s.queueBusy = true;
     try {
-      const q = await this.req({ type: "clear_queue" });
-      const steering: string[] = [...(q?.steering ?? [])];
-      const followUp: string[] = [...(q?.followUp ?? [])];
+      const { steering, followUp } = await this.takeQueue(s);
       const list = m.kind === "steer" ? steering : followUp;
-      const i = list[m.index] === m.text ? m.index : list.indexOf(m.text);
-      let item: string | undefined;
+      const i = list[m.index]?.text === m.text ? m.index : list.findIndex((x) => x.text === m.text);
+      let item: HeldMessage | undefined;
       if (i >= 0) {
         [item] = list.splice(i, 1);
         if (m.op === "move") list.splice(Math.max(0, Math.min(m.to ?? i, list.length)), 0, item);
       }
-      if (item !== undefined && m.op === "sendNow") {
-        // abort resolves once pi is idle, so this prompt starts the next run.
-        await this.req({ type: "abort" }).catch(() => {});
-        await this.req({ type: "prompt", message: item });
+      if (item && m.op === "sendNow") {
+        if (s.compactionQueue) steering.unshift({ ...item, mode: "steer" });
+        else {
+          // abort resolves once pi is idle, so this prompt starts the next run.
+          await this.req({ type: "abort" }).catch(() => {});
+          await this.req(promptCmd({ ...item, mode: "steer" }));
+        }
       }
+      if (s.compactionQueue) s.compactionQueue.push(...steering, ...followUp);
       // If the run ended meanwhile, the first message starts a new run and the rest queue behind it.
-      for (const message of steering) await this.req({ type: "prompt", message, streamingBehavior: "steer" });
-      for (const message of followUp) await this.req({ type: "prompt", message, streamingBehavior: "followUp" });
+      else for (const x of [...steering, ...followUp]) await this.req(promptCmd(x));
     } finally {
       s.queueBusy = false;
-      const last = s.ui.get("queue") ?? { type: "queue_update", steering: [], followUp: [] };
-      this.emit(s, { type: "event", event: last });
+      this.showQueue(s);
     }
   }
 
@@ -734,29 +778,103 @@ export class PiController implements vscode.Disposable {
    * Stop the current run. By default, queued messages are not lost: pi would
    * drop them on abort, so take them out first and send them as the next run
    * (steering first, then follow-ups). With `resumeQueue: false`, they go
-   * back into the input box instead.
+   * back into the input box instead. A stop during compaction also stops the
+   * compaction; the messages that waited for it are handled the same way.
    */
   async abort(resumeQueue = true) {
-    let steering: string[] = [];
-    let followUp: string[] = [];
-    try {
-      const q = await this.req({ type: "clear_queue" });
-      steering = q?.steering ?? [];
-      followUp = q?.followUp ?? [];
-    } catch {}
+    const s = this.active;
+    let steering: HeldMessage[] = [];
+    let followUp: HeldMessage[] = [];
+    if (s) ({ steering, followUp } = await this.takeQueue(s));
     await this.req({ type: "abort" }).catch(() => {});
     if (!steering.length && !followUp.length) return;
+    if (s) this.showQueue(s);
     if (!resumeQueue || this.terminal || !this.pi?.running) {
-      this.post({ type: "restoreQueue", text: [...steering, ...followUp].join("\n\n") });
+      this.post({ type: "restoreQueue", text: [...steering, ...followUp].map((x) => x.text).join("\n\n") });
       return;
     }
-    const [first, ...rest] = steering.length ? [steering.join("\n\n"), ...followUp] : followUp;
+    const joined: HeldMessage = {
+      text: steering.map((x) => x.text).join("\n\n"),
+      images: steering.flatMap((x) => x.images ?? []),
+      mode: "steer",
+    };
+    const [first, ...rest] = steering.length ? [joined, ...followUp] : followUp;
     try {
       // abort resolves once pi is idle, so the first message starts a new run.
-      await this.req({ type: "prompt", message: first });
-      for (const message of rest) await this.req({ type: "prompt", message, streamingBehavior: "followUp" });
+      await this.req(promptCmd(first));
+      for (const x of rest) await this.req(promptCmd({ ...x, mode: "followUp" }));
     } catch (err: any) {
       this.post({ type: "error", message: err.message ?? String(err) });
+    }
+  }
+
+  // ---------------------------------------------------------------- queue
+
+  /**
+   * Take all queued messages out: pi's queue (which has text only) and the compaction queue.
+   * The compaction queue stays set (empty) while pi compacts.
+   */
+  private async takeQueue(s: Session): Promise<{ steering: HeldMessage[]; followUp: HeldMessage[] }> {
+    const held = s.compactionQueue?.splice(0) ?? [];
+    let q: any;
+    try {
+      q = await s.pi.request({ type: "clear_queue" });
+    } catch {}
+    return {
+      steering: [...(q?.steering ?? []).map((text: string) => ({ text, mode: "steer" as const })), ...held.filter((x) => x.mode === "steer")],
+      followUp: [...(q?.followUp ?? []).map((text: string) => ({ text, mode: "followUp" as const })), ...held.filter((x) => x.mode === "followUp")],
+    };
+  }
+
+  /** The queue that the webview shows: pi's queue, then the messages that wait for compaction to end. */
+  private queueRecord(s: Session): RpcRecord {
+    const held = s.compactionQueue ?? [];
+    const texts = (mode: HeldMessage["mode"]) => held.filter((x) => x.mode === mode).map((x) => x.text);
+    return {
+      type: "queue_update",
+      steering: [...(s.piQueue?.steering ?? []), ...texts("steer")],
+      followUp: [...(s.piQueue?.followUp ?? []), ...texts("followUp")],
+    };
+  }
+
+  private showQueue(s: Session) {
+    const e = this.queueRecord(s);
+    s.ui.set("queue", e);
+    if (!s.queueBusy) this.emit(s, { type: "event", event: e });
+  }
+
+  private isExtensionCommand(s: Session, text: string): boolean {
+    const name = /^\/(\S+)/.exec(text)?.[1];
+    return !!name && !!s.extCommands?.has(name);
+  }
+
+  /**
+   * Compaction ended: send the messages that waited for it, in order. If pi retries the run
+   * (after an overflow), queue them into that run; else the first one starts a new run.
+   * Messages that pi refuses go back into the input box.
+   */
+  private async flushCompactionQueue(s: Session, willRetry: boolean) {
+    const held = s.compactionQueue ?? [];
+    s.compactionQueue = undefined;
+    if (!held.length) return;
+    s.queueBusy = true;
+    let i = 0;
+    try {
+      for (; i < held.length; i++) {
+        const x = held[i];
+        if (willRetry && !this.isExtensionCommand(s, x.text)) {
+          await s.pi.request({ type: x.mode === "steer" ? "steer" : "follow_up", message: x.text, ...(x.images?.length ? { images: x.images } : {}) });
+        } else await s.pi.request(promptCmd(x));
+      }
+    } catch (err: any) {
+      const text = held.slice(i).map((x) => x.text).join("\n\n");
+      if (s === this.active) {
+        this.post({ type: "error", message: `Could not send the queued message: ${err.message ?? String(err)}` });
+        this.post({ type: "restoreQueue", text });
+      } else this.output.appendLine(`[pi] could not send messages queued during compaction: ${err.message ?? String(err)}`);
+    } finally {
+      s.queueBusy = false;
+      this.showQueue(s);
     }
   }
 

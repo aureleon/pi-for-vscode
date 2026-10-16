@@ -749,11 +749,13 @@ function onEvent(e: any) {
     case "compaction_start":
       compacting = true;
       updateStats();
+      updatePlaceholder();
       renderNote(`Compacting context (${e.reason})…`, "muted compaction");
       break;
     case "compaction_end":
       compacting = false;
       updateStats();
+      updatePlaceholder();
       if (e.result) renderNote(`Context compacted: ${fmtTokens(e.result.tokensBefore)} → ~${fmtTokens(e.result.estimatedTokensAfter ?? 0)} tokens`, "muted");
       else if (e.errorMessage) renderNote(`Compaction failed: ${e.errorMessage}`, "error");
       else if (e.aborted) renderNote("Compaction aborted", "muted");
@@ -1012,7 +1014,7 @@ function setRunning(r: boolean) {
   running = r;
   document.body.classList.toggle("running", r);
   $("working").classList.toggle("hidden", !r);
-  input.placeholder = r ? "Queue another message…  (Enter steers, ⌥Enter follow-up, Esc stops)" : "Ask Pi…  (/ commands, @ files, ! shell)";
+  updatePlaceholder();
   if (r) {
     runStart = Date.now();
     outputTokens = 0;
@@ -1028,6 +1030,16 @@ function setRunning(r: boolean) {
   }
   updateSendButton();
   updateStats();
+}
+/** While pi compacts, messages wait in the queue and go to pi when compaction ends. */
+function updatePlaceholder() {
+  input.placeholder = running
+    ? compacting
+      ? "Queue a message for after compaction…  (Enter steers, ⌥Enter follow-up, Esc stops)"
+      : "Queue another message…  (Enter steers, ⌥Enter follow-up, Esc stops)"
+    : compacting
+      ? "Queue a message for after compaction…  (Enter steers, ⌥Enter follow-up)"
+      : "Ask Pi…  (/ commands, @ files, ! shell)";
 }
 function updateWorking() {
   if (!running) return;
