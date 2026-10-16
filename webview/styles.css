@@ -600,3 +600,16 @@ body.in-terminal #empty { display: none; }
   outline: none; background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
   color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
 }
+
+/* ---------------------------------------------------------------- image preview */
+.user-images img, img.tool-image, .attachment img, .md img { cursor: zoom-in; }
+.md img { max-width: 100%; }
+.lightbox {
+  position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+  padding: 24px; background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 88%, transparent); cursor: zoom-out; outline: none;
+}
+.lightbox img {
+  max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, .5);
+}
+.lightbox-close { position: absolute; top: 8px; right: 8px; }
