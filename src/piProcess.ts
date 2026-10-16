@@ -1,6 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { StringDecoder } from "node:string_decoder";
 
 export type RpcRecord = { type: string; [k: string]: any };
 
@@ -40,10 +39,12 @@ export class PiProcess extends EventEmitter {
       shell: process.platform === "win32",
     });
     this.proc = proc;
-    const decoder = new StringDecoder("utf8");
+    // TextDecoder, not node:string_decoder: other extensions in the shared extension host can break
+    // that module ("StringDecoder is not a constructor"). `stream: true` keeps split UTF-8 sequences intact.
+    const decoder = new TextDecoder("utf-8");
 
     proc.stdout.on("data", (chunk: Buffer) => {
-      this.buffer += decoder.write(chunk);
+      this.buffer += decoder.decode(chunk, { stream: true });
       let nl: number;
       // Split strictly on LF (never on U+2028/U+2029 like readline would).
       while ((nl = this.buffer.indexOf("\n")) >= 0) {
