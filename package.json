@@ -36,6 +36,10 @@
     },
     "commands": [
       {
+        "command": "pi.copyLinkAddress",
+        "title": "Copy Link Address"
+      },
+      {
         "command": "pi.newSession",
         "title": "Pi: New Session",
         "icon": "$(add)"
@@ -100,6 +104,19 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "pi.copyLinkAddress",
+          "when": "false"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "pi.copyLinkAddress",
+          "when": "webviewSection == 'link'",
+          "group": "9_cutcopypaste@9"
+        }
+      ],
       "editor/context": [
         {
           "command": "pi.addSelection",
