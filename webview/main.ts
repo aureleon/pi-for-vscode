@@ -260,8 +260,18 @@ function linkify(root: HTMLElement) {
     wrap.append(head, pre);
   });
 }
+/** True when the user selected text inside `el` (a drag over a link), so the click must not open it. */
+function selectedIn(el: HTMLElement): boolean {
+  const sel = getSelection();
+  return !!sel && !sel.isCollapsed && sel.toString().trim() !== "" && el.contains(sel.anchorNode) && el.contains(sel.focusNode);
+}
 document.addEventListener("click", (e) => {
   const t = e.target as HTMLElement;
+  const hit = t.closest(".file-link, a[href]") as HTMLElement | null;
+  if (hit && selectedIn(hit)) {
+    e.preventDefault();
+    return;
+  }
   const link = t.closest(".file-link") as HTMLElement | null;
   if (link) {
     const raw = link.dataset.path ?? link.textContent ?? "";
@@ -285,6 +295,27 @@ document.addEventListener("click", (e) => {
     }
   }
 });
+
+/**
+ * Right-click on a link: VS Code's webview menu has only Cut/Copy/Paste, and Copy copies the
+ * selection, which a right-click on a link does not make. Select the link text (unless the user
+ * already selected text) and give the menu the target for "Copy Link Address" (`webview/context`).
+ * Capture phase: VS Code reads `data-vscode-context` in its own `contextmenu` listener.
+ */
+document.addEventListener("contextmenu", (e) => {
+  const t = e.target as HTMLElement;
+  const a = t.closest(".file-link, a[href]") as HTMLElement | null;
+  if (!a) return;
+  const href = a.getAttribute("href") ?? a.dataset.path ?? a.textContent ?? "";
+  a.dataset.vscodeContext = JSON.stringify({ webviewSection: "link", href });
+  const sel = getSelection();
+  if (sel && (sel.isCollapsed || !sel.toString().trim())) {
+    const r = document.createRange();
+    r.selectNodeContents(a);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+}, true);
 
 // ------------------------------------------------------------------ timeline items
 
