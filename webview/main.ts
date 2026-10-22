@@ -317,6 +317,29 @@ document.addEventListener("contextmenu", (e) => {
   }
 }, true);
 
+/**
+ * Copy of selected transcript text through the host clipboard. VS Code routes Cmd/Ctrl+C and the
+ * menu's Copy to the webview itself, and that copy can do nothing (seen on table cells). The host
+ * write is the same path as the code-block Copy button. Text fields keep the native copy.
+ */
+let lastCopy = { text: "", at: 0 };
+function copySelection(): boolean {
+  const a = document.activeElement;
+  if (a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement) return false;
+  const text = getSelection()?.toString() ?? "";
+  if (!text.trim()) return false;
+  // A keypress and the copy event that VS Code sends for it give the same text: write it once.
+  const now = performance.now();
+  if (text !== lastCopy.text || now - lastCopy.at > 500) post({ type: "copy", text, quiet: true });
+  lastCopy = { text, at: now };
+  return true;
+}
+document.addEventListener("keydown", (e) => {
+  const mod = /Mac/.test(navigator.platform) ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+  if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "c") copySelection();
+}, true);
+document.addEventListener("copy", () => copySelection(), true);
+
 // ------------------------------------------------------------------ timeline items
 
 function addItem(kind: string, parent: HTMLElement = messagesEl): HTMLElement {

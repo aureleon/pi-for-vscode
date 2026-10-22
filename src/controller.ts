@@ -663,7 +663,7 @@ export class PiController implements vscode.Disposable {
           break;
         case "copy":
           await vscode.env.clipboard.writeText(String(m.text ?? ""));
-          vscode.window.setStatusBarMessage("Pi: copied to clipboard", 1500);
+          if (!m.quiet) vscode.window.setStatusBarMessage("Pi: copied to clipboard", 1500);
           break;
         case "listAction":
           if (m.kind === "session" && m.action === "view") {
