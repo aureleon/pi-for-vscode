@@ -371,11 +371,24 @@ function renderUser(msg: any) {
     }
     bubble.appendChild(row);
   }
-  // Collapse long prompts.
+  // Collapse long prompts. The toggle row shows that an expanded prompt can collapse again.
   requestAnimationFrame(() => {
     if (body.scrollHeight > 140) {
-      bubble.classList.add("collapsed");
-      bubble.addEventListener("click", () => bubble.classList.toggle("collapsed"));
+      bubble.classList.add("collapsible", "collapsed");
+      const toggle = el("button", "user-toggle");
+      const sync = () => {
+        const c = bubble.classList.contains("collapsed");
+        toggle.innerHTML = `${CHEVRON_ICON}<span>${c ? "Show more" : "Show less"}</span>`;
+        toggle.setAttribute("aria-expanded", String(!c));
+      };
+      sync();
+      bubble.appendChild(toggle);
+      bubble.addEventListener("click", (e) => {
+        // Let links work and do not collapse while the user selects text.
+        if ((e.target as HTMLElement).closest(".file-link, a[href]") || selectedIn(bubble)) return;
+        bubble.classList.toggle("collapsed");
+        sync();
+      });
     }
   });
   messagesEl.appendChild(bubble);
