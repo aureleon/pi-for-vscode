@@ -95,7 +95,15 @@ body.loading .empty-loading { display: flex; }
 .user-text.md > :first-child, .sp-q.md > :first-child { margin-top: 0; }
 .user-text.md > :last-child, .sp-q.md > :last-child { margin-bottom: 0; }
 .sp-q.md { white-space: normal; }
-.user-msg.collapsed .user-text { max-height: 120px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); cursor: pointer; }
+.user-msg.collapsible { cursor: pointer; }
+.user-msg.collapsed .user-text { max-height: 120px; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); }
+.user-toggle {
+  display: flex; align-items: center; gap: 4px; height: 20px; margin: 4px 0 -4px; padding: 0; border: none; background: none;
+  color: var(--muted); font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.user-msg.collapsible:hover .user-toggle { color: var(--vscode-foreground); }
+.user-toggle svg { width: 12px; height: 12px; transform: rotate(-90deg); transition: transform .1s; }
+.user-msg.collapsed .user-toggle svg { transform: rotate(90deg); }
 .user-images { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
 .user-images img { max-height: 80px; border-radius: 4px; border: 1px solid var(--border); }
 /* Queued messages: dimmed user messages at the end of the transcript, one line each. */
