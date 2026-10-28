@@ -395,6 +395,8 @@ body.loading .empty-loading { display: flex; }
   font-size: 0.85em; max-width: 180px;
 }
 .attachment img { height: 22px; border-radius: 3px; }
+.attachment-icon { display: inline-flex; flex: none; height: 22px; align-items: center; padding: 0 2px; color: var(--muted); }
+.attachment-icon svg { width: 14px; height: 14px; }
 .attachment span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .popup {

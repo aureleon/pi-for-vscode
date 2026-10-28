@@ -95,6 +95,9 @@ function withoutSessionArgs(args: string[]): string[] {
   return out;
 }
 
+/** Image types that pi sends to models as image content. Other files are attached as "@path" references. */
+const IMAGE_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+
 /** A `prompt` command for a message. The mode is always set: pi ignores it when idle. */
 function promptCmd(m: { text: string; images?: any[]; mode: "steer" | "followUp" }): RpcRecord {
   const cmd: RpcRecord = { type: "prompt", message: m.text, streamingBehavior: m.mode };
@@ -685,8 +688,11 @@ export class PiController implements vscode.Disposable {
         case "setThinking":
           await this.setThinking(m.level);
           break;
-        case "pickImage":
-          await this.pickImage();
+        case "pickAttachments":
+          await this.pickAttachments();
+          break;
+        case "saveAttachment":
+          await this.saveAttachment(m.name, m.data);
           break;
         case "queueOp":
           await this.queueOp(m);
@@ -914,17 +920,36 @@ export class PiController implements vscode.Disposable {
     this.post({ type: "fileResults", requestId, items });
   }
 
-  private async pickImage() {
-    const uris = await vscode.window.showOpenDialog({
-      canSelectMany: true,
-      filters: { Images: ["png", "jpg", "jpeg", "gif", "webp"] },
-    });
+  /** Attach files. Images pi supports go as image content; other files go as "@path" references. */
+  private async pickAttachments() {
+    const uris = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: "Attach", defaultUri: vscode.Uri.file(this.cwd) });
     for (const uri of uris ?? []) {
+      const name = path.basename(uri.fsPath);
+      const mimeType = IMAGE_MIME[path.extname(uri.fsPath).slice(1).toLowerCase()];
+      if (!mimeType) {
+        this.post({ type: "addFile", ref: this.fileRef(uri.fsPath), name });
+        continue;
+      }
       const data = (await vscode.workspace.fs.readFile(uri)) as Uint8Array;
-      const ext = path.extname(uri.fsPath).slice(1).toLowerCase();
-      const mimeType = ext === "jpg" ? "image/jpeg" : `image/${ext}`;
-      this.post({ type: "addImage", image: { type: "image", data: Buffer.from(data).toString("base64"), mimeType }, name: path.basename(uri.fsPath) });
+      this.post({ type: "addImage", image: { type: "image", data: Buffer.from(data).toString("base64"), mimeType }, name });
     }
+  }
+
+  /**
+   * A pasted or dropped file has no path in the webview. Save a copy in a temp
+   * folder on the extension host (where pi runs) and attach that path.
+   */
+  private async saveAttachment(name: string, data: string) {
+    const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-vscode-attach-"));
+    const file = path.join(dir, path.basename(name || "file"));
+    await fs.promises.writeFile(file, Buffer.from(data ?? "", "base64"));
+    this.post({ type: "addFile", ref: file, name: path.basename(file) });
+  }
+
+  /** Path relative to the session cwd when the file is inside it, else absolute. */
+  private fileRef(file: string) {
+    const rel = path.relative(this.cwd, file);
+    return rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel : file;
   }
 
   /**
