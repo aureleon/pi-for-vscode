@@ -60,6 +60,11 @@
         "icon": "$(debug-restart)"
       },
       {
+        "command": "pi.renameSession",
+        "title": "Pi: Rename Session\u2026",
+        "icon": "$(edit)"
+      },
+      {
         "command": "pi.selectModel",
         "title": "Pi: Select Model"
       },
@@ -151,6 +156,11 @@
           "command": "pi.newSession",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@5"
+        },
+        {
+          "command": "pi.renameSession",
+          "when": "activeWebviewPanelId == 'pi.panel'",
+          "group": "overflow@0"
         },
         {
           "command": "pi.newTerminal",

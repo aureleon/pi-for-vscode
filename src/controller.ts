@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { PiProcess, type RpcRecord } from "./piProcess";
-import { defaultSessionDir, listSessions, relativeTime, SessionSummary } from "./sessions";
+import { appendSessionName, defaultSessionDir, listSessions, relativeTime, SessionSummary } from "./sessions";
 import { getShellEnv } from "./shellEnv";
 import { agentDir, scopeModels } from "./modelScope";
 import { slimTree } from "./treeData";
@@ -172,6 +172,8 @@ export interface ChatHost {
  * running in the background until they finish.
  */
 export class PiController implements vscode.Disposable {
+  /** All open chats. A rename in one chat's session list goes to the chat whose process has the session. */
+  private static readonly all = new Set<PiController>();
   /** The session shown in the webview. */
   private active?: Session;
   /** Busy sessions the user switched away from. */
@@ -221,6 +223,7 @@ export class PiController implements vscode.Disposable {
         },
       }));
     }
+    PiController.all.add(this);
   }
 
   /** The hooks of the modules that are active in session `s`. */
@@ -753,6 +756,12 @@ export class PiController implements vscode.Disposable {
         case "listAction":
           if (m.kind === "session" && m.action === "view") {
             await vscode.commands.executeCommand("pi.viewSession", vscode.Uri.file(m.id));
+          } else if (m.kind === "session" && m.action === "rename") {
+            try {
+              await this.renameSession(m.id, String(m.name ?? ""));
+            } finally {
+              await this.pickSession(true);
+            }
           } else if (m.kind === "session" && (m.action === "archive" || m.action === "unarchive")) {
             await this.setArchived(m.id, m.action === "archive");
             await this.pickSession(true);
@@ -1110,6 +1119,8 @@ export class PiController implements vscode.Disposable {
   // ---------------------------------------------------------------- builtins
 
   async runBuiltin(name: string, arg: string) {
+    // The TUI owns the session file while it is open in the terminal.
+    if (name === "name" && this.terminal) throw new Error("This session is open in the terminal. Rename it there, or reattach first.");
     if (!this.pi?.running && name !== "restart") await this.start();
     switch (name) {
       case "new": {
@@ -1141,8 +1152,9 @@ export class PiController implements vscode.Disposable {
           .catch(() => {}); // failures arrive as compaction_end { errorMessage } and are shown there
         break;
       case "name": {
-        const name = arg || (await vscode.window.showInputBox({ prompt: "Session name", value: this.state.sessionName ?? "" }));
-        if (name) await this.req({ type: "set_session_name", name });
+        const value = this.state.sessionName || this.active?.webTitle || "";
+        const name = (arg || (await vscode.window.showInputBox({ title: "Rename Session", prompt: "Session name", value })))?.trim();
+        if (name && name !== this.state.sessionName) await this.req({ type: "set_session_name", name });
         await this.refreshState();
         break;
       }
@@ -1276,6 +1288,38 @@ export class PiController implements vscode.Disposable {
     await this.context.globalState.update(ARCHIVED_SESSIONS_KEY, [...set]);
   }
 
+  /**
+   * Rename the session `id` (a session file or a background session key) from the session list.
+   * A session that a pi process has open is renamed through that process, so the process keeps
+   * the name and no second writer touches its file. Otherwise the name is appended to the file,
+   * the same as a rename in the pi TUI's /resume list.
+   */
+  private async renameSession(id: string, name: string) {
+    name = name.replace(/[\r\n]+/g, " ").trim();
+    if (!name) return;
+    const bg = [...this.background].find((b) => this.sessionKey(b) === id);
+    if (bg) {
+      await bg.pi.request({ type: "set_session_name", name });
+      return;
+    }
+    if (id.startsWith("bg:")) return;
+    const file = path.resolve(id);
+    for (const c of PiController.all) {
+      const sessions = [c.active, ...c.background].filter((x): x is Session => !!x?.state.sessionFile && path.resolve(x.state.sessionFile) === file);
+      if (c.terminal && sessions.includes(c.active!)) throw new Error("This session is open in the terminal. Rename it there, or reattach first.");
+      const live = sessions.find((x) => x.pi.running);
+      if (live) {
+        await live.pi.request({ type: "set_session_name", name });
+        if (c === this && live === this.active) await this.refreshState();
+        return;
+      }
+    }
+    if ([...PiController.all].some((c) => c.filesInUse().has(file))) {
+      throw new Error("This session is still running inside another session (for example as a subagent). Rename it when it finishes.");
+    }
+    await appendSessionName(file, name);
+  }
+
   async pickSession(refresh = false) {
     const dir = this.state.sessionFile ? path.dirname(this.state.sessionFile) : defaultSessionDir(this.cwd);
     const listed = await listSessions(dir, 150);
@@ -1290,6 +1334,7 @@ export class PiController implements vscode.Disposable {
     const unlisted = [...this.background].filter((b) => !b.state.sessionFile || !listedFiles.has(path.resolve(b.state.sessionFile))).map((b) => ({
       id: this.sessionKey(b),
       label: this.titleOf(b),
+      name: b.state.sessionName,
       cols: [this.isBusy(b) ? "working" : "idle", ""],
       group: "Running in background",
       search: this.titleOf(b),
@@ -1318,6 +1363,7 @@ export class PiController implements vscode.Disposable {
       return {
         id: idOf(s.file),
         label: s.name || b?.state.sessionName || b?.webTitle || s.firstMessage?.split("\n")[0].slice(0, 200) || "(empty session)",
+        name: b ? b.state.sessionName : s.name,
         cols: [b ? (this.isBusy(b) ? "working" : "idle") : relativeTime(s.mtime), msgs(s.messageCount)],
         group: r === 0 ? "Current session" : r === 1 ? "Running in background" : dayGroup(latest),
         search: [s.name, b && this.titleOf(b), s.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
@@ -1464,6 +1510,7 @@ export class PiController implements vscode.Disposable {
   }
 
   dispose() {
+    PiController.all.delete(this);
     this.terminal = undefined; // leave a user's terminal session running
     this.pi?.stop();
     this.active = undefined;
