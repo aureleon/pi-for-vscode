@@ -13,7 +13,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - Markdown renders in replies and in your sent prompts. It is also styled live as you type.
 - While Pi works: <kbd>Enter</kbd> steers, <kbd>⌥ Enter</kbd> queues a follow-up, <kbd>Esc</kbd> stops.
 - Queued messages show at the end of the chat. Drag to reorder them, or remove or send one now.
-- `/` for commands, `@` for file paths, `!cmd` for shell commands. Paste or drop images.
+- `/` for commands, `@` for file paths, `!cmd` for shell commands. Paste, drop or attach files. Images go to the model as images; other files go as `@path` references.
 - The context pill shows how full the context is. Click it to compact.
 
 ### Models

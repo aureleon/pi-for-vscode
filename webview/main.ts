@@ -34,6 +34,7 @@ const I = {
   plus: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M7.5 2h1v5.5H14v1H8.5V14h-1V8.5H2v-1h5.5z"/></svg>`,
   newChat: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6a1.5 1.5 0 0 1-1.5 1.5H6.2L3 13.8V11h.5-.0A1.5 1.5 0 0 1 2 9.5v-6zm1.5-.5a.5.5 0 0 0-.5.5v6c0 .28.22.5.5.5H4v1.6L5.8 10h6.7a.5.5 0 0 0 .5-.5v-6a.5.5 0 0 0-.5-.5h-9zM7.5 4.5h1v1.5H10v1H8.5v1.5h-1V7H6V6h1.5z"/></svg>`,
   slash: `<svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2" fill="none" stroke="currentColor"/><path d="M10 4.5 6 11.5" stroke="currentColor" stroke-width="1.2"/></svg>`,
+  attach: `<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M11 4.5 5.6 9.9a1.2 1.2 0 0 0 1.7 1.7l5.4-5.4a2.5 2.5 0 0 0-3.5-3.5L3.8 8.1a3.8 3.8 0 0 0 5.4 5.4L13.5 9"/></svg>`,
   image: `<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor"/><circle cx="5.5" cy="6" r="1.2" fill="currentColor"/><path d="m2 12 4-4 3 3 2-2 3 3" fill="none" stroke="currentColor"/></svg>`,
   send: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 2.5 13.5 8l-.7.7L8.5 4.4V14h-1V4.4L3.2 8.7l-.7-.7z"/></svg>`,
   stop: `<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg>`,
@@ -89,7 +90,7 @@ app.innerHTML = `
         <textarea id="input" rows="1" spellcheck="true" placeholder="Ask Pi…  (/ commands, @ files, ! shell)"></textarea>
       </div>
       <div class="toolbar">
-        <button class="icon-btn" id="btn-image" title="Attach image">${I.image}</button>
+        <button class="icon-btn" id="btn-attach" title="Attach files">${I.attach}</button>
         <button class="icon-btn" id="btn-slash" title="Commands">${I.slash}</button>
         <button class="chip" id="btn-model" title="Select model and effort"><span id="model-name">…</span><span class="chip-level" id="thinking-level"></span></button>
         <span class="spacer"></span>
@@ -151,7 +152,14 @@ let runStart = 0;
 let outputTokens = 0;
 /** Output tokens of assistant messages that finished in this run. `usage` on events is per message, so the run total is summed here. */
 let runOutputDone = 0;
-let images: { image: any; name: string }[] = [];
+/**
+ * Composer attachments. Images go to pi as image content. Other files go as an
+ * "@path" reference in the prompt text, so the model reads them with its tools.
+ */
+type Attachment = { kind: "image"; image: any; name: string } | { kind: "file"; ref: string; name: string };
+let attachments: Attachment[] = [];
+/** Image types that pi sends to models as image content. Other types are attached as file paths. */
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const statuses = new Map<string, string>();
 const widgets = new Map<string, { lines: string[]; placement: string }>();
 const toolCards = new Map<string, ToolCard>();
@@ -1271,7 +1279,7 @@ function resizeInput() {
   updateSendButton();
 }
 function updateSendButton() {
-  const hasText = !!input.value.trim() || images.length > 0;
+  const hasText = !!input.value.trim() || attachments.length > 0;
   const stop = running && !hasText;
   sendBtn.innerHTML = stop ? I.stop : I.send;
   sendBtn.classList.toggle("stop", stop);
@@ -1281,14 +1289,18 @@ function updateSendButton() {
 
 function renderAttachments() {
   const a = $("attachments");
-  a.classList.toggle("hidden", !images.length);
+  a.classList.toggle("hidden", !attachments.length);
   a.innerHTML = "";
-  images.forEach((im, i) => {
+  attachments.forEach((at, i) => {
     const chip = el("div", "attachment");
-    chip.innerHTML = `<img src="data:${im.image.mimeType};base64,${im.image.data}"><span>${escapeHtml(im.name)}</span>`;
+    chip.innerHTML =
+      at.kind === "image"
+        ? `<img src="data:${at.image.mimeType};base64,${at.image.data}"><span>${escapeHtml(at.name)}</span>`
+        : `<span class="attachment-icon">${FILE_ICON}</span><span>${escapeHtml(at.name)}</span>`;
+    if (at.kind === "file") chip.title = at.ref;
     const x = el("button", "icon-btn", I.close);
     x.addEventListener("click", () => {
-      images.splice(i, 1);
+      attachments.splice(i, 1);
       renderAttachments();
     });
     chip.appendChild(x);
@@ -1300,14 +1312,14 @@ function renderAttachments() {
 function submit(mode?: "steer" | "followUp") {
   const text = input.value;
   const trimmed = text.trim();
-  if (!trimmed && !images.length) {
+  if (!trimmed && !attachments.length) {
     if (running) post({ type: "abort" });
     return;
   }
   hidePopup();
 
   // Shell escape: !cmd (in context) / !!cmd (excluded from context)
-  if (trimmed.startsWith("!") && !images.length) {
+  if (trimmed.startsWith("!") && !attachments.length) {
     const exclude = trimmed.startsWith("!!");
     const command = trimmed.slice(exclude ? 2 : 1).trim();
     if (command) post({ type: "bash", command, exclude });
@@ -1317,11 +1329,11 @@ function submit(mode?: "steer" | "followUp") {
 
   // Builtin slash commands (unless an extension/prompt/skill shadows them)
   const m = trimmed.match(/^\/(\S+)\s*([\s\S]*)$/);
-  if (m && !images.length && activeHooks().some((i) => i.interceptCommand?.(m[1], m[2]))) {
+  if (m && !attachments.length && activeHooks().some((i) => i.interceptCommand?.(m[1], m[2]))) {
     clearInput();
     return;
   }
-  if (m && !images.length) {
+  if (m && !attachments.length) {
     const builtin = BUILTINS.find((b) => b.name === m[1]);
     const shadowed = commands.some((c) => c.name === m[1]);
     if (builtin && !shadowed) {
@@ -1331,13 +1343,16 @@ function submit(mode?: "steer" | "followUp") {
     }
   }
 
-  post({ type: "prompt", text, images: images.map((i) => i.image), mode });
+  const refs = attachments.flatMap((a) => (a.kind === "file" ? [/\s/.test(a.ref) ? `@"${a.ref}"` : `@${a.ref}`] : []));
+  const images = attachments.flatMap((a) => (a.kind === "image" ? [a.image] : []));
+  const full = refs.length ? (trimmed ? `${text.trimEnd()}\n\n` : "") + refs.join(" ") : text;
+  post({ type: "prompt", text: full, images, mode });
   clearInput();
   stick = true;
 }
 function clearInput() {
   input.value = "";
-  images = [];
+  attachments = [];
   renderAttachments();
   resizeInput();
 }
@@ -1490,10 +1505,10 @@ input.addEventListener("focus", cancelBlurHide);
 input.addEventListener("paste", (e) => {
   const items = e.clipboardData?.items ?? ([] as any);
   for (const it of items as DataTransferItemList) {
-    if (it.kind === "file" && it.type.startsWith("image/")) {
+    if (it.kind === "file") {
       e.preventDefault();
       const f = it.getAsFile();
-      if (f) readImage(f);
+      if (f) readAttachment(f);
     }
   }
 });
@@ -1505,7 +1520,7 @@ composer.addEventListener("drop", (e) => {
   const files = e.dataTransfer?.files;
   if (files?.length) {
     e.preventDefault();
-    for (const f of files) if (f.type.startsWith("image/")) readImage(f);
+    for (const f of files) readAttachment(f);
     return;
   }
   const uri = e.dataTransfer?.getData("text/uri-list") || e.dataTransfer?.getData("text/plain");
@@ -1515,12 +1530,18 @@ composer.addEventListener("drop", (e) => {
     insertText(refs.join(" ") + " ");
   }
 });
-function readImage(f: File) {
+/**
+ * Attach a pasted or dropped file. The webview does not get the file's path,
+ * so a file that is not an image goes to the host, which saves a copy that pi can read.
+ */
+function readAttachment(f: File) {
   const r = new FileReader();
   r.onload = () => {
-    const data = String(r.result).split(",")[1];
-    images.push({ image: { type: "image", data, mimeType: f.type }, name: f.name || "pasted image" });
-    renderAttachments();
+    const data = String(r.result).split(",")[1] ?? "";
+    if (IMAGE_TYPES.includes(f.type)) {
+      attachments.push({ kind: "image", image: { type: "image", data, mimeType: f.type }, name: f.name || "pasted image" });
+      renderAttachments();
+    } else post({ type: "saveAttachment", name: f.name || "pasted file", data });
   };
   r.readAsDataURL(f);
 }
@@ -1541,7 +1562,7 @@ $("btn-model").addEventListener("click", (e) => {
   e.stopPropagation();
   picker.toggle();
 });
-$("btn-image").addEventListener("click", () => post({ type: "pickImage" }));
+$("btn-attach").addEventListener("click", () => post({ type: "pickAttachments" }));
 
 // ------------------------------------------------------------------ image preview
 
@@ -2400,7 +2421,11 @@ window.addEventListener("message", (ev) => {
       onFileResults(m.requestId, m.items ?? []);
       break;
     case "addImage":
-      images.push({ image: m.image, name: m.name });
+      attachments.push({ kind: "image", image: m.image, name: m.name });
+      renderAttachments();
+      break;
+    case "addFile":
+      attachments.push({ kind: "file", ref: m.ref, name: m.name });
       renderAttachments();
       break;
     case "bashStart": {
