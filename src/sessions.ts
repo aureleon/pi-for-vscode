@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -86,6 +87,30 @@ export async function summarizeSession(file: string, mtime = 0): Promise<Session
     }
   } catch {}
   return summary;
+}
+
+/**
+ * Name a session that no pi process has open: append a `session_info` entry to its file, as pi's
+ * `SessionManager.appendSessionInfo` does. The entry hangs off the last entry (pi's leaf on load).
+ */
+export async function appendSessionName(file: string, name: string): Promise<void> {
+  const data = await fs.promises.readFile(file, "utf8");
+  const ids = new Set<string>();
+  let leaf: string | null = null;
+  for (const line of data.split("\n")) {
+    if (!line || line.startsWith('{"type":"session"')) continue;
+    try {
+      const e = JSON.parse(line);
+      if (typeof e.id === "string") {
+        ids.add(e.id);
+        leaf = e.id;
+      }
+    } catch {}
+  }
+  let id = randomUUID().slice(0, 8);
+  while (ids.has(id)) id = randomUUID().slice(0, 8);
+  const entry = { type: "session_info", id, parentId: leaf, timestamp: new Date().toISOString(), name };
+  await fs.promises.appendFile(file, (data && !data.endsWith("\n") ? "\n" : "") + JSON.stringify(entry) + "\n");
 }
 
 export function relativeTime(ms: number): string {
