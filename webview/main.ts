@@ -61,6 +61,7 @@ app.innerHTML = `
       <button class="sp-icon" id="tb-more" title="More Actions…" aria-label="More actions" aria-haspopup="menu">${I.more}</button>
     </span>
     <div id="tb-menu" class="tb-menu hidden" role="menu">
+      <button role="menuitem" data-action="rename">Rename Session…</button>
       <button role="menuitem" data-cmd="pi.newTerminal">Open in Terminal</button>
       <button role="menuitem" data-cmd="pi.openInTab">Open in New Tab</button>
       <button role="menuitem" data-msg="restart">Restart Agent Process</button>
@@ -1172,7 +1173,7 @@ function updateTitle() {
   const t = state.sessionName || firstUserText.split("\n")[0].slice(0, 80) || undefined;
   const titleEl = $("topbar-title");
   titleEl.textContent = t ?? "New session";
-  titleEl.title = t ?? "";
+  titleEl.title = t ? `${t}\nDouble-click to rename` : "Double-click to rename";
   titleEl.classList.toggle("placeholder", !t);
   if (t === lastTitle) return;
   lastTitle = t;
@@ -1370,7 +1371,8 @@ if (document.body.dataset.header) {
     const b = (e.target as HTMLElement).closest<HTMLElement>("button");
     if (!b) return;
     closeMenu();
-    if (b.dataset.cmd) post({ type: "runCommand", command: b.dataset.cmd });
+    if (b.dataset.action === "rename") renameInline();
+    else if (b.dataset.cmd) post({ type: "runCommand", command: b.dataset.cmd });
     else if (b.dataset.msg) post({ type: b.dataset.msg });
   });
   menu.addEventListener("keydown", (e) => {
@@ -1387,6 +1389,39 @@ if (document.body.dataset.header) {
   });
   document.addEventListener("click", (e) => !menu.contains(e.target as Node) && closeMenu());
   window.addEventListener("blur", closeMenu);
+  $("topbar-title").addEventListener("dblclick", renameInline);
+}
+
+/**
+ * Edit the session name in place in the sidebar header. Enter or blur saves, Esc cancels.
+ * The title changes when pi reports `session_info_changed`, so a failed rename leaves it as it was.
+ */
+function renameInline() {
+  const titleEl = $("topbar-title");
+  if (titleEl.classList.contains("hidden")) return;
+  const old = state.sessionName || lastTitle || "";
+  const box = el("input", "topbar-rename");
+  box.value = old;
+  box.placeholder = "Session name";
+  box.setAttribute("aria-label", "Session name");
+  titleEl.classList.add("hidden");
+  titleEl.before(box);
+  box.focus();
+  box.select();
+  let done = false;
+  const finish = (save: boolean) => {
+    if (done) return;
+    done = true;
+    const name = box.value.trim();
+    box.remove();
+    titleEl.classList.remove("hidden");
+    if (save && name && name !== state.sessionName) post({ type: "builtin", name: "name", arg: name });
+  };
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); }
+  });
+  box.addEventListener("blur", () => finish(true));
 }
 
 // ------------------------------------------------------------------ composer
@@ -2131,6 +2166,8 @@ const picker = new ModelPicker();
 interface ListItem {
   id: string;
   label: string;
+  /** Session name, if the session has one (the label can be the first message). */
+  name?: string;
   meta?: string;
   cols?: string[];
   group?: string;
@@ -2150,6 +2187,7 @@ interface ListItem {
 const ARCHIVE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13v3.5h-1V14h-11V5.5h-1V2zm1 1v1.5h11V3h-11zm1 2.5V13h9V5.5h-9zM6 7h4v1H6V7z"/></svg>`;
 const CHEVRON_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="m6 3.6 4.4 4.4L6 12.4l-.7-.7L9 8 5.3 4.3z"/></svg>`;
 const VIEW_ICON = `<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor"/></svg>`;
+const RENAME_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M13.2 1.6a1.5 1.5 0 0 1 2.1 2.1L5.6 13.4 2 14.4l1-3.6 9.7-9.7.5.5zM4 11.3l-.5 1.7 1.7-.5 8.4-8.4-1.2-1.2L4 11.3zm9.2-9.2-.7.7 1.2 1.2.7-.7a.5.5 0 0 0 0-.7l-.5-.5a.5.5 0 0 0-.7 0z"/></svg>`;
 const UNARCHIVE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13v3.5h-1V14h-11V5.5h-1V2zm1 1v1.5h11V3h-11zm1 2.5V13h9V5.5h-9zM8 6.3l2.4 2.4-.7.7L8.5 8.2V12h-1V8.2L6.3 9.4l-.7-.7L8 6.3z"/></svg>`;
 
 /**
@@ -2213,6 +2251,11 @@ class ListMenu {
           this.sel = Math.max(0, this.flat.findIndex((x) => x.id === it.parent));
           this.render();
         }
+        e.preventDefault();
+      }
+      else if (e.key === "F2" && this.kind === "session") {
+        const it = this.flat[this.sel];
+        if (it) this.rename(it);
         e.preventDefault();
       }
       else if (e.key === "Backspace" && (e.metaKey || e.ctrlKey) && this.kind === "session") {
@@ -2330,6 +2373,12 @@ class ListMenu {
           e.stopPropagation();
           this.act(it, "view");
         });
+        const r = el("button", "lm-action", RENAME_ICON);
+        r.title = "Rename (F2)";
+        r.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.rename(it);
+        });
         const b = el("button", "lm-action lm-archive", it.archived ? UNARCHIVE_ICON : ARCHIVE_ICON);
         b.title = it.current ? "The current session can't be archived" : it.busy ? "A running session can't be archived" : it.archived ? "Unarchive (⌘⌫)" : "Archive: hide from this list (⌘⌫)";
         b.disabled = !!it.current || !!it.busy;
@@ -2337,7 +2386,7 @@ class ListMenu {
           e.stopPropagation();
           this.act(it, it.archived ? "unarchive" : "archive");
         });
-        actions.append(v, b);
+        actions.append(r, v, b);
         row.appendChild(actions);
       }
       row.addEventListener("click", () => this.choose(it));
@@ -2353,7 +2402,7 @@ class ListMenu {
     const hint = el("div", "menu-hint");
     const archivedCount = this.items.filter((it) => it.archived).length;
     const nested = this.kids.size > 0;
-    hint.textContent = this.kind === "session" ? `Enter to open${nested ? " · → to expand" : ""} · ⌘↵ to view · ⌘⌫ to archive` : this.kind === "fork" ? "Enter to fork from this message" : "";
+    hint.textContent = this.kind === "session" ? `Enter to open${nested ? " · → to expand" : ""} · F2 to rename · ⌘↵ to view · ⌘⌫ to archive` : this.kind === "fork" ? "Enter to fork from this message" : "";
     f.appendChild(hint);
     if (this.kind === "session" && archivedCount) {
       const t = el("button", "link menu-toggle", this.showArchived ? "Hide archived" : `Show archived (${archivedCount})`);
@@ -2371,6 +2420,43 @@ class ListMenu {
     if (this.expanded.has(it.id)) this.expanded.delete(it.id);
     else this.expanded.add(it.id);
     this.render(it.id);
+  }
+
+  /**
+   * Edit the name of a session in its row. Enter or blur saves, Esc cancels. The host renames it
+   * and sends the list again, so the list shows the saved name.
+   */
+  private rename(it: ListItem) {
+    const row = this.list.querySelectorAll<HTMLElement>(".lm-item")[this.flat.indexOf(it)];
+    const label = row?.querySelector<HTMLElement>(".lm-label");
+    if (!row || !label) return;
+    const box = el("input", "lm-rename");
+    box.value = it.name ?? (it.label === "(empty session)" ? "" : it.label);
+    box.placeholder = "Session name";
+    box.setAttribute("aria-label", "Session name");
+    box.spellcheck = false;
+    label.replaceWith(box);
+    box.addEventListener("click", (e) => e.stopPropagation());
+    box.focus();
+    box.select();
+    let done = false;
+    const finish = (save: boolean) => {
+      if (done) return;
+      done = true;
+      const name = box.value.trim();
+      if (save && name && name !== it.name) {
+        label.textContent = name;
+        post({ type: "listAction", kind: this.kind, id: it.id, action: "rename", name });
+      }
+      box.replaceWith(label);
+      if (this.open) this.search.focus();
+    };
+    box.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") { e.preventDefault(); finish(true); }
+      else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    });
+    box.addEventListener("blur", () => finish(true));
   }
 
   private act(it: ListItem, action: "archive" | "unarchive" | "view") {

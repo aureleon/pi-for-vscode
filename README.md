@@ -24,6 +24,8 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 
 ### Sessions
 - Resume or fork from a searchable list. Archive a session to hide it from the list.
+- Rename the current session: double-click its name in the sidebar header, or use *Rename Session…* (in the sidebar's *More Actions* menu, the tab's overflow menu, or the command palette). `/name <name>` also works.
+- Rename any session in the session list with the pencil button or F2.
 - Forks and sessions that extensions start (for example subagents) are nested under the session they came from. They are collapsed until you expand them.
 - Sessions run in parallel. If you start a new session or open another one while Pi works, the busy session continues in the background. It shows at the top of the session list, and a notification tells you when it finishes or needs an answer.
 - *View* (the eye button in the session list, or *Pi: View Session File*) opens a session read-only in a new tab. It starts no pi process and shows new messages as pi writes them. Use it to follow a session that an extension runs, for example a subagent.
@@ -50,6 +52,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Times** come from the `timestamp` of each message. pi does not save when a tool starts, so after a reload a tool call shows when it finished, and no run time.
 - **Nested tool calls** come from `parentToolCallId` on `tool_execution_*` events. After a reload, pi keeps only a record of them (`nestedCalls`: names, arguments, status, errors), so their outputs are not shown.
 - **The session viewer** reads the session file and checks it for changes every second. It shows the branch of the last entry in the file.
+- **Renaming from the session list** goes through the pi process that has the session open, in any chat. If no process has it open, the extension adds the name to the session file, the same as a rename in the pi TUI's `/resume` list. A session that is open in the terminal or runs as a subagent can't be renamed until it is free.
 - **Archived sessions** stay on disk. Only the list in VS Code hides them, so the pi TUI can still resume them.
 - **`/tree`** needs a command that RPC mode does not have. The extension adds it by loading a small bridge extension into pi (`dist/pi-bridge.mjs`).
 - **Queue edits** take the whole queue out of pi and queue it again, because RPC mode can only add to the queue or clear it. Images in queued messages are not kept. **Send now** stops the run and sends the message as the next run.
