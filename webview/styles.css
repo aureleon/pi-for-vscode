@@ -5,6 +5,7 @@
   --muted: var(--vscode-descriptionForeground);
   --card-bg: var(--vscode-editor-background);
   --input-bg: var(--vscode-input-background);
+  --bg: var(--vscode-sideBar-background, var(--vscode-editor-background));
   /* Pi TUI palette (accent violet from pi's dark/light themes). High-contrast
      themes keep VS Code's own colours, see below. */
   --pi-violet: #a798d7;
@@ -28,7 +29,7 @@ body {
   font-family: var(--vscode-font-family);
   font-size: var(--vscode-font-size);
   color: var(--vscode-foreground);
-  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  background: var(--bg);
   overflow: hidden;
 }
 body { display: flex; flex-direction: column; height: 100vh; }
@@ -201,6 +202,18 @@ body.loading .empty-loading { display: flex; }
 .item.muted { color: var(--muted); font-style: italic; }
 .note.summary summary { cursor: pointer; }
 .note.custom::before { background: var(--vscode-charts-purple, #a371f7); }
+
+/* ---------------------------------------------------------------- timestamps */
+/* Shown on hover (see showStamp). The text is a pseudo-element, so copied text does not include it. */
+.ts {
+  display: none; position: absolute; top: 4px; right: 0; padding-left: 8px; line-height: 20px;
+  font-size: 11px; color: var(--muted); background: var(--bg); white-space: nowrap; cursor: default;
+}
+.ts::before { content: attr(data-label); }
+.item:hover > .ts, .user-msg:hover > .ts, .item.tool:hover > .tool-head > .ts { display: block; }
+/* User messages: in the gap above the bubble. Tool cards: at the end of the head row. */
+.user-msg > .ts { top: -17px; right: 2px; line-height: 16px; background: none; }
+.tool-head > .ts { position: static; flex: none; margin-left: auto; line-height: inherit; background: none; }
 
 /* ---------------------------------------------------------------- tool cards */
 .tool-head { display: flex; gap: 8px; align-items: baseline; min-width: 0; }

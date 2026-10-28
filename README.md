@@ -8,6 +8,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 
 ### Chat
 - Replies, thinking and tool calls stream in as a timeline. Tool cards show input and output, and edits show a diff.
+- Hover over a message or tool call to see its time. Tool calls also show how long they ran.
 - Tool calls that a tool makes (for example from codemode or a subagent tool) show under that tool's card.
 - Cards of extension tools also show the tool's `details` (DATA), including partial results while the tool runs.
 - Markdown renders in replies and in your sent prompts. It is also styled live as you type.
@@ -46,6 +47,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 ## Notes
 
 - **Nested sessions** use the `parentSession` field of the session header, the same as pi's `/resume`. A session whose parent is not in the list shows at the top level.
+- **Times** come from the `timestamp` of each message. pi does not save when a tool starts, so after a reload a tool call shows when it finished, and no run time.
 - **Nested tool calls** come from `parentToolCallId` on `tool_execution_*` events. After a reload, pi keeps only a record of them (`nestedCalls`: names, arguments, status, errors), so their outputs are not shown.
 - **The session viewer** reads the session file and checks it for changes every second. It shows the branch of the last entry in the file.
 - **Archived sessions** stay on disk. Only the list in VS Code hides them, so the pi TUI can still resume them.

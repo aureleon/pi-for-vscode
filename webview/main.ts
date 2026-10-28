@@ -353,8 +353,20 @@ document.addEventListener("copy", () => copySelection(), true);
 
 // ------------------------------------------------------------------ timeline items
 
+/**
+ * Time of the message that is being rendered (ms). Items of a snapshot get the time of their
+ * message; live items get the clock.
+ */
+let itemTime: number | undefined;
+function toMs(t: any): number | undefined {
+  const n = typeof t === "number" ? t : typeof t === "string" ? Date.parse(t) : NaN;
+  return Number.isFinite(n) ? n : undefined;
+}
+const itemNow = () => itemTime ?? Date.now();
+
 function addItem(kind: string, parent: HTMLElement = messagesEl): HTMLElement {
   const item = el("div", `item ${kind}`);
+  item.dataset.ts = String(itemNow());
   parent.appendChild(item);
   updateEmpty();
   autoscroll();
@@ -368,6 +380,7 @@ function renderUser(msg: any) {
     updateTitle();
   }
   const bubble = el("div", "user-msg");
+  bubble.dataset.ts = String(itemNow());
   const body = el("div", "user-text md");
   body.innerHTML = mdUser(text);
   linkify(body);
@@ -524,6 +537,8 @@ class ToolCard {
   onDone?: (isError: boolean) => void;
   args: any = {};
   done = false;
+  /** When the tool started to run. Only known live; a snapshot has only the message times. */
+  private execStart?: number;
 
   constructor(public id: string, public name: string, parent?: HTMLElement) {
     this.item = addItem("tool pending", parent);
@@ -531,6 +546,13 @@ class ToolCard {
     this.body = el("div", "tool-body hidden");
     this.item.append(this.head, this.body);
     this.renderHead();
+  }
+
+  /** The tool starts to run now. The card can exist earlier, while the model writes the call. */
+  markStarted() {
+    if (this.execStart || this.done) return;
+    this.execStart = Date.now();
+    this.item.dataset.ts = String(this.execStart);
   }
 
   setArgs(args: any) {
@@ -647,6 +669,7 @@ class ToolCard {
     if (this.nestedCount || !Array.isArray(record?.calls) || !record.calls.length) return;
     for (const r of record.calls) {
       const c = this.nested(`${this.id}/record-${r.id}`, String(r.name ?? "tool"));
+      delete c.item.dataset.ts; // the record has no times
       c.setArgs(r.arguments ?? (r.argumentsBytes ? { arguments: `(${r.argumentsBytes} bytes, not kept)` } : {}));
       c.done = true;
       c.item.classList.remove("pending");
@@ -664,6 +687,15 @@ class ToolCard {
     this.done = true;
     this.item.classList.remove("pending");
     this.item.classList.add(isError ? "failed" : "ok");
+    if (first) {
+      // Live: show the run time. Snapshot: the start is not known, so show when the tool finished.
+      const end = itemNow();
+      if (this.execStart) this.item.dataset.dur = String(end - this.execStart);
+      else if (itemTime !== undefined) {
+        this.item.dataset.ts = String(end);
+        this.item.dataset.finished = "1";
+      }
+    }
     this.setNestedRecord(result?.nestedCalls);
     if (this.nestedBox && !this.nestedToggled) this.nestedBox.classList.remove("open");
     if (first) this.onDone?.(isError);
@@ -719,6 +751,47 @@ function getToolCard(id: string, name: string, parentId?: string): ToolCard {
   return c;
 }
 
+// ------------------------------------------------------------------ timestamps
+
+/** `14:32:05` today, `Mar 3 14:32:05` on another day, with the year when it is not this year. */
+function fmtTime(ts: number): string {
+  const d = new Date(ts);
+  const today = new Date();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  if (d.toDateString() === today.toDateString()) return time;
+  const year = d.getFullYear() === today.getFullYear() ? undefined : "numeric";
+  return `${d.toLocaleDateString([], { month: "short", day: "numeric", year })} ${time}`;
+}
+/** Short run times need tenths of a second: `0.4s`, `7.2s`, then `42s`, `3m 05s`. */
+function fmtRunTime(ms: number): string {
+  return ms < 10_000 ? `${(Math.max(0, ms) / 1000).toFixed(1)}s` : fmtDuration(ms);
+}
+
+/**
+ * Show the time of an item when the pointer is on it. The label is made on the first hover, so
+ * items that replace their content after `addItem` keep it, and an idle transcript has no extra nodes.
+ * The text is in a pseudo-element, so it is not part of a copied selection.
+ */
+function showStamp(node: HTMLElement) {
+  const ts = Number(node.dataset.ts);
+  if (!ts) return;
+  const host = node.classList.contains("tool") ? node.querySelector<HTMLElement>(":scope > .tool-head") : node;
+  if (!host) return;
+  let s = host.querySelector<HTMLElement>(":scope > .ts");
+  if (!s) {
+    s = el("span", "ts");
+    host.appendChild(s);
+  }
+  const dur = node.dataset.dur ? Number(node.dataset.dur) : undefined;
+  const full = new Date(ts).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" });
+  s.dataset.label = dur !== undefined ? `${fmtTime(ts)} · ${fmtRunTime(dur)}` : fmtTime(ts);
+  s.title = node.dataset.finished ? `Finished ${full}` : dur !== undefined ? `Started ${full}\nRan for ${fmtRunTime(dur)}` : full;
+}
+messagesEl.addEventListener("mouseover", (e) => {
+  const node = (e.target as HTMLElement).closest<HTMLElement>("[data-ts]");
+  if (node && messagesEl.contains(node)) showStamp(node);
+});
+
 // ------------------------------------------------------------------ transcript
 
 function resetTranscript() {
@@ -732,6 +805,16 @@ function resetTranscript() {
 }
 
 function renderMessage(msg: any) {
+  const prev = itemTime;
+  itemTime = toMs(msg.timestamp) ?? prev;
+  try {
+    renderMessageBody(msg);
+  } finally {
+    itemTime = prev;
+  }
+}
+
+function renderMessageBody(msg: any) {
   switch (msg.role) {
     case "user":
       renderUser(msg);
@@ -827,6 +910,7 @@ function onEvent(e: any) {
       break;
     case "tool_execution_start": {
       const c = getToolCard(e.toolCallId, e.toolName, e.parentToolCallId);
+      c.markStarted();
       if (e.args && !Object.keys(c.args).length) c.setArgs(e.args);
       break;
     }
@@ -2517,6 +2601,7 @@ window.addEventListener("message", (ev) => {
       break;
     case "bashStart": {
       const c = new ToolCard(m.id, "bash");
+      c.markStarted();
       c.setArgs({ command: m.command, description: `! ${m.command.split("\n")[0]}` });
       bashCards.set(m.id, c);
       stick = true;
