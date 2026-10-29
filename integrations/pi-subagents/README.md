@@ -5,6 +5,7 @@ Support for [pi-subagents](https://www.npmjs.com/package/@strayge/pi-subagents),
 ## What it does
 
 - Hides the `fleet` widget, the ↑↓/Enter agent picker below the editor. It needs terminal keys and a TUI overlay, which RPC mode does not have. The `agents` widget shows the same rows.
+- Shows the times in the `agents` widget in whole seconds (`12s`, not `12.3s`), so the counter changes once a second.
 
 The core shows the rest without an integration: factory widgets such as the `agents` bars, and the subagent sessions that run inside the chat.
 
