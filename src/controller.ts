@@ -525,6 +525,23 @@ export class PiController implements vscode.Disposable {
     return e?.type === "extension_ui_request" && e.method === "setWidget" && !!s.hiddenWidgets?.has(e.widgetKey);
   }
 
+  /**
+   * Let the active modules change the lines of a widget. Returns undefined when the result equals
+   * the lines shown already, so a widget that pi re-renders often does not flood the webview.
+   */
+  private rewriteWidget(s: Session, e: RpcRecord): RpcRecord | undefined {
+    let lines: string[] = e.widgetLines;
+    let changed = false;
+    for (const h of this.hooks(s)) {
+      const next = h.onWidget?.(s.handle, e.widgetKey, lines);
+      if (next) (lines = next), (changed = true);
+    }
+    if (!changed) return e;
+    const prev = s.ui.get(`widget:${e.widgetKey}`);
+    if (prev && prev.widgetPlacement === e.widgetPlacement && JSON.stringify(prev.widgetLines) === JSON.stringify(lines)) return undefined;
+    return { ...e, widgetLines: lines };
+  }
+
   /** Send a message for session `s` to the webview, if it is the one shown. */
   private emit(s: Session, msg: any) {
     if (s !== this.active) return;
@@ -564,6 +581,11 @@ export class PiController implements vscode.Disposable {
       case "extension_ui_request":
         if (e.method === "setStatus" && this.hooks(s).some((h) => h.onStatus?.(s.handle, e.statusKey, e.statusText))) return;
         if (this.isHiddenWidget(s, e)) return;
+        if (e.method === "setWidget" && Array.isArray(e.widgetLines)) {
+          const w = this.rewriteWidget(s, e);
+          if (!w) return;
+          e = w;
+        }
         this.handleExtensionUi(s, e);
         break;
       case "agent_start":
