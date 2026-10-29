@@ -63,6 +63,11 @@ export interface HostIntegrationInstance {
   onShown?(s: ExtSession): void;
   /** A `setStatus` from pi. Return true to consume it: it is not shown. */
   onStatus?(s: ExtSession, key: string, text: string | undefined): boolean;
+  /**
+   * A `setWidget` with lines from pi. Return new lines to show instead, or undefined to keep them.
+   * The controller drops the update when the new lines equal the ones shown.
+   */
+  onWidget?(s: ExtSession, key: string, lines: string[]): string[] | undefined;
   /** Is `s` doing work that RPC events do not show? A busy process is not stopped on a session switch. */
   isBusy?(s: ExtSession): boolean;
   /** Session files that a running pi process writes to apart from its own session. Another process must not open them. */
