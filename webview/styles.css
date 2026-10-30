@@ -79,6 +79,10 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
 .topbar .sp-icon { position: relative; }
 .topbar .sp-icon.active { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
 .messages { display: flex; flex-direction: column; }
+/* Skip layout and paint of messages that are off screen, so long sessions stay fast (typing
+   in the composer re-lays out the page). `auto` keeps the last real height once one is known.
+   The clip margin keeps the timeline line (.item::after) and the user-message time visible. */
+.messages > * { content-visibility: auto; contain-intrinsic-size: auto 80px; overflow-clip-margin: 20px; }
 .empty { text-align: center; color: var(--muted); margin-top: 18vh; line-height: 1.7; }
 .empty .logo { width: 64px; height: 64px; display: block; margin: 0 auto 10px; }
 .empty .hint { font-size: 0.9em; margin-top: 6px; }
@@ -305,7 +309,7 @@ body.loading .empty-loading { display: flex; }
 }
 #input {
   position: relative; z-index: 1; display: block; width: 100%; resize: none; border: none; outline: none;
-  background: transparent; max-height: 300px;
+  background: transparent; max-height: 300px; field-sizing: content;
   color: transparent; caret-color: var(--vscode-input-foreground);
   scrollbar-width: none; /* a scrollbar would narrow the text box and break alignment */
 }

@@ -1272,15 +1272,27 @@ function syncHighlight() {
 }
 input.addEventListener("scroll", () => (inputHl.scrollTop = input.scrollTop));
 
+/**
+ * Grow the input with its text, up to its max-height. With CSS `field-sizing: content` the browser does
+ * this itself. The fallback measures scrollHeight, which forces a layout of the whole page on each key.
+ */
+const FIELD_SIZING = CSS.supports("field-sizing", "content");
 function resizeInput() {
-  input.style.height = "auto";
-  input.style.height = Math.min(input.scrollHeight, 300) + "px";
+  if (!FIELD_SIZING) {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 300) + "px";
+  }
   syncHighlight();
   updateSendButton();
 }
+/** Last state of the send button, so a key press that does not change it does not touch the DOM. */
+let sendBtnState = "";
 function updateSendButton() {
   const hasText = !!input.value.trim() || attachments.length > 0;
   const stop = running && !hasText;
+  const key = `${stop}|${running}|${hasText}`;
+  if (key === sendBtnState) return;
+  sendBtnState = key;
   sendBtn.innerHTML = stop ? I.stop : I.send;
   sendBtn.classList.toggle("stop", stop);
   sendBtn.title = stop ? "Stop (Esc)" : running ? "Queue message (Enter)" : "Send (Enter)";
