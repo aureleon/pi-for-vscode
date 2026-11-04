@@ -16,10 +16,12 @@ const TENTHS = /(?<![\d.])(\d+)\.\ds\b/g;
  * below the editor. It reads keys with `onTerminalInput` and opens a TUI overlay, and RPC mode
  * has neither, so the chat would show a dead menu next to the `agents` widget, which has the
  * same rows. The integration hides it, and rounds the times in the `agents` widget to seconds.
+ * Its pi side (`pi.ts`) names agent sessions after their task.
  */
 export const subagentsHost: HostIntegration = {
   id: "pi-subagents",
   matches: hasPiSubagents,
+  piExtension: "integrations/pi-subagents.mjs",
   hiddenWidgets: ["fleet"],
   create: () => ({
     onWidget: (_s, key, lines) => (key === "agents" ? lines.map((l) => l.replace(TENTHS, "$1s")) : undefined),
