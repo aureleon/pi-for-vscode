@@ -11,6 +11,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - Tool calls that a tool makes (for example from codemode or a subagent tool) show under that tool's card.
 - Cards of extension tools also show the tool's `details` (DATA), including partial results while the tool runs.
 - Markdown renders in replies and in your sent prompts. It is also styled live as you type.
+- When the composer is empty and the last message is from the model, the send button changes to Continue. It sends `pi.continuePrompt`.
 - While Pi works: <kbd>Enter</kbd> steers, <kbd>⌥ Enter</kbd> queues a follow-up, <kbd>Esc</kbd> stops.
 - Queued messages show at the end of the chat. Drag to reorder them, or remove or send one now.
 - `/` for commands, `@` for file paths, `!cmd` for shell commands. Paste, drop or attach files. Images go to the model as images; other files go as `@path` references.
@@ -76,6 +77,7 @@ VS Code apps opened from the Dock often do not get your shell `PATH`. For this r
 | `pi.resumeLastSession` | `true` | Reopen the last session of the workspace. |
 | `pi.useLoginShellEnv` | `true` | Load the environment of your login shell. |
 | `pi.terminalLocation` | `"editor"` | Where terminals open: as an editor tab or in the terminal panel. |
+| `pi.continuePrompt` | `"Continue as you left off."` | The prompt that the Continue button sends. |
 
 Extensions can check `process.env.PI_VSCODE === "1"` to know that they run inside VS Code.
 
