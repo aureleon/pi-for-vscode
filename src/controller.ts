@@ -1198,40 +1198,64 @@ export class PiController implements vscode.Disposable {
     const dir = this.state.sessionFile ? path.dirname(this.state.sessionFile) : defaultSessionDir(this.cwd);
     const listed = await listSessions(dir, 150);
     const archived = this.archivedSessions;
-    const bg = [...this.background];
-    const bgKeys = new Set(bg.map((b) => this.sessionKey(b)));
-    const sessions = listed.filter((s) => (s.messageCount > 0 || s.file === this.state.sessionFile) && !bgKeys.has(s.file));
-    const running = bg.map((b) => {
-      const summary = listed.find((s) => s.file === b.state.sessionFile);
-      const n = summary?.messageCount;
+    const bgByFile = new Map([...this.background].filter((b) => b.state.sessionFile).map((b) => [path.resolve(b.state.sessionFile!), b]));
+    const current = this.state.sessionFile && path.resolve(this.state.sessionFile);
+    const sessions = listed.filter((s) => s.messageCount > 0 || path.resolve(s.file) === current || bgByFile.has(path.resolve(s.file)));
+    const msgs = (n?: number) => (n != null ? `${n} msg${n === 1 ? "" : "s"}` : "");
+    // Background sessions that have no listed file yet (or no file at all) get a row of their own.
+    const listedFiles = new Set(sessions.map((s) => path.resolve(s.file)));
+    const unlisted = [...this.background].filter((b) => !b.state.sessionFile || !listedFiles.has(path.resolve(b.state.sessionFile))).map((b) => ({
+      id: this.sessionKey(b),
+      label: this.titleOf(b),
+      cols: [b.state.isStreaming ? "working" : "idle", ""],
+      group: "Running in background",
+      search: this.titleOf(b),
+      running: !!b.state.isStreaming,
+      busy: true,
+    }));
+    // Split the nested list into trees (a root and its descendants), so a tree moves as one block.
+    const trees: ReturnType<typeof nestSessions>[] = [];
+    for (const e of nestSessions(sessions)) {
+      if (!e.depth || !trees.length) trees.push([]);
+      trees[trees.length - 1].push(e);
+    }
+    const rank = (t: ReturnType<typeof nestSessions>) =>
+      t.some((e) => path.resolve(e.s.file) === current) ? 0 : t.some((e) => bgByFile.has(path.resolve(e.s.file))) ? 1 : 2;
+    // The tree with the current session comes first, then trees with background sessions, then the rest by date.
+    const ordered = trees.map((t, i) => ({ t, i, r: rank(t) })).sort((a, b) => a.r - b.r || a.i - b.i);
+    // Rows are keyed by sessionKey() for background sessions, so parent links must use the same ids.
+    const idOf = (f: string) => {
+      const b = bgByFile.get(path.resolve(f));
+      return b ? this.sessionKey(b) : f;
+    };
+    const treeItems = ordered.flatMap(({ t, r }) => t.map(({ s, depth, parent, latest }) => {
+      const file = path.resolve(s.file);
+      const b = bgByFile.get(file);
+      const isCurrent = file === current;
       return {
-        id: this.sessionKey(b),
-        label: this.titleOf(b),
-        cols: [b.state.isStreaming ? "working" : "idle", n != null ? `${n} msg${n === 1 ? "" : "s"}` : ""],
-        group: "Running in background",
-        search: [this.titleOf(b), summary?.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
-        running: !!b.state.isStreaming,
-        busy: true,
+        id: idOf(s.file),
+        label: s.name || b?.state.sessionName || b?.webTitle || s.firstMessage?.split("\n")[0].slice(0, 200) || "(empty session)",
+        cols: [b ? (b.state.isStreaming ? "working" : "idle") : relativeTime(s.mtime), msgs(s.messageCount)],
+        group: r === 0 ? "Current session" : r === 1 ? "Running in background" : dayGroup(latest),
+        search: [s.name, b && this.titleOf(b), s.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
+        current: isCurrent,
+        archived: !isCurrent && !b && archived.has(s.file),
+        running: (isCurrent && !!this.state.isStreaming) || !!b?.state.isStreaming,
+        busy: !!b || undefined,
+        parent: parent && idOf(parent),
+        depth,
       };
-    });
+    }));
+    const split = treeItems.findIndex((it) => it.group !== "Current session");
+    const head = split < 0 ? treeItems : treeItems.slice(0, split);
+    const tail = split < 0 ? [] : treeItems.slice(split);
     this.host.reveal();
     this.post({
       type: "openList",
       kind: "session",
       placeholder: "Resume a Pi session",
       empty: "No previous sessions for this folder",
-      items: [...running, ...nestSessions(sessions).map(({ s, depth, parent, latest }) => ({
-        id: s.file,
-        label: s.name || s.firstMessage?.split("\n")[0].slice(0, 200) || "(empty session)",
-        cols: [relativeTime(s.mtime), `${s.messageCount} msg${s.messageCount === 1 ? "" : "s"}`],
-        group: dayGroup(latest),
-        search: [s.name, s.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
-        current: s.file === this.state.sessionFile,
-        archived: s.file !== this.state.sessionFile && archived.has(s.file),
-        running: s.file === this.state.sessionFile && !!this.state.isStreaming,
-        parent,
-        depth,
-      }))],
+      items: [...head, ...unlisted, ...tail],
       refresh,
     });
   }
