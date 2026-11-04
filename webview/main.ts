@@ -38,6 +38,7 @@ const I = {
   image: `<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor"/><circle cx="5.5" cy="6" r="1.2" fill="currentColor"/><path d="m2 12 4-4 3 3 2-2 3 3" fill="none" stroke="currentColor"/></svg>`,
   send: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 2.5 13.5 8l-.7.7L8.5 4.4V14h-1V4.4L3.2 8.7l-.7-.7z"/></svg>`,
   stop: `<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg>`,
+  retry: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 2.5a5.5 5.5 0 1 0 5.4 6.5l1 .2A6.5 6.5 0 1 1 12.6 3.4V1.5h1v3.5h-3.5V4h1.8A5.5 5.5 0 0 0 8 2.5z"/></svg>`,
   grip: `<svg viewBox="0 0 16 16"><g fill="currentColor"><circle cx="6" cy="4" r="1.1"/><circle cx="10" cy="4" r="1.1"/><circle cx="6" cy="8" r="1.1"/><circle cx="10" cy="8" r="1.1"/><circle cx="6" cy="12" r="1.1"/><circle cx="10" cy="12" r="1.1"/></g></svg>`,
   close: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="m8 7.3 3.6-3.6.7.7L8.7 8l3.6 3.6-.7.7L8 8.7l-3.6 3.6-.7-.7L7.3 8 3.7 4.4l.7-.7z"/></svg>`,
   terminal: `<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor"/><path d="m4 6 2 2-2 2M7.5 10.5h4" fill="none" stroke="currentColor"/></svg>`,
@@ -148,6 +149,8 @@ const BUILTINS: Command[] = [
 let commands: Command[] = [];
 let state: any = {};
 let running = false;
+/** Role of the last user, assistant or tool message in the transcript. When it is "assistant", an empty composer offers Continue. */
+let lastRole = "";
 let runStart = 0;
 let outputTokens = 0;
 /** Output tokens of assistant messages that finished in this run. `usage` on events is per message, so the run total is summed here. */
@@ -724,11 +727,13 @@ function resetTranscript() {
   bashCards.clear();
   current = undefined;
   firstUserText = "";
+  lastRole = "";
   $("dialogs").innerHTML = "";
   updateEmpty();
 }
 
 function renderMessage(msg: any) {
+  if (["user", "assistant", "toolResult", "bashExecution"].includes(msg.role)) lastRole = msg.role;
   switch (msg.role) {
     case "user":
       renderUser(msg);
@@ -811,6 +816,7 @@ function onEvent(e: any) {
       break;
     }
     case "message_end":
+      if (e.message.role === "assistant" || e.message.role === "toolResult") lastRole = e.message.role;
       if (e.message.role === "assistant") {
         if (running) {
           runOutputDone += e.message.usage?.output ?? 0;
@@ -1290,13 +1296,15 @@ let sendBtnState = "";
 function updateSendButton() {
   const hasText = !!input.value.trim() || attachments.length > 0;
   const stop = running && !hasText;
-  const key = `${stop}|${running}|${hasText}`;
+  const retry = !running && !hasText && lastRole === "assistant" && !READONLY;
+  const key = `${stop}|${running}|${hasText}|${retry}`;
   if (key === sendBtnState) return;
   sendBtnState = key;
-  sendBtn.innerHTML = stop ? I.stop : I.send;
+  sendBtn.innerHTML = stop ? I.stop : retry ? I.retry : I.send;
   sendBtn.classList.toggle("stop", stop);
-  sendBtn.title = stop ? "Stop (Esc)" : running ? "Queue message (Enter)" : "Send (Enter)";
-  sendBtn.toggleAttribute("disabled", !stop && !hasText);
+  sendBtn.classList.toggle("retry", retry);
+  sendBtn.title = stop ? "Stop (Esc)" : retry ? "Continue" : running ? "Queue message (Enter)" : "Send (Enter)";
+  sendBtn.toggleAttribute("disabled", !stop && !retry && !hasText);
 }
 
 function renderAttachments() {
@@ -1569,7 +1577,13 @@ function insertText(text: string, replace = false) {
   input.focus();
 }
 
-sendBtn.addEventListener("click", () => (sendBtn.classList.contains("stop") ? post({ type: "abort" }) : submit("steer")));
+sendBtn.addEventListener("click", () => {
+  if (sendBtn.classList.contains("stop")) post({ type: "abort" });
+  else if (sendBtn.classList.contains("retry")) {
+    post({ type: "continue" });
+    stick = true;
+  } else submit("steer");
+});
 $("btn-model").addEventListener("click", (e) => {
   e.stopPropagation();
   picker.toggle();

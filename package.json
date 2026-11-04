@@ -215,6 +215,11 @@
             "Open the pi TUI in the terminal panel"
           ],
           "description": "Where \"Pi: Open Session in Terminal\" opens the pi TUI."
+        },
+        "pi.continuePrompt": {
+          "type": "string",
+          "default": "Continue as you left off.",
+          "description": "The prompt that the Continue button sends. The button shows in an empty composer when the last message is from the model."
         }
       }
     },

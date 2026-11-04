@@ -606,6 +606,10 @@ export class PiController implements vscode.Disposable {
         case "prompt":
           await this.prompt(m.text, m.images, m.mode);
           break;
+        case "continue":
+          // RPC mode has no command to resume a run without a new message, so send a short prompt.
+          await this.prompt(vscode.workspace.getConfiguration("pi").get<string>("continuePrompt")?.trim() || "Continue as you left off.", undefined, "steer");
+          break;
         case "abort":
           await this.abort();
           break;
