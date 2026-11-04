@@ -23,7 +23,8 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 ### Sessions
 - Resume or fork from a searchable list. Archive a session to hide it from the list.
 - Forks and sessions that extensions start (for example subagents) are nested under the session they came from. They are collapsed until you expand them.
-- Sessions run in parallel. If you start a new session or open another one while Pi works, the busy session continues in the background. It shows at the top of the session list, and a notification tells you when it finishes or needs an answer.
+- Sessions run in parallel. If you start a new session or open another one while Pi works, the busy session continues in the background. It shows below the current session in the session list, and a notification tells you when it finishes or needs an answer.
+- The session list shows the current session first, then the sessions that run in the background, then the other sessions by date. Nested sessions stay under their parent session in each group.
 - *View* (the eye button in the session list, or *Pi: View Session File*) opens a session read-only in a new tab. It starts no pi process and shows new messages as pi writes them. Use it to follow a session that an extension runs, for example a subagent.
 - `/tree` moves between branches of a session. It can summarize the branch you leave and label entries.
 - `/tree` can also start a new session from an entry ("New", Ctrl+Enter). The current session does not change.

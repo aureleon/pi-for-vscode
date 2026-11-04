@@ -2022,6 +2022,8 @@ interface ListItem {
 
 const ARCHIVE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13v3.5h-1V14h-11V5.5h-1V2zm1 1v1.5h11V3h-11zm1 2.5V13h9V5.5h-9zM6 7h4v1H6V7z"/></svg>`;
 const CHEVRON_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="m6 3.6 4.4 4.4L6 12.4l-.7-.7L9 8 5.3 4.3z"/></svg>`;
+/** Parent with a nested child: marks the count of nested sessions (subagents, forks). */
+const NESTED_ICON = `<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" d="M4.5 4v4.5a2 2 0 0 0 2 2H9"/><rect x="9.5" y="8" width="5" height="5" rx="1" fill="none" stroke="currentColor"/><circle cx="4.5" cy="4" r="1.75" fill="currentColor"/></svg>`;
 const VIEW_ICON = `<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor"/></svg>`;
 const UNARCHIVE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13v3.5h-1V14h-11V5.5h-1V2zm1 1v1.5h11V3h-11zm1 2.5V13h9V5.5h-9zM8 6.3l2.4 2.4-.7.7L8.5 8.2V12h-1V8.2L6.3 9.4l-.7-.7L8 6.3z"/></svg>`;
 
@@ -2114,8 +2116,10 @@ class ListMenu {
       this.sel = 0;
       this.showArchived = false;
       this.expanded.clear();
-      // Show where the current session is, if it is nested.
-      for (let p = items.find((it) => it.current)?.parent; p && !this.expanded.has(p); p = this.byId.get(p)?.parent) this.expanded.add(p);
+      // Show where the current session and the background sessions are, if they are nested.
+      for (const it of items.filter((x) => x.current || x.busy)) {
+        for (let p = it.parent; p && !this.expanded.has(p); p = this.byId.get(p)?.parent) this.expanded.add(p);
+      }
     }
     this.search.placeholder = placeholder;
     this.open = true;
@@ -2175,7 +2179,7 @@ class ListMenu {
         group = it.group;
         this.list.appendChild(el("div", "lm-group", escapeHtml(group)));
       }
-      const row = el("div", `mp-item lm-item${i === this.sel ? " active" : ""}${it.current ? " current" : ""}${it.archived ? " archived" : ""}${archivable ? " has-action" : ""}${it.depth ? " nested" : ""}`);
+      const row = el("div", `mp-item lm-item${i === this.sel ? " active" : ""}${it.current ? " current" : ""}${it.archived ? " archived" : ""}${archivable ? " has-action" : ""}${it.depth ? " nested" : ""}${nested ? " has-kids" : ""}`);
       row.title = it.search || it.label;
       const cols = it.cols ?? (it.meta ? [it.meta] : []);
       const open = this.expanded.has(it.id) || (!!words.length && this.flat.some((x) => x.parent === it.id));
@@ -2185,8 +2189,9 @@ class ListMenu {
         : `<span class="lm-twisty"></span>`;
       row.innerHTML =
         `<span class="lm-dot${it.running ? " lm-running" : ""}">${it.running ? SPINNER : it.current ? "●" : ""}</span>` +
-        `<span class="lm-main" style="padding-left:${(it.depth ?? 0) * 16}px">${twisty}<span class="lm-label">${escapeHtml(it.label)}</span>` +
-        (kids && !open ? `<span class="lm-kids">${kids}</span>` : "") + `</span>` +
+        `<span class="lm-main" style="padding-left:${(it.depth ?? 0) * 16}px">${twisty}<span class="lm-label">${escapeHtml(it.label)}</span></span>` +
+        // The nested count sits with the other columns, so it does not read as part of the title.
+        (nested ? `<span class="lm-kids-col">${kids && !open ? `<span class="lm-kids" title="${kids} nested session${kids === 1 ? "" : "s"} (subagents, forks)">${NESTED_ICON}${kids}</span>` : ""}</span>` : "") +
         cols.map((c, j) => `<span class="lm-col lm-col-${j}">${escapeHtml(c)}</span>`).join("");
       row.querySelector("button.lm-twisty")?.addEventListener("click", (e) => {
         e.stopPropagation();
