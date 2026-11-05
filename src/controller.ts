@@ -153,6 +153,11 @@ interface Session {
   handle: ExtSession;
   /** Session file the process was started with. It counts as open before pi reports `sessionFile`. */
   claim?: string;
+  /**
+   * Last `setStatus` text per key that a module consumed (for example the child-runs count). A chat
+   * that takes the session over gives them to its own modules (see `adopt`).
+   */
+  hookStatus: Map<string, string | undefined>;
   /** A snapshot of this session reached the webview (after it was ready). */
   delivered?: boolean;
 }
@@ -174,7 +179,12 @@ export interface Handover {
   file?: string;
   state: any;
   webTitle?: string;
+  /** What the chat knows of the session beyond pi's state: a running turn, dialogs, queues, widgets. */
+  live: LiveState;
 }
+
+/** The parts of a Session that a session that works needs in another chat (see `Session`). */
+type LiveState = Pick<Session, "tail" | "dialogs" | "ui" | "hookStatus" | "runStartedAt" | "compactionQueue" | "piQueue" | "extCommands" | "ext" | "hiddenWidgets">;
 
 /** A session tab in the header. Tabs of idle sessions have no process; opening one resumes its file. */
 export interface Tab {
@@ -555,7 +565,7 @@ export class PiController implements vscode.Disposable {
   private wrap(pi: PiProcess, command = "pi"): Session {
     const controller = this;
     const s: Session = {
-      pi, state: {}, tail: [], dialogs: new Map(), ui: new Map(),
+      pi, state: {}, tail: [], dialogs: new Map(), ui: new Map(), hookStatus: new Map(),
       // Workarounds are active from the start; integrations once `get_commands` shows their extension.
       ext: activeModules(this.modules, undefined),
       handle: {
@@ -964,7 +974,6 @@ export class PiController implements vscode.Disposable {
     const i = this.tabs.findIndex((t) => t.key === key);
     if (i < 0 || key.startsWith("bg:")) return undefined;
     const s = this.sessionOfTab(key);
-    if (s && this.isBusy(s)) throw new Error(`"${this.titleOf(s)}" is still working. Move its tab when it finishes.`);
     if (s && s === this.active) this.assertNoTerminal();
     const [tab] = this.tabs.splice(i, 1);
     this.unread.delete(key);
@@ -994,10 +1003,13 @@ export class PiController implements vscode.Disposable {
     for (const h of handovers) {
       const s = this.adopt(h);
       if (h.file && h.file === show) shown = s;
+      // A session that works keeps working, in this chat's background.
+      else if (this.isBusy(s)) this.background.add(s);
       else if (this.warm.length < this.warmLimit) this.warm.push(s);
       else s.pi.stop();
     }
     this.syncTabs();
+    this.updateStatus();
     if (shown) await this.showProcess(shown);
     else if (show) await this.openSession(show);
   }
@@ -1017,27 +1029,40 @@ export class PiController implements vscode.Disposable {
     this.syncTabs();
   }
 
+  /**
+   * Take up a session from another chat with all that the chat knew of it, so that a turn that
+   * runs, an open dialog or a queue goes on here. The modules of this chat get the statuses that
+   * the other chat's modules consumed (for example the running child sessions).
+   */
   private adopt(h: Handover): Session {
     const s = this.wrap(h.pi);
+    Object.assign(s, h.live);
     s.state = { ...h.state };
     s.claim = h.file;
     s.webTitle = h.webTitle;
+    for (const [key, text] of s.hookStatus) for (const m of this.hooks(s)) if (m.onStatus?.(s.handle, key, text)) break;
     return s;
   }
 
   /** Take the process of `s` out of this chat. The integrations forget the session; the other chat's take it up. */
   private detach(s: Session): Handover {
-    for (const h of this.hooks(s)) h.onExit?.(s.handle);
     s.pi.removeAllListeners();
     this.background.delete(s);
     this.warm = this.warm.filter((w) => w !== s);
     if (this.active === s) this.active = undefined;
-    return { pi: s.pi, file: s.state.sessionFile ?? s.claim, state: s.state, webTitle: s.webTitle };
+    // After the session left (it is not shown), so the modules send nothing about it to this webview.
+    for (const h of this.hooks(s)) h.onExit?.(s.handle);
+    this.updateStatus();
+    const { tail, dialogs, ui, hookStatus, runStartedAt, compactionQueue, piQueue, extCommands, ext, hiddenWidgets } = s;
+    return {
+      pi: s.pi, file: s.state.sessionFile ?? s.claim, state: s.state, webTitle: s.webTitle,
+      live: { tail, dialogs, ui, hookStatus, runStartedAt, compactionQueue, piQueue, extCommands, ext, hiddenWidgets },
+    };
   }
 
-  /** The processes of all idle sessions, for a tile that is merged into another. Call only without work (hasWork). */
+  /** The processes of all sessions of this chat (also the ones that work), for a tile that is merged into another. */
   detachAll(): Handover[] {
-    const all = [this.active, ...this.warm].filter((s): s is Session => !!s?.pi.running);
+    const all = [this.active, ...this.background, ...this.warm].filter((s): s is Session => !!s?.pi.running);
     return all.map((s) => this.detach(s));
   }
 
@@ -1083,7 +1108,10 @@ export class PiController implements vscode.Disposable {
     if (TAIL_EVENTS.has(e.type)) s.tail.push(e);
     switch (e.type) {
       case "extension_ui_request":
-        if (e.method === "setStatus" && this.hooks(s).some((h) => h.onStatus?.(s.handle, e.statusKey, e.statusText))) return;
+        if (e.method === "setStatus" && this.hooks(s).some((h) => h.onStatus?.(s.handle, e.statusKey, e.statusText))) {
+          s.hookStatus.set(e.statusKey, e.statusText);
+          return;
+        }
         if (this.isHiddenWidget(s, e)) return;
         if (e.method === "setWidget" && Array.isArray(e.widgetLines)) {
           const w = this.rewriteWidget(s, e);

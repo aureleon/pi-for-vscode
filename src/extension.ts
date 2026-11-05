@@ -241,7 +241,6 @@ class SidebarTiles implements vscode.Disposable {
     const src = this.chats.get(from)?.c;
     const dst = this.chats.get(to)?.c;
     if (!src || !dst || from === to) return;
-    if (src.hasWork) throw new Error("a session in this tile is still working. Merge the tile when it finishes.");
     const { tabs, shown } = src.tabList();
     // The processes move to the other tile; closing this tile stops only what is left.
     const handovers = src.detachAll();
