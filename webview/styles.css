@@ -120,6 +120,8 @@ kbd {
 .topbar .sp-icon { position: relative; }
 .topbar .sp-icon.active { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
 .messages { display: flex; flex-direction: column; }
+/* Transcripts of other tabs, kept for a quick switch back (keepView in chat.ts). */
+.messages.kept-view { display: none; }
 /* Skip layout and paint of messages that are off screen, so long sessions stay fast (typing
    in the composer re-lays out the page). `auto` keeps the last real height once one is known.
    The clip margin keeps the timeline line (.item::after) and the user-message time visible. */
