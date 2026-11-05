@@ -46,6 +46,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - Drag a tab out of its tabs into the chat to open it in a new tile, on the half where you drop it. Drag it to another tile's tabs or middle to move it there, or to that tile's edge for a new tile next to it. The label at the pointer says what the drop does.
 - Drag a tile by the empty part of its header: to the middle of another tile to merge the two into tabs, or to its edge to move the tile.
 - Close a tile with *Close Tile* in its More Actions menu, or by closing its last tab, or by dragging its last tab away.
+- A tab that is still loading can be closed or moved. A close stops the load; a move takes the loading session along.
 - The tiles, their tabs and their sizes come back when VS Code starts again.
 
 ### Chat tabs

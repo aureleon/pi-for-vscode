@@ -1600,8 +1600,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         }
         post({ type: "tabClose", key: t.key });
       });
-      tab.append(mark);
-      if (t.key) tab.append(close);
+      // Also the tab of a new session that is still loading: closing it stops the load.
+      tab.append(mark, close);
       tab.addEventListener("click", () => {
         if (t.shown || !t.key) return;
         // Show the switch at once; the host sends the session and the tabs when it is loaded.
