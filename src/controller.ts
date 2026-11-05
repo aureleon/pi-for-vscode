@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import { PiProcess, type RpcRecord } from "./piProcess";
 import { appendSessionName, defaultSessionDir, listSessions, relativeTime, SessionSummary } from "./sessions";
 import { getShellEnv } from "./shellEnv";
+import { readSessionView } from "./sessionView";
 import { agentDir, scopeModels } from "./modelScope";
 import { slimTree } from "./treeData";
 import { createPiTerminal, piTerminalName } from "./piTerminal";
@@ -13,6 +14,8 @@ import { openDirectory, openPath } from "./openPath";
 import { activeModules, hiddenWidgets, hostModules, moduleEntryTypes, modulePiExtensions, type ExtSession, type HostIntegration, type HostIntegrationInstance } from "./integrations";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
+/** Model, effort and commands of the last snapshot, for the preview while pi starts. */
+const PREVIEW_KEY = "pi.previewState";
 const RECENT_MODELS_KEY = "pi.recentModels";
 export const ARCHIVED_SESSIONS_KEY = "pi.archivedSessions";
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g;
@@ -150,6 +153,8 @@ interface Session {
   handle: ExtSession;
   /** Session file the process was started with. It counts as open before pi reports `sessionFile`. */
   claim?: string;
+  /** A snapshot of this session reached the webview (after it was ready). */
+  delivered?: boolean;
 }
 
 /** How a chat starts. */
@@ -176,6 +181,11 @@ export interface Tab {
   /** Session key (see `sessionKey`): the session file, or `bg:<id>` without a file. */
   key: string;
   title: string;
+  /**
+   * Session id of a new session that has no message yet. pi writes the file only with the first
+   * message, so the tab opens it again with `--session-id`.
+   */
+  id?: string;
 }
 
 interface StartOptions {
@@ -266,6 +276,11 @@ export class PiController implements vscode.Disposable {
       }));
     }
     PiController.all.add(this);
+    // Start pi now, not when the webview is ready: pi needs seconds to start, and the webview loads
+    // in the meantime. A tile that gets a process handed over (adoptFirst, right after this) starts none.
+    queueMicrotask(() => {
+      if (!this.active && !this.disposed && !this.terminal) this.start().catch((err) => this.output.appendLine(`[pi] start failed: ${err.message ?? err}`));
+    });
   }
 
   /** The hooks of the modules that are active in session `s`. */
@@ -370,14 +385,15 @@ export class PiController implements vscode.Disposable {
   private park(s: Session) {
     if (!s.pi.running) return;
     if (this.isBusy(s)) return this.sendToBackground(s);
-    // A new session that got no message has no file: it becomes the spare again, or stops.
-    if (!s.state.sessionFile || !fs.existsSync(s.state.sessionFile)) {
-      if (!this.spare && this.warmLimit && s.state.sessionFile) this.spare = s;
+    const key = this.sessionKey(s);
+    if (!this.tabs.some((t) => t.key === key)) {
+      // No tab (it was closed): a new session without a message becomes the spare again.
+      const unwritten = !!s.state.sessionFile && !fs.existsSync(s.state.sessionFile);
+      if (unwritten && !this.spare && this.warmLimit) this.spare = s;
       else s.pi.stop();
       return;
     }
-    const key = this.sessionKey(s);
-    if (this.warmLimit && s.state.sessionFile && this.tabs.some((t) => t.key === key)) {
+    if (this.warmLimit && s.state.sessionFile) {
       this.warm = [s, ...this.warm.filter((w) => w !== s)];
       for (const old of this.warm.splice(this.warmLimit)) old.pi.stop();
       return;
@@ -392,11 +408,17 @@ export class PiController implements vscode.Disposable {
    * A while after a session is shown, start processes for the tabs next to it, one at a time, so
    * that the first switch to them is quick too.
    */
-  private schedulePrewarm() {
+  private schedulePrewarm(delay = this.prewarmedOnce ? 2500 : 8000) {
     if (!this.warmLimit || this.disposed) return;
     clearTimeout(this.prewarmTimer);
-    this.prewarmTimer = setTimeout(() => void this.prewarm(), 2500);
+    this.prewarmTimer = setTimeout(() => {
+      // Do not slow down chats that start (for example all tiles when VS Code opens).
+      if ([...PiController.all].some((c) => c.starting)) return this.schedulePrewarm(2000);
+      this.prewarmedOnce = true;
+      void this.prewarm();
+    }, delay);
   }
+  private prewarmedOnce = false;
 
   private async prewarm() {
     if (this.prewarming || this.disposed) return;
@@ -460,6 +482,12 @@ export class PiController implements vscode.Disposable {
   }
 
   private async doStart(sessionFile?: string, sessionId?: string, opts: StartOptions = {}) {
+    // The file that this start resumes, for the preview (onReady) while the shell env loads.
+    this.startingFile = opts.fresh ? undefined : sessionFile ?? this.options.sessionFile ??
+      (this.options.tabsKey ? this.context.workspaceState.get<string>(`${this.options.tabsKey}:shown`) : undefined) ??
+      (this.options.primary && vscode.workspace.getConfiguration("pi").get<boolean>("resumeLastSession", true)
+        ? this.context.workspaceState.get<string>(LAST_SESSION_KEY)
+        : undefined);
     const prev = this.active;
     if (prev) {
       if (opts.keepRunning) this.park(prev);
@@ -486,6 +514,8 @@ export class PiController implements vscode.Disposable {
     const asked = !!(sessionFile ?? this.options.sessionFile);
     this.options.sessionFile = undefined;
     const pinned = args.some((a) => ["--session", "--session-id", "--continue", "-c", "--no-session"].includes(a));
+    // The tab of a new session without a message: it has no file yet, so open it by its id.
+    if (!sessionId && resume && !fs.existsSync(resume)) sessionId = this.tabs.find((t) => t.key === resume && t.id)?.id;
     let claim: string | undefined;
     if (sessionId && !pinned) {
       // Exact session (resumes it, or creates it if it was never written).
@@ -501,11 +531,12 @@ export class PiController implements vscode.Disposable {
     }
 
     this.args = args;
-    this.pendingKey = claim;
+    this.pendingKey = claim ?? (sessionId ? this.tabs.find((t) => t.id === sessionId)?.key : undefined);
     this.active = this.spawn(command, args, env);
     this.active.claim = claim;
     this.updateStatus();
-    this.post({ type: "starting", fresh: !claim && !sessionId });
+    // After a preview of this file, "starting" would replace it with "Loading session".
+    if (!(claim && this.previewFile === claim)) this.post({ type: "starting", fresh: !claim && !sessionId });
     await this.sendInit("init");
   }
 
@@ -715,6 +746,9 @@ export class PiController implements vscode.Disposable {
       if (state.sessionFile && this.options.primary) {
         this.context.workspaceState.update(LAST_SESSION_KEY, state.sessionFile);
       }
+      if (this.webviewReady) s.delivered = true;
+      // For the preview at the next start (sendPreview): the model and the commands.
+      this.context.workspaceState.update(PREVIEW_KEY, { model: state.model, thinkingLevel: state.thinkingLevel, commands: commands.commands });
       this.post({
         type: kind,
         state,
@@ -839,8 +873,14 @@ export class PiController implements vscode.Disposable {
     const a = this.active;
     const key = a && (a.state.sessionFile || a.state.sessionId) ? this.sessionKey(a) : undefined;
     if (key && !this.tabs.some((t) => t.key === key)) {
-      const i = this.tabs.findIndex((t) => t.key === this.shownKey);
-      this.tabs.splice(i < 0 ? this.tabs.length : i + 1, 0, { key, title: "" });
+      // A new session opened again with --session-id gets a new file name: keep its tab.
+      const id = a?.state.sessionId;
+      const same = id && this.tabs.find((t) => t.id === id);
+      if (same) same.key = key;
+      else {
+        const i = this.tabs.findIndex((t) => t.key === this.shownKey);
+        this.tabs.splice(i < 0 ? this.tabs.length : i + 1, 0, { key, title: "" });
+      }
     }
     for (const b of this.background) {
       const k = this.sessionKey(b);
@@ -856,8 +896,11 @@ export class PiController implements vscode.Disposable {
     const shownTab = key ?? (this.pendingKey && path.resolve(this.pendingKey)) ?? undefined;
     this.tabs = this.tabs.filter((t) => {
       const s = this.sessionOfTab(t.key);
-      if (s) t.title = this.titleOf(s);
-      return !!s || t.key === shownTab || (!t.key.startsWith("bg:") && fs.existsSync(t.key));
+      if (s) {
+        t.title = this.titleOf(s);
+        t.id = s.state.sessionFile && !fs.existsSync(s.state.sessionFile) ? s.state.sessionId : undefined;
+      }
+      return !!s || t.key === shownTab || !!t.id || (!t.key.startsWith("bg:") && fs.existsSync(t.key));
     });
     const tabs = this.tabs.map((t) => {
       const s = this.sessionOfTab(t.key);
@@ -974,7 +1017,7 @@ export class PiController implements vscode.Disposable {
 
   /** The processes of all idle sessions, for a tile that is merged into another. Call only without work (hasWork). */
   detachAll(): Handover[] {
-    const all = [this.active, ...this.warm].filter((s): s is Session => !!s?.pi.running && !!(s.state.sessionFile && fs.existsSync(s.state.sessionFile)));
+    const all = [this.active, ...this.warm].filter((s): s is Session => !!s?.pi.running);
     return all.map((s) => this.detach(s));
   }
 
@@ -1138,8 +1181,40 @@ export class PiController implements vscode.Disposable {
       this.post({ type: "terminalAttached", title: this.terminal.name });
       return;
     }
+    for (const s of [this.active, ...this.background, ...this.warm]) if (s) s.delivered = false;
+    this.syncTabs();
+    // While pi starts, show the session from its file: the transcript is there at once.
+    if (this.starting) {
+      const file = this.active?.state.sessionFile ?? this.active?.claim ?? this.startingFile;
+      if (file && fs.existsSync(file)) await this.sendPreview(file);
+      await this.starting.catch(() => {});
+    }
     if (!this.pi?.running) await this.start();
-    else await this.sendInit("init");
+    else if (!this.active?.delivered) await this.sendInit("init");
+  }
+
+  /**
+   * Show a session read from its file, before its pi process answers. The snapshot from pi
+   * follows and takes over; the webview keeps the transcript if it has the same messages.
+   */
+  private startingFile?: string;
+  private previewFile?: string;
+
+  private async sendPreview(file: string) {
+    this.previewFile = file;
+    try {
+      const view = await readSessionView(file);
+      const last = this.context.workspaceState.get<any>(PREVIEW_KEY) ?? {};
+      if (this.active?.delivered) return;
+      this.post({
+        type: "init",
+        preview: true,
+        state: { sessionFile: file, sessionName: view.name, model: last.model, thinkingLevel: last.thinkingLevel },
+        commands: last.commands ?? [],
+        messages: view.messages,
+        cwd: this.cwd,
+      });
+    } catch {}
   }
 
   private async onWebviewMessage(m: any) {
@@ -1897,6 +1972,8 @@ export class PiController implements vscode.Disposable {
     if (bg) return this.showProcess(bg);
     if (id === this.state.sessionFile && this.pi?.running) return;
     if (id.startsWith("bg:")) return; // a background session without a file that has since gone away
+    const unwritten = this.tabs.find((t) => t.key === id && t.id && !fs.existsSync(id));
+    if (unwritten) return this.start(undefined, unwritten.id, { keepRunning: true });
     const owner = PiController.ownerOf(id, this);
     if (owner) return owner.showSession(id);
     // Another pi process must not write to a file that a running child session (a subagent) writes to.

@@ -168,6 +168,8 @@ export function mountTiles(vscode: ChatApi, logo: string) {
     let press: { x: number; y: number; id: number; tile: string; key?: string; label: string } | undefined;
     let active = false;
     let ghost: HTMLElement | undefined;
+    let label: HTMLElement | undefined;
+    let hintEl: HTMLElement | undefined;
     let zone: HTMLElement | undefined;
     let line: HTMLElement | undefined;
     let drop: Drop | undefined;
@@ -216,6 +218,14 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       if (key === dropKey) return;
       dropKey = key;
       show(drop);
+      // Say what the drop does.
+      const p = press!;
+      const hint = !drop ? "" : drop.kind === "tabs"
+        ? drop.tile === p.tile ? "Move here" : "Move to this tile"
+        : drop.kind === "into" ? (p.key ? "Move to this tile" : "Merge into tabs")
+        : p.key ? "New tile" : "Move tile here";
+      label!.textContent = p.key ? p.label : `${p.label} (tile)`;
+      hintEl!.textContent = hint;
     }
     const finish = (e: PointerEvent, ok: boolean) => {
       if (!press || e.pointerId !== press.id) return;
@@ -255,7 +265,12 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       measure();
       ghost = document.createElement("div");
       ghost.className = "drag-ghost";
-      ghost.textContent = press!.key ? press!.label : `${press!.label} (tile)`;
+      label = document.createElement("span");
+      label.className = "drag-label";
+      hintEl = document.createElement("span");
+      hintEl.className = "drag-hint";
+      ghost.append(label, hintEl);
+      label.textContent = press!.key ? press!.label : `${press!.label} (tile)`;
       document.body.appendChild(ghost);
       zone = document.createElement("div");
       zone.className = "drop-zone";
@@ -293,6 +308,13 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       });
     }
 
+    /**
+     * Side by side or stacked, after the drop: a new tile (a tab dropped on an edge) can change it.
+     * Same test as updateDirection.
+     */
+    const rowAfter = (d: { kind: string } | undefined) =>
+      root.clientWidth >= ROW_MIN * Math.max(1, tiles.size + (press?.key && d?.kind === "edge" ? 1 : 0));
+
     const inside = (r: DOMRect, x: number, y: number) => x >= r.left && x < r.right && y >= r.top && y < r.bottom;
 
     /** What a drop at (x, y) would do. Uses the measured rectangles: no hit test on each move. */
@@ -307,17 +329,19 @@ export function mountTiles(vscode: ChatApi, logo: string) {
         return { kind: "tabs", tile, index: g.tabs.filter((t) => (t.left + t.right) / 2 < x).length };
       }
       const r = g.rect;
-      const row = root.classList.contains("row");
+      const row = rowAfter(p.key ? { kind: "edge" } : undefined);
       const f = row ? (x - r.left) / r.width : (y - r.top) / r.height;
       if (!p.key) {
         if (tile === p.tile) return undefined;
-        if (f < 0.25) return { kind: "edge", tile, side: "before" };
-        if (f > 0.75) return { kind: "edge", tile, side: "after" };
+        if (f < 1 / 3) return { kind: "edge", tile, side: "before" };
+        if (f > 2 / 3) return { kind: "edge", tile, side: "after" };
         return { kind: "into", tile };
       }
-      if (canSplit && f < 0.25) return { kind: "edge", tile, side: "before" };
-      if (canSplit && f > 0.75) return { kind: "edge", tile, side: "after" };
-      return tile === p.tile ? undefined : { kind: "into", tile };
+      // A tab over its own chat makes a new tile of it: the half under the pointer.
+      if (tile === p.tile) return canSplit ? { kind: "edge", tile, side: f < 0.5 ? "before" : "after" } : undefined;
+      if (canSplit && f < 1 / 3) return { kind: "edge", tile, side: "before" };
+      if (canSplit && f > 2 / 3) return { kind: "edge", tile, side: "after" };
+      return { kind: "into", tile };
     }
 
     /** Draw the drop marker. It is a fixed layer on the body, so the tiles do not lay out again. */
@@ -340,7 +364,7 @@ export function mountTiles(vscode: ChatApi, logo: string) {
         box(line!, { left: x - 1, top: strip.top + 4, width: 2, height: strip.height - 8 });
         return;
       }
-      const row = root.classList.contains("row");
+      const row = rowAfter(d);
       let r = { left: t.left, top: t.top, width: t.width, height: t.height };
       if (d.kind === "edge") {
         if (row) r = { ...r, width: t.width / 2, left: d.side === "before" ? t.left : t.left + t.width / 2 };

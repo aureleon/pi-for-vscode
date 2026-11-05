@@ -6,6 +6,7 @@ import * as vscode from "vscode";
 import { PiController, type ChatHost, type Handover, type Tab } from "./controller";
 import { createPiTerminal } from "./piTerminal";
 import { SessionViewer } from "./sessionViewer";
+import { getShellEnv } from "./shellEnv";
 import { defaultSessionDir } from "./sessions";
 
 let output: vscode.OutputChannel;
@@ -408,6 +409,8 @@ function refFor(uri: vscode.Uri): string {
 export function activate(context: vscode.ExtensionContext) {
   output = vscode.window.createOutputChannel("Pi");
   context.subscriptions.push(output);
+  // Read the login shell's environment now (about a second); the first pi start needs it.
+  void getShellEnv(vscode.workspace.getConfiguration("pi").get<boolean>("useLoginShellEnv", true));
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("pi.chat", new SidebarProvider(context), {
