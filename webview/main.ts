@@ -64,7 +64,7 @@ app.innerHTML = `
       <button class="sp-icon" id="tb-terminal" title="Continue Session in Terminal" aria-label="Continue session in terminal">${I.terminal}</button>
       <button class="sp-icon" id="tb-tree" title="Session Tree (/tree)" aria-label="Session tree">${I.tree}</button>
       <button class="sp-icon" id="tb-history" title="Resume Session…" aria-label="Resume session">${I.history}</button>
-      <button class="sp-icon" id="tb-new" title="New Session" aria-label="New session">${I.plus}</button>
+      <button class="sp-icon" id="tb-new" title="New Session (⌥-click: to the side)" aria-label="New session">${I.plus}</button>
       <button class="sp-icon" id="tb-more" title="More Actions…" aria-label="More actions" aria-haspopup="menu">${I.more}</button>
     </span>
     <div id="tb-menu" class="tb-menu hidden" role="menu">
@@ -1379,7 +1379,8 @@ if (document.body.dataset.header) {
   $("tb-terminal").addEventListener("click", () => post({ type: "openTerminal" }));
   $("tb-tree").addEventListener("click", () => post({ type: "builtin", name: "tree", arg: "" }));
   $("tb-history").addEventListener("click", () => post({ type: "builtin", name: "resume", arg: "" }));
-  $("tb-new").addEventListener("click", () => post({ type: "builtin", name: "new", arg: "" }));
+  // Alt-click opens the new session in a chat tab to the side, like the split button of a chat tab.
+  $("tb-new").addEventListener("click", (e) => post(e.altKey ? { type: "runCommand", command: "pi.splitRight" } : { type: "builtin", name: "new", arg: "" }));
   const menu = $("tb-menu");
   const closeMenu = () => menu.classList.add("hidden");
   $("tb-more").addEventListener("click", (e) => {
