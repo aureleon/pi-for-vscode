@@ -884,7 +884,9 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   /** Show an empty new session while the host starts it (+ and fresh starts), so nothing waits on pi. */
   function showNewSession() {
     setLoading(false);
-    resetTranscript();
+    // Keep the session on screen for a switch back to its tab.
+    if (!keepView()) resetTranscript();
+    shownSig = undefined;
     state = { ...state, sessionName: undefined, sessionFile: undefined };
     updateTitle();
     frame.classList.remove("switching");
@@ -955,6 +957,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   // ------------------------------------------------------------------ events
 
   function onEvent(e: any) {
+    if (TRANSCRIPT_EVENTS.has(e.type)) shownSig = undefined;
     switch (e.type) {
       case "agent_start":
         setRunning(true);
@@ -1566,7 +1569,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         // Show the switch at once; the host sends the session and the tabs when it is loaded.
         strip.querySelector(".tab.active")?.classList.remove("active");
         tab.classList.add("active");
-        frame.classList.add("switching");
+        if (!showKept(t.key)) frame.classList.add("switching");
         post({ type: "tabPick", key: t.key });
       });
       // Middle click closes, like editor tabs.
@@ -2768,21 +2771,116 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     return list?.filter((c) => !c.name.startsWith("vscode:"));
   }
 
-  /** Messages of the preview that the host sent from the session file while pi starts (sendPreview). */
-  let previewSig: string | undefined;
+  /**
+   * Which messages the transcript on screen shows: the signature of the snapshot it was drawn from
+   * (also a preview from the session file, or a kept view). Live events clear it. A snapshot with the
+   * same signature keeps the transcript, with its scroll position.
+   */
+  let shownSig: string | undefined;
   const snapshotSig = (m: any) => {
     const msgs = m.messages ?? [];
     const last = msgs[msgs.length - 1];
     return `${m.state?.sessionFile}|${msgs.length}|${last?.timestamp ?? ""}|${last?.role ?? ""}`;
   };
+  /** Events that change the transcript, so it no longer matches its snapshot. */
+  const TRANSCRIPT_EVENTS = new Set(["agent_start", "message_start", "message_update", "message_end", "tool_execution_start", "tool_execution_update", "tool_execution_end"]);
+
+  // ---------------------------------------------------------------- kept views of other tabs
+
+  /**
+   * The transcripts of tabs that you left, by session file (the last few). A switch back shows the
+   * kept one at once, and pi's snapshot keeps it if nothing changed. Busy sessions are not kept.
+   */
+  interface KeptView {
+    sig?: string;
+    /**
+     * A hidden element in the page that holds the transcript. Off screen messages keep their
+     * remembered height there (content-visibility), so the scroll position comes back; a detached
+     * fragment would forget it.
+     */
+    holder: HTMLElement;
+    toolCards: Map<string, ToolCard>;
+    bashCards: Map<string, ToolCard>;
+    firstUserText: string;
+    lastRole: string;
+    scrollTop: number;
+    stick: boolean;
+    state: any;
+  }
+  const keptViews = new Map<string, KeptView>();
+  const KEEP_VIEWS = 8;
+
+  /** Keep the transcript on screen for its session. It leaves the page: the transcript is empty after this. */
+  function keepView(): boolean {
+    const file = state.sessionFile;
+    if (!file || running || current || !messagesEl.childElementCount) return false;
+    // Read the scroll position first: moving the messages out resets it.
+    const scrollTop = scrollEl.scrollTop;
+    const atBottom = stick || scrollEl.scrollHeight - scrollTop - scrollEl.clientHeight < 60;
+    const holder = el("div", "messages kept-view");
+    holder.append(...messagesEl.childNodes);
+    scrollEl.appendChild(holder);
+    keptViews.get(file)?.holder.remove();
+    keptViews.delete(file);
+    keptViews.set(file, {
+      sig: shownSig, holder, toolCards: new Map(toolCards), bashCards: new Map(bashCards),
+      firstUserText, lastRole, scrollTop, stick: atBottom, state: { ...state },
+    });
+    while (keptViews.size > KEEP_VIEWS) {
+      const [old, v] = keptViews.entries().next().value!;
+      v.holder.remove();
+      keptViews.delete(old);
+    }
+    resetTranscript();
+    return true;
+  }
+
+  /** Show the kept transcript of `file`. The caller sets `state`. */
+  function restoreView(file: string): KeptView | undefined {
+    const v = keptViews.get(file);
+    if (!v) return undefined;
+    keptViews.delete(file);
+    resetTranscript();
+    messagesEl.append(...v.holder.childNodes);
+    v.holder.remove();
+    for (const [k, c] of v.toolCards) toolCards.set(k, c);
+    for (const [k, c] of v.bashCards) bashCards.set(k, c);
+    firstUserText = v.firstUserText;
+    lastRole = v.lastRole;
+    shownSig = v.sig;
+    updateEmpty();
+    stick = v.stick;
+    if (stick) scrollNow();
+    else scrollEl.scrollTop = v.scrollTop;
+    return v;
+  }
+
+  /** A click on a tab: show its kept transcript at once, if there is one. Returns false if there is none. */
+  function showKept(file: string): boolean {
+    if (!keptViews.has(file) || running || current) return false;
+    keepView();
+    const v = restoreView(file)!;
+    state = { ...state, sessionFile: file, sessionName: v.state.sessionName, model: v.state.model, thinkingLevel: v.state.thinkingLevel };
+    updateTitle();
+    updateModel();
+    return true;
+  }
 
   function applySnapshot(m: any) {
+    const prevFile = state.sessionFile;
+    const file = m.state?.sessionFile;
+    const sig = snapshotSig(m);
+    // Another session: keep the one on screen, and take up the kept view of this one.
+    if (file !== prevFile && !READONLY) {
+      keepView();
+      if (file) restoreView(file);
+    }
     state = { ...m.state, cwd: m.cwd ?? state.cwd };
     persistSession(state.sessionFile);
     if (m.commands) commands = visibleCommands(m.commands)!;
-    // pi's snapshot after the preview: keep the transcript (and the scroll position) if it is the same.
-    const same = !m.preview && previewSig !== undefined && previewSig === snapshotSig(m) && !state.isStreaming;
-    previewSig = m.preview ? snapshotSig(m) : undefined;
+    // The transcript on screen shows these messages already: keep it (and its scroll position).
+    const same = !m.preview && !!shownSig && shownSig === sig && !state.isStreaming;
+    shownSig = sig;
     if (same) {
       updateTitle();
       updateModel();
