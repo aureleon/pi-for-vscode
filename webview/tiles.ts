@@ -1,4 +1,4 @@
-import { mountChat, type ChatApi, type ChatInstance } from "./chat";
+import { MAX_TILES, mountChat, type ChatApi, type ChatInstance } from "./chat";
 
 /**
  * Sidebar tiles: several chats in one webview. The host owns the list of tiles and sends it
@@ -148,6 +148,178 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       }
       vscode.postMessage({ type: "tiles:sizes", sizes: Object.fromEntries([...tiles.values()].map((t) => [t.id, 1])) });
     });
+  }
+
+  initDrag();
+
+  // ---------------------------------------------------------------- drag tabs and tiles
+
+  type Drop =
+    | { kind: "tabs"; tile: string; index: number }
+    | { kind: "into"; tile: string }
+    | { kind: "edge"; tile: string; side: "before" | "after" };
+
+  /**
+   * Pointer drags (not HTML drag and drop, which VS Code takes for drops into the editor).
+   * A tab: to its strip (reorder), another tile's strip or middle (move), or a tile's edge (new tile).
+   * A tile, by the empty part of its header: another tile's middle or header (merge), or an edge (move).
+   */
+  function initDrag() {
+    let press: { x: number; y: number; id: number; tile: string; key?: string; label: string } | undefined;
+    let active = false;
+    let ghost: HTMLElement | undefined;
+    let zone: HTMLElement | undefined;
+    let line: HTMLElement | undefined;
+    let drop: Drop | undefined;
+    let suppressClickUntil = 0;
+
+    const tabCount = (tile: string) => tiles.get(tile)?.el.querySelectorAll('.tab[data-key]:not([data-key=""])').length ?? 0;
+
+    root.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      const t = e.target as HTMLElement;
+      const tileEl = t.closest<HTMLElement>(".tile");
+      if (!tileEl || !t.closest(".topbar") || t.closest("button, input, .tb-menu")) return;
+      const tab = t.closest<HTMLElement>(".tab");
+      if (tab && !tab.dataset.key) return;
+      press = {
+        x: e.clientX, y: e.clientY, id: e.pointerId, tile: tileEl.dataset.id ?? "", key: tab?.dataset.key,
+        label: (tab ?? tileEl.querySelector(".tab.active"))?.querySelector(".tab-label, .topbar-title")?.textContent ?? "Pi",
+      };
+    });
+    root.addEventListener("pointermove", (e) => {
+      if (!press || e.pointerId !== press.id) return;
+      if (!active) {
+        if (Math.hypot(e.clientX - press.x, e.clientY - press.y) < 5) return;
+        // Dragging a tile needs another tile to go to.
+        if (!press.key && tiles.size < 2) return;
+        begin();
+      }
+      ghost!.style.left = `${e.clientX + 12}px`;
+      ghost!.style.top = `${e.clientY + 10}px`;
+      drop = target(e.clientX, e.clientY);
+      show(drop);
+    });
+    const finish = (e: PointerEvent, ok: boolean) => {
+      if (!press || e.pointerId !== press.id) return;
+      const p = press;
+      press = undefined;
+      if (!active) return;
+      const d = drop;
+      end();
+      suppressClickUntil = performance.now() + 400;
+      if (ok && d) send(p, d);
+    };
+    root.addEventListener("pointerup", (e) => finish(e, true));
+    root.addEventListener("pointercancel", (e) => finish(e, false));
+    window.addEventListener("keydown", (e) => {
+      if (active && e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        press = undefined;
+        end();
+      }
+    }, true);
+    // The click after a drag must not select a tab.
+    window.addEventListener("click", (e) => {
+      if (performance.now() < suppressClickUntil) {
+        e.preventDefault();
+        e.stopPropagation();
+        suppressClickUntil = 0;
+      }
+    }, true);
+
+    function begin() {
+      active = true;
+      try { root.setPointerCapture(press!.id); } catch {}
+      root.classList.add("dragging");
+      const src = tiles.get(press!.tile)?.el;
+      if (press!.key) src?.querySelector(`.tab[data-key="${CSS.escape(press!.key)}"]`)?.classList.add("drag-source");
+      else src?.classList.add("drag-source");
+      ghost = document.createElement("div");
+      ghost.className = "drag-ghost";
+      ghost.textContent = press!.key ? press!.label : `${press!.label} (tile)`;
+      document.body.appendChild(ghost);
+      zone = document.createElement("div");
+      zone.className = "drop-zone";
+      line = document.createElement("div");
+      line.className = "drop-line";
+    }
+
+    function end() {
+      active = false;
+      drop = undefined;
+      root.classList.remove("dragging");
+      root.querySelectorAll(".drag-source").forEach((x) => x.classList.remove("drag-source"));
+      ghost?.remove();
+      zone?.remove();
+      line?.remove();
+    }
+
+    /** What a drop at (x, y) would do. */
+    function target(x: number, y: number): Drop | undefined {
+      const p = press!;
+      const el = document.elementFromPoint(x, y) as HTMLElement | null;
+      const tileEl = el?.closest<HTMLElement>(".tile");
+      const tile = tileEl?.dataset.id;
+      if (!tileEl || !tile) return undefined;
+      const canSplit = tiles.size < MAX_TILES && !(tile === p.tile && tabCount(p.tile) < 2);
+      if (el!.closest(".topbar")) {
+        if (!p.key) return tile === p.tile ? undefined : { kind: "into", tile };
+        const tabs = [...tileEl.querySelectorAll<HTMLElement>('.tab[data-key]:not([data-key=""])')];
+        const index = tabs.filter((t) => {
+          const r = t.getBoundingClientRect();
+          return r.left + r.width / 2 < x;
+        }).length;
+        return { kind: "tabs", tile, index };
+      }
+      const r = tileEl.getBoundingClientRect();
+      const row = root.classList.contains("row");
+      const f = row ? (x - r.left) / r.width : (y - r.top) / r.height;
+      if (!p.key) {
+        if (tile === p.tile) return undefined;
+        if (f < 0.25) return { kind: "edge", tile, side: "before" };
+        if (f > 0.75) return { kind: "edge", tile, side: "after" };
+        return { kind: "into", tile };
+      }
+      if (canSplit && f < 0.25) return { kind: "edge", tile, side: "before" };
+      if (canSplit && f > 0.75) return { kind: "edge", tile, side: "after" };
+      return tile === p.tile ? undefined : { kind: "into", tile };
+    }
+
+    function show(d: Drop | undefined) {
+      zone!.remove();
+      line!.remove();
+      const tileEl = d && tiles.get(d.tile)?.el;
+      if (!d || !tileEl) return;
+      if (d.kind === "tabs") {
+        const strip = tileEl.querySelector<HTMLElement>(".tb-tabs");
+        const tabs = [...tileEl.querySelectorAll<HTMLElement>('.tab[data-key]:not([data-key=""])')];
+        const base = tileEl.getBoundingClientRect();
+        const s = strip?.getBoundingClientRect();
+        const at = tabs[d.index]?.getBoundingClientRect().left ?? (tabs.length ? tabs[tabs.length - 1].getBoundingClientRect().right : s?.left ?? base.left);
+        line!.style.left = `${at - base.left - 1}px`;
+        line!.style.top = `${(s?.top ?? base.top) - base.top + 4}px`;
+        line!.style.height = `${(s?.height ?? 28) - 8}px`;
+        tileEl.appendChild(line!);
+        return;
+      }
+      const row = root.classList.contains("row");
+      const half = d.kind === "edge";
+      zone!.style.inset = !half ? "0" : row
+        ? d.side === "before" ? "0 50% 0 0" : "0 0 0 50%"
+        : d.side === "before" ? "0 0 50% 0" : "50% 0 0 0";
+      tileEl.appendChild(zone!);
+    }
+
+    function send(p: NonNullable<typeof press>, d: Drop) {
+      if (p.key) {
+        if (d.kind === "tabs") vscode.postMessage({ type: "tiles:moveTab", from: p.tile, key: p.key, to: d.tile, index: d.index });
+        else if (d.kind === "into") vscode.postMessage({ type: "tiles:moveTab", from: p.tile, key: p.key, to: d.tile });
+        else vscode.postMessage({ type: "tiles:moveTab", from: p.tile, key: p.key, to: d.tile, side: d.side });
+      } else if (d.kind === "edge") vscode.postMessage({ type: "tiles:moveTile", from: p.tile, to: d.tile, side: d.side });
+      else vscode.postMessage({ type: "tiles:merge", from: p.tile, to: d.tile });
+    }
   }
 
   window.addEventListener("message", (ev) => {

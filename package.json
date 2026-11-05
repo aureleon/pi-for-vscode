@@ -232,6 +232,13 @@
           ],
           "description": "Where \"Pi: Open Session in Terminal\" opens the pi TUI."
         },
+        "pi.warmTabs": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 8,
+          "description": "How many idle session tabs in each sidebar tile keep their pi process, so that switching to them is quick. Each process uses memory (about 200 MB). 0 starts a session only when you open its tab."
+        },
         "pi.continuePrompt": {
           "type": "string",
           "default": "Continue as you left off.",
