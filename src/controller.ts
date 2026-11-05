@@ -14,7 +14,7 @@ import { activeModules, hiddenWidgets, hostModules, moduleEntryTypes, modulePiEx
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
 const RECENT_MODELS_KEY = "pi.recentModels";
-const ARCHIVED_SESSIONS_KEY = "pi.archivedSessions";
+export const ARCHIVED_SESSIONS_KEY = "pi.archivedSessions";
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g;
 export const stripAnsi = (s: string) => (s ?? "").replace(ANSI_RE, "");
 
@@ -162,10 +162,15 @@ interface StartOptions {
 /** Anything that can host the chat webview (sidebar view or editor panel). */
 export interface ChatHost {
   webview: vscode.Webview;
-  setTitle(title: string | undefined): void;
+  /** `busy`: the shown session works (editor tabs mark their title). */
+  setTitle(title: string | undefined, busy?: boolean): void;
   /** Optional: a badge on the native view (integrations use it for unread items). */
   setBadge?(count: number, tooltip?: string): void;
   reveal(): void;
+  /** Open a session file in a new chat tab beside this chat. */
+  openBeside?(file: string): void;
+  /** Where the chat is, for lists of chats ("sidebar", "tab"). */
+  kind: string;
 }
 
 /**
@@ -176,6 +181,8 @@ export interface ChatHost {
 export class PiController implements vscode.Disposable {
   /** All open chats. A rename in one chat's session list goes to the chat whose process has the session. */
   private static readonly all = new Set<PiController>();
+  /** One status bar item for all chats: it counts the sessions that work. */
+  private static statusItem?: vscode.StatusBarItem;
   /** The session shown in the webview. */
   private active?: Session;
   /** Busy sessions the user switched away from. */
@@ -183,7 +190,6 @@ export class PiController implements vscode.Disposable {
   private disposables: vscode.Disposable[] = [];
   private webviewReady = false;
   private outbox: any[] = [];
-  private statusItem: vscode.StatusBarItem;
   private starting?: Promise<void>;
   private env: NodeJS.ProcessEnv = process.env;
   private args: string[] = [];
@@ -201,9 +207,6 @@ export class PiController implements vscode.Disposable {
     private readonly output: vscode.OutputChannel,
     private readonly options: { primary: boolean; sessionFile?: string },
   ) {
-    this.statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    this.statusItem.command = "pi.focus";
-    this.disposables.push(this.statusItem);
     this.disposables.push(host.webview.onDidReceiveMessage((m) => this.onWebviewMessage(m)));
     const enabled = vscode.workspace.getConfiguration("pi").get<Record<string, boolean>>("workarounds", {}) ?? {};
     this.modules = hostModules((id) => enabled[id] !== false);
@@ -445,19 +448,52 @@ export class PiController implements vscode.Disposable {
     });
   }
 
-  /** Show the spinner while any session of this chat is working. */
+  /** Show the spinner while any session of any chat is working. */
   private updateStatus() {
-    const busy = [this.active, ...this.background].filter((s) => s && this.isBusy(s)).length;
-    if (!busy) {
-      this.statusItem.hide();
+    this.updateTitle();
+    PiController.updateSharedStatus();
+  }
+
+  /** Sessions that work, in all chats. */
+  private static working(): { chat: PiController; s: Session; background: boolean }[] {
+    return [...PiController.all].flatMap((chat) =>
+      [chat.active, ...chat.background]
+        .filter((s): s is Session => !!s && chat.isBusy(s))
+        .map((s) => ({ chat, s, background: s !== chat.active })));
+  }
+
+  private static updateSharedStatus() {
+    const busy = PiController.working();
+    if (!busy.length) {
+      PiController.statusItem?.hide();
       return;
     }
-    const bg = [...this.background].filter((s) => this.isBusy(s)).length;
-    this.statusItem.text = busy > 1 ? `$(loading~spin) Pi (${busy})` : "$(loading~spin) Pi";
-    this.statusItem.tooltip = bg
-      ? `Pi is working… (${bg} session${bg === 1 ? "" : "s"} in the background)`
-      : "Pi is working…";
-    this.statusItem.show();
+    const item = (PiController.statusItem ??= vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100));
+    item.command = "pi.showRunning";
+    const bg = busy.filter((b) => b.background).length;
+    item.text = busy.length > 1 ? `$(loading~spin) Pi (${busy.length})` : "$(loading~spin) Pi";
+    item.tooltip = (bg ? `Pi is working… (${bg} session${bg === 1 ? "" : "s"} in the background)` : "Pi is working…") + "\nClick to show the running sessions.";
+    item.show();
+  }
+
+  /** Pick a running session from all chats and show it. With one, show it at once. */
+  static async pickRunning() {
+    const busy = PiController.working();
+    if (!busy.length) return vscode.commands.executeCommand("pi.focus");
+    const go = (b: (typeof busy)[number]) => {
+      b.chat.host.reveal();
+      if (b.background) void b.chat.showBackground(b.s);
+    };
+    if (busy.length === 1) return go(busy[0]);
+    const pick = await vscode.window.showQuickPick(
+      busy.map((b) => ({
+        label: `$(loading~spin) ${b.chat.titleOf(b.s)}`,
+        description: b.background ? `${b.chat.host.kind} · in the background` : b.chat.host.kind,
+        b,
+      })),
+      { placeHolder: "Show a running Pi session" },
+    );
+    if (pick) go(pick.b);
   }
 
   restart() {
@@ -611,7 +647,7 @@ export class PiController implements vscode.Disposable {
   }
 
   private updateTitle() {
-    this.host.setTitle(this.state.sessionName || this.active?.webTitle);
+    this.host.setTitle(this.state.sessionName || this.active?.webTitle, !!this.active && this.isBusy(this.active));
   }
 
   // ---------------------------------------------------------------- pi -> ui
@@ -791,7 +827,7 @@ export class PiController implements vscode.Disposable {
           break;
         case "runCommand":
           // Overflow menu of the sidebar header row; only our own commands.
-          if (["pi.newTerminal", "pi.openInTab"].includes(m.command)) await vscode.commands.executeCommand(m.command);
+          if (["pi.newTerminal", "pi.openInTab", "pi.openGrid"].includes(m.command)) await vscode.commands.executeCommand(m.command);
           break;
         case "openTerminal":
           await this.openInTerminal();
@@ -819,6 +855,8 @@ export class PiController implements vscode.Disposable {
         case "listAction":
           if (m.kind === "session" && m.action === "view") {
             await vscode.commands.executeCommand("pi.viewSession", vscode.Uri.file(m.id));
+          } else if (m.kind === "session" && m.action === "side") {
+            await this.openBeside(m.id);
           } else if (m.kind === "session" && m.action === "rename") {
             try {
               await this.renameSession(m.id, String(m.name ?? ""));
@@ -1495,6 +1533,18 @@ export class PiController implements vscode.Disposable {
     if (!r?.cancelled) await this.sendInit("reset");
   }
 
+  /** Open the session file in a new chat tab beside this chat, or show the chat that has it open. */
+  private async openBeside(id: string) {
+    if (id.startsWith("bg:")) return;
+    const owner = PiController.ownerOf(id);
+    if (owner) return owner.showSession(id);
+    if (this.filesInUse().has(path.resolve(id))) {
+      vscode.window.showWarningMessage("Pi: this session is still running inside another session (for example as a subagent). Open it when it finishes.");
+      return;
+    }
+    this.host.openBeside?.(id);
+  }
+
   /** Open the inline model picker in the webview. */
   async pickModel(query = "") {
     this.host.reveal();
@@ -1584,5 +1634,10 @@ export class PiController implements vscode.Disposable {
     for (const s of this.background) s.pi.stop();
     this.background.clear();
     for (const d of this.disposables) d.dispose();
+    PiController.updateSharedStatus();
+    if (!PiController.all.size) {
+      PiController.statusItem?.dispose();
+      PiController.statusItem = undefined;
+    }
   }
 }

@@ -13,7 +13,9 @@
     "Chat"
   ],
   "main": "./dist/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onWebviewPanel:pi.panel"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -53,6 +55,25 @@
         "command": "pi.openInTab",
         "title": "Pi: Open in New Tab",
         "icon": "$(link-external)"
+      },
+      {
+        "command": "pi.splitRight",
+        "title": "Pi: Split Chat Right",
+        "icon": "$(split-horizontal)"
+      },
+      {
+        "command": "pi.splitDown",
+        "title": "Pi: Split Chat Down",
+        "icon": "$(split-vertical)"
+      },
+      {
+        "command": "pi.openGrid",
+        "title": "Pi: Open Sessions Side by Side\u2026",
+        "icon": "$(layout)"
+      },
+      {
+        "command": "pi.showRunning",
+        "title": "Pi: Show Running Sessions"
       },
       {
         "command": "pi.restart",
@@ -138,6 +159,12 @@
       ],
       "editor/title": [
         {
+          "command": "pi.splitRight",
+          "alt": "pi.splitDown",
+          "when": "activeWebviewPanelId == 'pi.panel'",
+          "group": "navigation@6"
+        },
+        {
           "command": "pi.openInTerminal",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@1"
@@ -171,6 +198,11 @@
           "command": "pi.restart",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "overflow@1"
+        },
+        {
+          "command": "pi.openGrid",
+          "when": "activeWebviewPanelId == 'pi.panel'",
+          "group": "overflow@0"
         }
       ]
     },
@@ -185,6 +217,18 @@
         "key": "ctrl+alt+l",
         "mac": "cmd+alt+l",
         "when": "editorTextFocus"
+      },
+      {
+        "command": "pi.splitRight",
+        "key": "ctrl+\\",
+        "mac": "cmd+\\",
+        "when": "activeWebviewPanelId == 'pi.panel' && !terminalFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus"
+      },
+      {
+        "command": "pi.splitDown",
+        "key": "ctrl+k ctrl+\\",
+        "mac": "cmd+k cmd+\\",
+        "when": "activeWebviewPanelId == 'pi.panel' && !terminalFocus && !panelFocus && !sideBarFocus && !auxiliaryBarFocus"
       }
     ],
     "configuration": {

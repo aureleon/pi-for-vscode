@@ -11,6 +11,12 @@ declare function acquireVsCodeApi(): { postMessage(m: any): void; getState(): an
 const vscode = acquireVsCodeApi();
 const post = (m: any) => vscode.postMessage(m);
 
+/** Keep the session file in the webview state, so that a chat tab opens the same session after a window reload. */
+function persistSession(file: string | undefined) {
+  const prev = vscode.getState() ?? {};
+  if (prev.sessionFile !== file) vscode.setState({ ...prev, sessionFile: file });
+}
+
 // ------------------------------------------------------------------ markdown
 
 marked.use({
@@ -65,6 +71,7 @@ app.innerHTML = `
       <button role="menuitem" data-action="rename">Rename Session…</button>
       <button role="menuitem" data-cmd="pi.newTerminal">Open in Terminal</button>
       <button role="menuitem" data-cmd="pi.openInTab">Open in New Tab</button>
+      <button role="menuitem" data-cmd="pi.openGrid">Open Sessions Side by Side…</button>
       <button role="menuitem" data-msg="restart">Restart Agent Process</button>
     </div>
   </header>
@@ -1255,8 +1262,15 @@ function setRunning(r: boolean) {
   updateSendButton();
   updateStats();
 }
+/** Narrow chats (tiles side by side) get short placeholders without the key hints. */
+const NARROW = window.matchMedia("(max-width: 420px)");
+NARROW.addEventListener("change", () => updatePlaceholder());
 /** While pi compacts, messages wait in the queue and go to pi when compaction ends. */
 function updatePlaceholder() {
+  if (NARROW.matches) {
+    input.placeholder = compacting ? "Queue for after compaction…" : running ? "Steer or queue…" : "Ask Pi…";
+    return;
+  }
   input.placeholder = running
     ? compacting
       ? "Queue a message for after compaction…  (Enter steers, ⌥Enter follow-up, Esc stops)"
@@ -2206,6 +2220,7 @@ const CHEVRON_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="m6 3
 const NESTED_ICON = `<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" d="M4.5 4v4.5a2 2 0 0 0 2 2H9"/><rect x="9.5" y="8" width="5" height="5" rx="1" fill="none" stroke="currentColor"/><circle cx="4.5" cy="4" r="1.75" fill="currentColor"/></svg>`;
 const VIEW_ICON = `<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor"/></svg>`;
 const RENAME_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M13.2 1.6a1.5 1.5 0 0 1 2.1 2.1L5.6 13.4 2 14.4l1-3.6 9.7-9.7.5.5zM4 11.3l-.5 1.7 1.7-.5 8.4-8.4-1.2-1.2L4 11.3zm9.2-9.2-.7.7 1.2 1.2.7-.7a.5.5 0 0 0 0-.7l-.5-.5a.5.5 0 0 0-.7 0z"/></svg>`;
+const SIDE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13l.5.5v11l-.5.5h-13l-.5-.5v-11l.5-.5zM2 3v10h5.5V3H2zm6.5 0v10H14V3H8.5z"/></svg>`;
 const UNARCHIVE_ICON = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 2h13v3.5h-1V14h-11V5.5h-1V2zm1 1v1.5h11V3h-11zm1 2.5V13h9V5.5h-9zM8 6.3l2.4 2.4-.7.7L8.5 8.2V12h-1V8.2L6.3 9.4l-.7-.7L8 6.3z"/></svg>`;
 
 /**
@@ -2257,6 +2272,11 @@ class ListMenu {
       else if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && this.kind === "session") {
         const it = this.flat[this.sel];
         if (it && !it.id.startsWith("bg:")) this.act(it, "view");
+        e.preventDefault();
+      }
+      else if (e.key === "Enter" && e.altKey && this.kind === "session") {
+        const it = this.flat[this.sel];
+        if (it && this.canSide(it)) this.act(it, "side");
         e.preventDefault();
       }
       else if (e.key === "Enter") { const it = this.flat[this.sel]; if (it) this.choose(it); e.preventDefault(); }
@@ -2394,6 +2414,13 @@ class ListMenu {
           e.stopPropagation();
           this.act(it, "view");
         });
+        const sd = el("button", "lm-action", SIDE_ICON);
+        sd.title = it.current ? "This session is open here" : it.busy ? "A session that runs in the background stays in this chat" : it.elsewhere ? "Show the chat that has this session open (⌥↵)" : "Open to the side (⌥↵ or ⌥-click)";
+        sd.disabled = !this.canSide(it);
+        sd.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.act(it, "side");
+        });
         const r = el("button", "lm-action", RENAME_ICON);
         r.title = "Rename (F2)";
         r.addEventListener("click", (e) => {
@@ -2407,10 +2434,13 @@ class ListMenu {
           e.stopPropagation();
           this.act(it, it.archived ? "unarchive" : "archive");
         });
-        actions.append(r, v, b);
+        actions.append(r, sd, v, b);
         row.appendChild(actions);
       }
-      row.addEventListener("click", () => this.choose(it));
+      row.addEventListener("click", (e) => {
+        if (e.altKey && archivable && this.canSide(it)) this.act(it, "side");
+        else this.choose(it);
+      });
       this.list.appendChild(row);
     });
     (this.list.querySelectorAll(".lm-item")[this.sel] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
@@ -2423,7 +2453,7 @@ class ListMenu {
     const hint = el("div", "menu-hint");
     const archivedCount = this.items.filter((it) => it.archived).length;
     const nested = this.kids.size > 0;
-    hint.textContent = this.kind === "session" ? `Enter to open${nested ? " · → to expand" : ""} · F2 to rename · ⌘↵ to view · ⌘⌫ to archive` : this.kind === "fork" ? "Enter to fork from this message" : "";
+    hint.textContent = this.kind === "session" ? `Enter to open${nested ? " · → to expand" : ""} · ⌥↵ to the side · F2 to rename · ⌘↵ to view · ⌘⌫ to archive` : this.kind === "fork" ? "Enter to fork from this message" : "";
     f.appendChild(hint);
     if (this.kind === "session" && archivedCount) {
       const t = el("button", "link menu-toggle", this.showArchived ? "Hide archived" : `Show archived (${archivedCount})`);
@@ -2480,8 +2510,13 @@ class ListMenu {
     box.addEventListener("blur", () => finish(true));
   }
 
-  private act(it: ListItem, action: "archive" | "unarchive" | "view") {
-    if (action === "view") this.hide();
+  /** A session can open in a tab of its own unless it is shown here or runs in this chat's background. */
+  private canSide(it: ListItem) {
+    return !it.current && !it.busy && !it.id.startsWith("bg:");
+  }
+
+  private act(it: ListItem, action: "archive" | "unarchive" | "view" | "side") {
+    if (action === "view" || action === "side") this.hide();
     post({ type: "listAction", kind: this.kind, id: it.id, action });
   }
 
@@ -2565,6 +2600,7 @@ function visibleCommands(list?: Command[]): Command[] | undefined {
 
 function applySnapshot(m: any) {
   state = { ...m.state, cwd: m.cwd ?? state.cwd };
+  persistSession(state.sessionFile);
   if (m.commands) commands = visibleCommands(m.commands)!;
   resetTranscript();
   for (const msg of m.messages ?? []) renderMessage(msg);
@@ -2614,6 +2650,7 @@ window.addEventListener("message", (ev) => {
       break;
     case "state":
       state = { ...state, ...m.state };
+      persistSession(state.sessionFile);
       updateModel();
       updateTitle();
       break;
