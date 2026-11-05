@@ -752,19 +752,20 @@ button.lm-twisty:hover { background: var(--vscode-toolbar-hoverBackground); colo
 /* ---------------------------------------------------------------- drag tabs and tiles (tiles.ts)
    Drag a tab to reorder it, to another tile's tabs or middle to move it there, or to a tile's edge
    to make a new tile. Drag a tile by its header to another tile to merge them, or to an edge to move it. */
-.tiles.dragging, .tiles.dragging * { cursor: grabbing !important; user-select: none; }
+/* Only the cursor, and only on the root (it has the pointer capture). A user-select rule here
+   would restyle the whole page on each move; the pointerdown handler stops selection instead. */
+.tiles.dragging { cursor: grabbing; }
 .tiles.dragging .tab.drag-source { opacity: .4; }
-.tiles.dragging .tile.drag-source { opacity: .6; }
 .drag-ghost {
-  position: fixed; z-index: 100; pointer-events: none; max-width: 220px; padding: 3px 10px; border-radius: 5px;
+  position: fixed; left: 0; top: 0; z-index: 100; will-change: transform; pointer-events: none; max-width: 220px; padding: 3px 10px; border-radius: 5px;
   font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); color: var(--vscode-foreground);
   border: 1px solid var(--accent); box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
 }
 /* Where a drop goes: part of a tile (VS Code's drop overlay colour), or a line between two tabs. */
 .drop-zone {
-  position: absolute; z-index: 60; pointer-events: none; transition: inset .08s ease;
+  position: fixed; z-index: 90; pointer-events: none;
   background: var(--vscode-editorGroup-dropBackground, color-mix(in srgb, var(--accent) 25%, transparent));
   border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
 }
-.drop-line { position: absolute; z-index: 60; pointer-events: none; width: 2px; background: var(--accent); border-radius: 1px; }
+.drop-line { position: fixed; z-index: 90; pointer-events: none; width: 2px; background: var(--accent); border-radius: 1px; }
