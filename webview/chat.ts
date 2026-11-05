@@ -186,6 +186,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
 
   /** An element of this chat by id. Each chat (a tile in the sidebar) has its own copy of the ids. */
   const $ = <T extends HTMLElement = HTMLElement>(id: string) => frame.querySelector(`#${id}`) as T;
+  /** The session title. It moves between tabs (see renderTabs), so keep the element, not a lookup. */
+  const titleEl = $("topbar-title");
   const LOGO = opts.logo ?? "";
   /** Read-only session viewer: no pi process and no composer. The host sends the transcript from the session file. */
   const READONLY = !!opts.readonly;
@@ -283,7 +285,6 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   function setLoading(on: boolean) {
     frame.classList.toggle("loading", on);
     if (on) {
-      const titleEl = $("topbar-title");
       titleEl.textContent = "Loading…";
       titleEl.title = "";
       titleEl.classList.add("placeholder");
@@ -1259,7 +1260,6 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   let lastTitle: string | undefined;
   function updateTitle() {
     const t = state.sessionName || firstUserText.split("\n")[0].slice(0, 80) || undefined;
-    const titleEl = $("topbar-title");
     titleEl.textContent = t ?? "New session";
     titleEl.title = t ? `${t}\nDouble-click to rename` : "Double-click to rename";
     titleEl.classList.toggle("placeholder", !t);
@@ -1485,7 +1485,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     });
     on(document, "click", (e) => !menu.contains(e.target as Node) && closeMenu());
     on(window, "blur", closeMenu);
-    $("topbar-title").addEventListener("dblclick", renameInline);
+    titleEl.addEventListener("dblclick", renameInline);
     $("tb-split").addEventListener("click", () => opts.tiles?.split());
     // A vertical wheel scrolls the tabs sideways.
     $("tb-tabs").addEventListener("wheel", (e) => {
@@ -1511,7 +1511,6 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   let pendingTabs: TabInfo[] | undefined;
   function renderTabs(tabs: TabInfo[]) {
     const strip = $("tb-tabs");
-    const titleEl = $("topbar-title");
     // Do not take the rename box away while the user types; draw the tabs when the rename ends.
     if (strip.querySelector(".topbar-rename")) {
       pendingTabs = tabs;
@@ -1519,6 +1518,9 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     }
     pendingTabs = undefined;
     strip.replaceChildren();
+    // Until the shown session has a file or an id (while pi starts), no tab is the shown one.
+    // The title still needs a tab: it shows "Loading…" or "New session" there.
+    if (!tabs.some((t) => t.shown)) tabs = [{ key: "", title: "", shown: true, busy: false, unread: false }, ...tabs];
     for (const t of tabs) {
       const tab = el("div", `tab${t.shown ? " active" : ""}${t.busy ? " busy" : ""}${t.unread ? " unread" : ""}`);
       tab.setAttribute("role", "tab");
@@ -1539,7 +1541,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         e.stopPropagation();
         post({ type: "tabClose", key: t.key });
       });
-      tab.append(mark, close);
+      tab.append(mark);
+      if (t.key) tab.append(close);
       tab.addEventListener("click", () => !t.shown && post({ type: "tabPick", key: t.key }));
       // Middle click closes, like editor tabs.
       tab.addEventListener("auxclick", (e) => e.button === 1 && post({ type: "tabClose", key: t.key }));
@@ -1559,7 +1562,6 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
    * The title changes when pi reports `session_info_changed`, so a failed rename leaves it as it was.
    */
   function renameInline() {
-    const titleEl = $("topbar-title");
     if (titleEl.classList.contains("hidden")) return;
     const old = state.sessionName || lastTitle || "";
     const box = el("input", "topbar-rename");
