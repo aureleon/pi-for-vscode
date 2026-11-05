@@ -1313,10 +1313,14 @@ export class PiController implements vscode.Disposable {
         case "setModel":
           await this.setModel(m.provider, m.id);
           break;
-        case "title":
-          if (this.active) this.active.webTitle = m.title;
+        case "title": {
+          // Only for the session that the title is of: after a click on a tab, the webview shows (and
+          // reports) that tab before this chat has switched to it.
+          const s = m.file ? [this.active, ...this.background, ...this.warm].find((x) => x && PiController.fileOf(x) === path.resolve(m.file)) : this.active;
+          if (s) s.webTitle = m.title;
           this.updateTitle();
           break;
+        }
         case "tabPick":
           await this.openSession(String(m.key));
           break;

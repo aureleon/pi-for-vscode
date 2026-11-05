@@ -1270,14 +1270,18 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
 
   /** The sidebar shows the title in its own header row; editor tabs get it reported via the host. */
   let lastTitle: string | undefined;
+  let lastTitleKey: string | undefined;
   function updateTitle() {
     const t = state.sessionName || firstUserText.split("\n")[0].slice(0, 80) || undefined;
     titleEl.textContent = t ?? "New session";
     titleEl.title = t ? `${t}\nDouble-click to rename` : "Double-click to rename";
     titleEl.classList.toggle("placeholder", !t);
-    if (t === lastTitle) return;
+    // The file says which session the title is of: the webview can show a tab before the host switched to it.
+    const key = `${state.sessionFile ?? ""}\n${t ?? ""}`;
+    if (key === lastTitleKey) return;
+    lastTitleKey = key;
     lastTitle = t;
-    post({ type: "title", title: t });
+    post({ type: "title", title: t, file: state.sessionFile });
   }
   function levelLabel(l?: string): string {
     if (!l) return "";
