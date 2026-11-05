@@ -827,7 +827,7 @@ export class PiController implements vscode.Disposable {
           break;
         case "runCommand":
           // Overflow menu of the sidebar header row; only our own commands.
-          if (["pi.newTerminal", "pi.openInTab", "pi.openGrid", "pi.splitRight"].includes(m.command)) await vscode.commands.executeCommand(m.command);
+          if (["pi.newTerminal", "pi.openInTab"].includes(m.command)) await vscode.commands.executeCommand(m.command);
           break;
         case "openTerminal":
           await this.openInTerminal();
