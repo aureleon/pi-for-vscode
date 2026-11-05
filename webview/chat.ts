@@ -1604,9 +1604,10 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       tab.append(mark, close);
       tab.addEventListener("click", () => {
         if (t.shown || !t.key) return;
-        // Show the switch at once; the host sends the session and the tabs when it is loaded.
-        strip.querySelector(".tab.active")?.classList.remove("active");
-        tab.classList.add("active");
+        // Show the switch at once; the host sends the session and the tabs when it is loaded. The tabs move
+        // first: the title element goes to the clicked tab (with its title), and the tab you leave keeps its
+        // own title, before the kept transcript of the clicked tab changes the title.
+        if (lastTabs) setTabsNow(lastTabs.map((x) => (x.shown ? { ...x, shown: false, title: titleEl.textContent || x.title } : x.key === t.key ? { ...x, shown: true } : x)));
         if (!showKept(t.key)) frame.classList.add("switching");
         post({ type: "tabPick", key: t.key });
       });
