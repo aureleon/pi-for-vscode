@@ -39,7 +39,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 
 ### Tiles
 - Split the sidebar into up to 4 chats with the split button in the header. Each tile has its own session tabs and runs its own sessions.
-- Tiles stack top to bottom, or sit side by side when the sidebar is wide enough. Drag the line between two tiles to resize them; double-click it to make all tiles the same size.
+- Tiles stack top to bottom, or sit side by side when the sidebar is wide enough. All tiles have the same size after a split or a close. Drag the line between two tiles to resize them; double-click it to make all tiles the same size again.
 - Close a tile with *Close Tile* in its More Actions menu, or by closing its last tab.
 - The tiles, their tabs and their sizes come back when VS Code starts again.
 
