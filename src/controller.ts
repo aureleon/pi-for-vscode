@@ -337,7 +337,10 @@ export class PiController implements vscode.Disposable {
   }
 
   private titleOf(s: Session): string {
-    return s.state.sessionName || s.webTitle || "Untitled session";
+    if (s.state.sessionName || s.webTitle) return s.state.sessionName || s.webTitle;
+    // pi writes the file with the first message: without one it is a new session (the webview says the same).
+    const f = s.state.sessionFile;
+    return f && !fs.existsSync(f) ? "New session" : "Untitled session";
   }
 
   // ---------------------------------------------------------------- one chat per session
@@ -747,6 +750,12 @@ export class PiController implements vscode.Disposable {
         this.context.workspaceState.update(LAST_SESSION_KEY, state.sessionFile);
       }
       if (this.webviewReady) s.delivered = true;
+      // The title that the webview shows (its first prompt), so the tab has it before the webview reports it.
+      if (!s.webTitle) {
+        const first = (messages.messages ?? []).find((x: any) => x.role === "user");
+        const text = typeof first?.content === "string" ? first.content : (first?.content ?? []).filter((c: any) => c?.type === "text").map((c: any) => c.text).join("\n");
+        if (text?.trim()) s.webTitle = text.trim().split("\n")[0].slice(0, 80);
+      }
       // For the preview at the next start (sendPreview): the model and the commands.
       this.context.workspaceState.update(PREVIEW_KEY, { model: state.model, thinkingLevel: state.thinkingLevel, commands: commands.commands });
       this.post({

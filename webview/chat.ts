@@ -1468,7 +1468,11 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     $("tb-history").addEventListener("click", () => post({ type: "builtin", name: "resume", arg: "" }));
     $("tb-new").addEventListener("click", () => {
     // Show the new session now; the host sends it when it is ready (at once if a spare process waits).
-    if (!running) showNewSession();
+    if (!running) {
+      // Draw the new tab now, after the shown one. The shown tab keeps its title as a plain tab.
+      if (lastTabs) setTabsNow(lastTabs.flatMap((t) => (t.shown ? [{ ...t, shown: false, title: titleEl.textContent || t.title }, NEW_TAB] : [t])));
+      showNewSession();
+    }
     post({ type: "builtin", name: "new", arg: "" });
   });
     const menu = $("tb-menu");
@@ -1525,6 +1529,13 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
    * state and the rename in place work as without tabs. Other tabs show the title that the host sends.
    */
   let pendingTabs: TabInfo[] | undefined;
+  /** The tab of a new session that the host has not reported yet. */
+  const NEW_TAB: TabInfo = { key: "", title: "", shown: true, busy: false, unread: false };
+  /** Draw tabs that the webview expects, before the host sends them (a click on + or on ×). */
+  function setTabsNow(tabs: TabInfo[]) {
+    lastTabsJson = "";
+    renderTabs(tabs);
+  }
   let lastTabsJson = "";
   /** The tabs as the host sent them, to draw them again when the session on screen changes. */
   let lastTabs: TabInfo[] | undefined;
@@ -1554,6 +1565,11 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       tab.setAttribute("role", "tab");
       tab.setAttribute("aria-selected", String(t.shown));
       if (t.shown) {
+        // The webview does not show this session yet (the host switched to it): show its title from the host until it does.
+        if (t.key && t.key !== state.sessionFile && t.title) {
+          titleEl.textContent = t.title;
+          titleEl.classList.remove("placeholder");
+        }
         tab.append(titleEl);
       } else {
         const label = el("span", "tab-label", escapeHtml(t.title));
@@ -1567,6 +1583,17 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       close.setAttribute("aria-label", "Close tab");
       close.addEventListener("click", (e) => {
         e.stopPropagation();
+        // Closing the shown tab: show the neighbour now, with its kept transcript if there is one.
+        // A tab that works asks first on the host, so it stays until the host sends the tabs.
+        if (t.shown && !t.busy && lastTabs) {
+          const rest = lastTabs.filter((x) => x.key !== t.key);
+          const i = Math.min(lastTabs.findIndex((x) => x.key === t.key), rest.length - 1);
+          const next = rest[i];
+          if (next) {
+            if (!showKept(next.key)) frame.classList.add("switching");
+            setTabsNow(rest.map((x) => ({ ...x, shown: x.key === next.key })));
+          }
+        }
         post({ type: "tabClose", key: t.key });
       });
       tab.append(mark);
