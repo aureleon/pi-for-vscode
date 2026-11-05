@@ -129,6 +129,11 @@ class SidebarTiles implements vscode.Disposable {
     this.view.badge = count > 0 ? { value: count, tooltip: tooltip || String(count) } : undefined;
   }
 
+  /** A split or a close gives all tiles the same size. A drag on a sash can change it after that. */
+  private evenSizes() {
+    for (const t of this.tiles) t.size = 1;
+  }
+
   private save() {
     this.context.workspaceState.update(TILES_KEY, this.tiles);
   }
@@ -164,17 +169,15 @@ class SidebarTiles implements vscode.Disposable {
     }
   }
 
-  /** Add a tile after `id` with a new session. The two tiles share the space of the old one. */
+  /** Add a tile after `id` with a new session. All tiles get the same size again. */
   private split(id: string) {
     if (this.tiles.length >= MAX_TILES) return;
     const i = Math.max(0, this.tiles.findIndex((t) => t.id === id));
-    const src = this.tiles[i];
     let n = 2;
     while (this.tiles.some((t) => t.id === `t${n}`)) n++;
-    const half = (src?.size ?? 1) / 2;
-    if (src) src.size = half;
-    const tile = { id: `t${n}`, size: half || 1 };
+    const tile = { id: `t${n}`, size: 1 };
     this.tiles.splice(i + 1, 0, tile);
+    this.evenSizes();
     // A tile id can come back after a close: start it without the old tile's tabs.
     this.context.workspaceState.update(`pi.sidebarTabs:${tile.id}`, undefined);
     this.context.workspaceState.update(`pi.sidebarTabs:${tile.id}:shown`, undefined);
@@ -199,10 +202,9 @@ class SidebarTiles implements vscode.Disposable {
     const i = this.tiles.findIndex((t) => t.id === id);
     const e = this.chats.get(id);
     if (i < 0 || !e || this.tiles.length < 2) return;
-    const [gone] = this.tiles.splice(i, 1);
-    // The neighbour takes the space.
+    this.tiles.splice(i, 1);
+    this.evenSizes();
     const nb = this.tiles[Math.max(0, i - 1)];
-    nb.size += gone.size;
     this.chats.delete(id);
     e.c.dispose();
     e.inbox.dispose();
