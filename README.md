@@ -39,6 +39,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 ### Tiles
 - Put several chats side by side in the editor area. Drag, resize and maximize them like other editor tabs.
 - *Split Chat Right* (the split button in a Pi tab, or <kbd>⌘\</kbd>) opens a new chat beside the current one. <kbd>⌥</kbd>-click the button, or press <kbd>⌘K ⌘\</kbd>, to split down.
+- <kbd>⌥</kbd>-click the + (New Session) button, in the sidebar or in a chat tab, to start the new session to the side.
 - In the session list, the split button, <kbd>⌥</kbd>-click or <kbd>⌥↵</kbd> opens a session to the side.
 - *Open Sessions Side by Side…* (in the More Actions menu and the command palette) opens up to 6 sessions in a grid. The open editors stay on the left.
 - Chat tabs and their sessions come back after a window reload.

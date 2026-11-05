@@ -181,6 +181,7 @@
         },
         {
           "command": "pi.newSession",
+          "alt": "pi.splitRight",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@5"
         },
