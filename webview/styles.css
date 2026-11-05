@@ -277,7 +277,7 @@ kbd {
 .dl { display: block; }
 .dl.add { background: var(--vscode-diffEditor-insertedLineBackground, rgba(46, 160, 67, .2)); }
 .dl.del { background: var(--vscode-diffEditor-removedLineBackground, rgba(248, 81, 73, .2)); }
-.dl.ctx { opacity: .75; }
+.dl.same { opacity: .75; }
 .diff-sep { color: var(--muted); text-align: center; }
 .tool-image { max-width: 100%; display: block; margin: 6px; border-radius: 4px; }
 .tool-content pre.muted { color: var(--muted); font-style: italic; }

@@ -817,7 +817,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     return diff
       .split("\n")
       .map((l) => {
-        const c = l[0] === "+" ? "add" : l[0] === "-" ? "del" : "ctx";
+        const c = l[0] === "+" ? "add" : l[0] === "-" ? "del" : "same";
         return `<span class="dl ${c}">${escapeHtml(l)}</span>`;
       })
       .join("");
