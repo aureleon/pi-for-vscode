@@ -488,16 +488,61 @@ export class PiController implements vscode.Disposable {
 
   // ---------------------------------------------------------------- process
 
+  /**
+   * Start pi on a session. A start without a target joins the one that runs. A start with a target
+   * (open a tab, a new session) replaces it: the older start stops where it is (`openGen`).
+   */
   async start(sessionFile?: string, sessionId?: string, opts: StartOptions = {}): Promise<void> {
-    if (this.starting) return this.starting;
-    this.starting = this.doStart(sessionFile, sessionId, opts).finally(() => (this.starting = undefined));
-    return this.starting;
+    if (this.starting && !sessionFile && !sessionId && !opts.fresh) return this.starting;
+    const gen = ++this.openGen;
+    const p = this.doStart(gen, sessionFile, sessionId, opts).finally(() => {
+      if (this.starting === p) this.starting = undefined;
+    });
+    this.starting = p;
+    return p;
   }
 
-  private async doStart(sessionFile?: string, sessionId?: string, opts: StartOptions = {}) {
+  // ---------------------------------------------------------------- opening a session
+
+  /** Counts the opens (starts and switches). An open whose number is no longer the last one stops. */
+  private openGen = 0;
+  /** A `switch_session` that runs, so that a move of its tab can wait for it. */
+  private switching?: Promise<unknown>;
+
+  /** The tab that is opening: its key, or "" for a new session that pi has not reported yet. */
+  private openingKey(): string | undefined {
+    if (!this.starting && !this.switching) return undefined;
+    const f = this.pendingKey ?? this.startingFile;
+    if (f) return this.tabs.find((t) => path.resolve(t.key) === path.resolve(f))?.key ?? f;
+    return this.active?.state.sessionFile ? undefined : "";
+  }
+
+  /** The tab that was shown last (saved), if it is still a tab. A closed tab is not opened again. */
+  private savedShownTab(): string | undefined {
+    if (!this.options.tabsKey) return undefined;
+    const k = this.context.workspaceState.get<string>(`${this.options.tabsKey}:shown`);
+    return k && this.tabs.some((t) => t.key === k) ? k : undefined;
+  }
+
+  private isOpening(key: string): boolean {
+    const k = this.openingKey();
+    return k !== undefined && (k === key || (!!k && !!key && path.resolve(k) === path.resolve(key)));
+  }
+
+  /** Stop opening a tab (it was closed): a process that is starting for it stops. */
+  private cancelOpening() {
+    this.openGen++;
+    this.pendingKey = undefined;
+    if (this.starting && this.active && !this.active.delivered) {
+      this.active.pi.stop();
+      this.active = undefined;
+    }
+  }
+
+  private async doStart(gen: number, sessionFile?: string, sessionId?: string, opts: StartOptions = {}) {
     // The file that this start resumes, for the preview (onReady) while the shell env loads.
     this.startingFile = opts.fresh ? undefined : sessionFile ?? this.options.sessionFile ??
-      (this.options.tabsKey ? this.context.workspaceState.get<string>(`${this.options.tabsKey}:shown`) : undefined) ??
+      this.savedShownTab() ??
       (this.options.primary && vscode.workspace.getConfiguration("pi").get<boolean>("resumeLastSession", true)
         ? this.context.workspaceState.get<string>(LAST_SESSION_KEY)
         : undefined);
@@ -509,6 +554,8 @@ export class PiController implements vscode.Disposable {
     }
     const cfg = vscode.workspace.getConfiguration("pi");
     const env = await getShellEnv(cfg.get<boolean>("useLoginShellEnv", true));
+    // A newer open (or a close of this tab) came while the environment loaded.
+    if (gen !== this.openGen) return;
     env.PI_VSCODE = "1";
     for (const h of this.integrations.values()) Object.assign(env, h.env?.());
     this.env = env;
@@ -520,7 +567,7 @@ export class PiController implements vscode.Disposable {
     args.push(...this.extensionArgs());
 
     const resume = opts.fresh ? undefined : sessionFile ?? this.options.sessionFile ??
-      (this.options.tabsKey ? this.context.workspaceState.get<string>(`${this.options.tabsKey}:shown`) : undefined) ??
+      this.savedShownTab() ??
       (this.options.primary && cfg.get<boolean>("resumeLastSession", true)
         ? this.context.workspaceState.get<string>(LAST_SESSION_KEY)
         : undefined);
@@ -971,24 +1018,60 @@ export class PiController implements vscode.Disposable {
    * chat has no tabs left (the caller closes the tile).
    */
   async releaseTab(key: string): Promise<{ tab: Tab; empty: boolean; handover?: Handover } | undefined> {
-    const i = this.tabs.findIndex((t) => t.key === key);
+    // pi switches this chat's process to the tab right now: let it finish, then the process moves with the tab.
+    let switched: Session | undefined;
+    if (this.switching && this.isOpening(key)) {
+      await this.switching.catch(() => {});
+      // The process has the tab's session now, before its snapshot came: it is the one that moves.
+      if (this.active && this.pendingKey && path.resolve(this.pendingKey) === path.resolve(key)) {
+        switched = this.active;
+        this.openGen++;
+        this.pendingKey = undefined;
+        switched.claim = key;
+        switched.state = { ...switched.state, sessionFile: key, sessionName: undefined };
+        switched.webTitle = undefined;
+      }
+    }
+    let i = this.tabs.findIndex((t) => t.key === key);
     if (i < 0 || key.startsWith("bg:")) return undefined;
-    const s = this.sessionOfTab(key);
+    // A process that starts for the tab moves with it; the start here stops. Without a process yet, the other chat starts one.
+    if (!switched && this.starting && this.isOpening(key)) {
+      const loading = this.active;
+      this.openGen++;
+      this.pendingKey = undefined;
+      if (loading && !loading.delivered) {
+        loading.claim ??= key;
+        const [tab] = this.tabs.splice(i, 1);
+        const handover = loading.pi.running ? this.detach(loading) : undefined;
+        this.showNextAfter(i);
+        this.syncTabs();
+        return { tab, empty: !this.tabs.length, handover };
+      }
+      i = this.tabs.findIndex((t) => t.key === key);
+      if (!loading) {
+        const [tab] = this.tabs.splice(i, 1);
+        this.showNextAfter(i);
+        this.syncTabs();
+        return { tab, empty: !this.tabs.length };
+      }
+    }
+    const s = switched ?? this.sessionOfTab(key);
     if (s && s === this.active) this.assertNoTerminal();
     const [tab] = this.tabs.splice(i, 1);
     this.unread.delete(key);
     const shown = !!s && s === this.active;
     const handover = s?.pi.running ? this.detach(s) : undefined;
-    if (shown) {
-      // Show the next tab. Do not wait: the other chat shows the moved session now.
-      const next = this.tabs[Math.min(i, this.tabs.length - 1)];
-      if (next) {
-        this.post({ type: "starting" });
-        this.openSession(next.key).catch((err) => this.post({ type: "error", message: err.message ?? String(err) }));
-      }
-    }
+    if (shown) this.showNextAfter(i);
     this.syncTabs();
     return { tab, empty: !this.tabs.length, handover };
+  }
+
+  /** The shown tab left (moved to another chat): show the tab at its place. Does not wait. */
+  private showNextAfter(i: number) {
+    const next = this.tabs[Math.min(i, this.tabs.length - 1)];
+    if (!next) return;
+    this.post({ type: "starting" });
+    this.openSession(next.key).catch((err) => this.post({ type: "error", message: err.message ?? String(err) }));
   }
 
   /**
@@ -1069,9 +1152,11 @@ export class PiController implements vscode.Disposable {
   /** Close a tab. A session that works stops (after a question). Closing the shown tab shows its neighbour. */
   private async closeTab(key: string) {
     const i = this.tabs.findIndex((t) => t.key === key);
-    if (i < 0) return;
-    const s = this.sessionOfTab(key);
-    const shown = !!s && s === this.active;
+    // A tab that is still opening closes too: its start stops, nothing waits for it to load.
+    const opening = this.isOpening(key);
+    if (i < 0 && !opening) return;
+    const s = opening ? undefined : this.sessionOfTab(key);
+    const shown = opening || (!!s && s === this.active);
     if (shown) this.assertNoTerminal();
     if (s && this.isBusy(s)) {
       const pick = await vscode.window.showWarningMessage(`Pi: "${this.titleOf(s)}" is still working. Stop it and close the tab?`, { modal: true }, "Stop and Close");
@@ -1079,8 +1164,10 @@ export class PiController implements vscode.Disposable {
       s.pi.stop();
       s.state.isStreaming = false;
     }
-    this.tabs.splice(i, 1);
+    const at = this.tabs.findIndex((t) => t.key === key);
+    if (at >= 0) this.tabs.splice(at, 1);
     this.unread.delete(key);
+    if (opening) this.cancelOpening();
     if (!shown) {
       if (s) {
         this.background.delete(s);
@@ -1090,9 +1177,11 @@ export class PiController implements vscode.Disposable {
         }
       }
       this.updateStatus();
+      // No tab left: close the tile, as for the shown tab below.
+      if (!this.tabs.length) this.host.closeChat?.();
       return;
     }
-    const next = this.tabs[Math.min(i, this.tabs.length - 1)];
+    const next = this.tabs[Math.min(Math.max(at, 0), this.tabs.length - 1)];
     if (next) return this.openSession(next.key);
     // The last tab of a sidebar tile closes the tile, like the last editor of an editor group.
     if (this.host.closeChat?.()) return;
@@ -1101,6 +1190,7 @@ export class PiController implements vscode.Disposable {
       if (!r?.cancelled) await this.sendInit("reset");
     } else await this.start(undefined, undefined, { fresh: true });
   }
+
 
   // ---------------------------------------------------------------- pi -> ui
 
@@ -2043,7 +2133,17 @@ export class PiController implements vscode.Disposable {
     // A tab that has no process yet: switch this process to it. The tab left behind gets a process
     // again later (prewarm), so that switching back is quick.
     this.pendingKey = id;
-    const r = await this.req({ type: "switch_session", sessionPath: id });
+    const gen = ++this.openGen;
+    const sw = this.req({ type: "switch_session", sessionPath: id });
+    this.switching = sw;
+    let r: any;
+    try {
+      r = await sw;
+    } finally {
+      if (this.switching === sw) this.switching = undefined;
+    }
+    // A newer open, or a close of this tab, came while pi switched: it shows the next session.
+    if (gen !== this.openGen) return;
     if (!r?.cancelled) await this.sendInit("reset");
     else this.pendingKey = undefined;
   }
