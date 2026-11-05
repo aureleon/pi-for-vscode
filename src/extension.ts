@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { PiController, type ChatHost, type Tab } from "./controller";
+import { PiController, type ChatHost, type Handover, type Tab } from "./controller";
 import { createPiTerminal } from "./piTerminal";
 import { SessionViewer } from "./sessionViewer";
 import { defaultSessionDir } from "./sessions";
@@ -87,7 +87,7 @@ class SidebarTiles implements vscode.Disposable {
   }
 
   /** `start`: tabs for a new tile (a tab dragged out of another tile) and the session to show. */
-  private createChat(id: string, start?: { tabs: Tab[]; shown: string }) {
+  private createChat(id: string, start?: { tabs: Tab[]; shown: string; handover?: Handover }) {
     const inbox = new vscode.EventEmitter<any>();
     const host: ChatHost = {
       webview: {
@@ -119,8 +119,9 @@ class SidebarTiles implements vscode.Disposable {
       primary: first && !start,
       tabsKey: first ? "pi.sidebarTabs" : `pi.sidebarTabs:${id}`,
       tabs: start?.tabs,
-      sessionFile: start?.shown,
+      sessionFile: start?.handover ? undefined : start?.shown,
     });
+    if (start?.handover) c.adoptFirst(start.handover);
     this.chats.set(id, { c, inbox, badge: 0 });
     controllers.add(c);
     if (!sidebar) sidebar = c;
@@ -191,7 +192,7 @@ class SidebarTiles implements vscode.Disposable {
   }
 
   /** Add a tile before or after `id`. `start`: its tabs (a tab dragged out); else a new session. */
-  private addTile(id: string, side: "before" | "after", start?: { tabs: Tab[]; shown: string }) {
+  private addTile(id: string, side: "before" | "after", start?: { tabs: Tab[]; shown: string; handover?: Handover }) {
     if (this.tiles.length >= MAX_TILES) return;
     const i = Math.max(0, this.tiles.findIndex((t) => t.id === id));
     let n = 2;
@@ -222,9 +223,11 @@ class SidebarTiles implements vscode.Disposable {
     if (side && from === to && src.tabCount < 2) return;
     const out = await src.releaseTab(key);
     if (!out) return;
-    if (side) this.addTile(to, side, { tabs: [out.tab], shown: out.tab.key });
-    else await dst.adoptTabs([out.tab], index, out.tab.key);
+    // The process moves with the tab, so the session shows at once in the other tile.
+    if (side) this.addTile(to, side, { tabs: [out.tab], shown: out.tab.key, handover: out.handover });
+    else await dst.adoptTabs([out.tab], index, out.tab.key, out.handover ? [out.handover] : []);
     if (out.empty && this.tiles.length > 1) this.removeTile(from);
+    if (!side) this.view.webview.postMessage({ type: "tiles:focus", tile: to });
   }
 
   /** A tile was dropped on another one: its tabs join that tile, and it closes. */
@@ -234,9 +237,11 @@ class SidebarTiles implements vscode.Disposable {
     if (!src || !dst || from === to) return;
     if (src.hasWork) throw new Error("a session in this tile is still working. Merge the tile when it finishes.");
     const { tabs, shown } = src.tabList();
-    // Closing the tile stops its processes, so the other tile can open the files.
+    // The processes move to the other tile; closing this tile stops only what is left.
+    const handovers = src.detachAll();
     this.removeTile(from);
-    await dst.adoptTabs(tabs, undefined, shown && tabs.some((t) => t.key === shown) ? shown : undefined);
+    this.view.webview.postMessage({ type: "tiles:focus", tile: to });
+    await dst.adoptTabs(tabs, undefined, shown && tabs.some((t) => t.key === shown) ? shown : undefined, handovers);
   }
 
   /** A tile was dropped on the edge of another one: move it there. */

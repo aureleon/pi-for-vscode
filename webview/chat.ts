@@ -881,6 +881,15 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
 
   // ------------------------------------------------------------------ transcript
 
+  /** Show an empty new session while the host starts it (+ and fresh starts), so nothing waits on pi. */
+  function showNewSession() {
+    setLoading(false);
+    resetTranscript();
+    state = { ...state, sessionName: undefined, sessionFile: undefined };
+    updateTitle();
+    frame.classList.remove("switching");
+  }
+
   function resetTranscript() {
     messagesEl.innerHTML = "";
     toolCards.clear();
@@ -1454,7 +1463,11 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     $("tb-terminal").addEventListener("click", () => post({ type: "openTerminal" }));
     $("tb-tree").addEventListener("click", () => post({ type: "builtin", name: "tree", arg: "" }));
     $("tb-history").addEventListener("click", () => post({ type: "builtin", name: "resume", arg: "" }));
-    $("tb-new").addEventListener("click", () => post({ type: "builtin", name: "new", arg: "" }));
+    $("tb-new").addEventListener("click", () => {
+    // Show the new session now; the host sends it when it is ready (at once if a spare process waits).
+    if (!running) showNewSession();
+    post({ type: "builtin", name: "new", arg: "" });
+  });
     const menu = $("tb-menu");
     const closeMenu = () => menu.classList.add("hidden");
     $("tb-more").addEventListener("click", (e) => {
@@ -2848,7 +2861,9 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         break;
       case "starting":
         hideBanner();
-        setLoading(true);
+        // A new session: show its empty welcome at once, not "Loading session".
+        if (m.fresh) showNewSession();
+        else setLoading(true);
         break;
       case "exited":
         setRunning(false);

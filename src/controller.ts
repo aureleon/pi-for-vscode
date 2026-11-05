@@ -163,6 +163,14 @@ export interface ChatOptions {
   tabs?: Tab[];
 }
 
+/** A pi process that moves from one chat to another with its tab. */
+export interface Handover {
+  pi: PiProcess;
+  file?: string;
+  state: any;
+  webTitle?: string;
+}
+
 /** A session tab in the header. Tabs of idle sessions have no process; opening one resumes its file. */
 export interface Tab {
   /** Session key (see `sessionKey`): the session file, or `bg:<id>` without a file. */
@@ -213,6 +221,8 @@ export class PiController implements vscode.Disposable {
    * their tab is quick. A pi process takes seconds to start and `switch_session` about a second.
    */
   private warm: Session[] = [];
+  /** An idle process with a new, unwritten session, so that + shows a new session at once. */
+  private spare?: Session;
   private disposables: vscode.Disposable[] = [];
   private webviewReady = false;
   private outbox: any[] = [];
@@ -360,6 +370,12 @@ export class PiController implements vscode.Disposable {
   private park(s: Session) {
     if (!s.pi.running) return;
     if (this.isBusy(s)) return this.sendToBackground(s);
+    // A new session that got no message has no file: it becomes the spare again, or stops.
+    if (!s.state.sessionFile || !fs.existsSync(s.state.sessionFile)) {
+      if (!this.spare && this.warmLimit && s.state.sessionFile) this.spare = s;
+      else s.pi.stop();
+      return;
+    }
     const key = this.sessionKey(s);
     if (this.warmLimit && s.state.sessionFile && this.tabs.some((t) => t.key === key)) {
       this.warm = [s, ...this.warm.filter((w) => w !== s)];
@@ -389,6 +405,17 @@ export class PiController implements vscode.Disposable {
       const cfg = vscode.workspace.getConfiguration("pi");
       const user = cfg.get<string[]>("args") ?? [];
       if (user.some((a) => ["--session-id", "--no-session"].includes(a))) return;
+      const command = cfg.get<string>("path")?.trim() || "pi";
+      if (!this.spare && this.active && !this.disposed) {
+        const s = this.spawn(command, [...withoutSessionArgs(user), ...this.extensionArgs()], this.env);
+        this.spare = s;
+        try {
+          s.state = await s.pi.request({ type: "get_state" });
+        } catch {
+          if (this.spare === s) this.spare = undefined;
+          s.pi.stop();
+        }
+      }
       const shown = this.tabs.findIndex((t) => t.key === this.shownKey);
       // The nearest tabs first: the ones you are most likely to open next.
       const order = this.tabs
@@ -400,7 +427,7 @@ export class PiController implements vscode.Disposable {
         if (key.startsWith("bg:") || this.sessionOfTab(key) || !fs.existsSync(key)) continue;
         if (PiController.ownerOf(key) || this.filesInUse().has(path.resolve(key))) continue;
         const args = [...withoutSessionArgs(user), ...this.extensionArgs(), "--session", key];
-        const s = this.spawn(cfg.get<string>("path")?.trim() || "pi", args, this.env);
+        const s = this.spawn(command, args, this.env);
         s.claim = key;
         this.warm.push(s);
         try {
@@ -478,13 +505,20 @@ export class PiController implements vscode.Disposable {
     this.active = this.spawn(command, args, env);
     this.active.claim = claim;
     this.updateStatus();
-    this.post({ type: "starting" });
+    this.post({ type: "starting", fresh: !claim && !sessionId });
     await this.sendInit("init");
   }
 
   private spawn(command: string, args: string[], env: NodeJS.ProcessEnv): Session {
     this.output.appendLine(`[pi] starting: ${command} --mode rpc ${args.join(" ")} (cwd ${this.cwd})`);
     const pi = new PiProcess(command, args, this.cwd, env);
+    const s = this.wrap(pi, command);
+    pi.start();
+    return s;
+  }
+
+  /** A Session for the process `pi`, with this chat's listeners. Also used for a process that another chat hands over. */
+  private wrap(pi: PiProcess, command = "pi"): Session {
     const controller = this;
     const s: Session = {
       pi, state: {}, tail: [], dialogs: new Map(), ui: new Map(),
@@ -507,6 +541,10 @@ export class PiController implements vscode.Disposable {
       this.output.appendLine(`[pi] exited code=${code} signal=${signal} ${err?.message ?? ""}`);
       s.state.isStreaming = false;
       for (const h of this.hooks(s)) h.onExit?.(s.handle);
+      if (this.spare === s) {
+        this.spare = undefined;
+        return;
+      }
       const wi = this.warm.indexOf(s);
       if (wi >= 0) {
         this.warm.splice(wi, 1);
@@ -525,7 +563,6 @@ export class PiController implements vscode.Disposable {
       this.post({ type: "exited", code, signal, hint, stderr: stripAnsi(pi.stderrTail).slice(-3000) });
       this.updateStatus();
     });
-    pi.start();
     return s;
   }
 
@@ -869,7 +906,7 @@ export class PiController implements vscode.Disposable {
    * one process has the file. A session that works can't move. Returns the tab, and whether the
    * chat has no tabs left (the caller closes the tile).
    */
-  async releaseTab(key: string): Promise<{ tab: Tab; empty: boolean } | undefined> {
+  async releaseTab(key: string): Promise<{ tab: Tab; empty: boolean; handover?: Handover } | undefined> {
     const i = this.tabs.findIndex((t) => t.key === key);
     if (i < 0 || key.startsWith("bg:")) return undefined;
     const s = this.sessionOfTab(key);
@@ -877,36 +914,68 @@ export class PiController implements vscode.Disposable {
     if (s && s === this.active) this.assertNoTerminal();
     const [tab] = this.tabs.splice(i, 1);
     this.unread.delete(key);
-    if (s && s !== this.active) {
-      this.warm = this.warm.filter((w) => w !== s);
-      this.background.delete(s);
-      s.pi.stop();
-    } else if (s) {
+    const shown = !!s && s === this.active;
+    const handover = s?.pi.running ? this.detach(s) : undefined;
+    if (shown) {
+      // Show the next tab. Do not wait: the other chat shows the moved session now.
       const next = this.tabs[Math.min(i, this.tabs.length - 1)];
       if (next) {
-        await this.openSession(next.key);
-        // openSession can keep the process (warm). The other chat opens the file next, so stop it.
-        const left = this.sessionOfTab(key);
-        if (left) {
-          this.warm = this.warm.filter((w) => w !== left);
-          left.pi.stop();
-        }
-      } else {
-        s.pi.stop();
-        this.active = undefined;
+        this.post({ type: "starting" });
+        this.openSession(next.key).catch((err) => this.post({ type: "error", message: err.message ?? String(err) }));
       }
     }
     this.syncTabs();
-    return { tab, empty: !this.tabs.length };
+    return { tab, empty: !this.tabs.length, handover };
   }
 
-  /** Add tabs that come from another chat at `index` (default: the end), and show `show`. */
-  async adoptTabs(tabs: Tab[], index: number | undefined, show?: string) {
+  /**
+   * Add tabs that come from another chat at `index` (default: the end), and show `show`. `handovers`:
+   * the processes of those tabs. They move with the tabs, so nothing restarts.
+   */
+  async adoptTabs(tabs: Tab[], index: number | undefined, show?: string, handovers: Handover[] = []) {
     const fresh = tabs.filter((t) => !this.tabs.some((x) => x.key === t.key));
     const at = index === undefined ? this.tabs.length : Math.max(0, Math.min(this.tabs.length, index));
     this.tabs.splice(at, 0, ...fresh);
+    let shown: Session | undefined;
+    for (const h of handovers) {
+      const s = this.adopt(h);
+      if (h.file && h.file === show) shown = s;
+      else if (this.warm.length < this.warmLimit) this.warm.push(s);
+      else s.pi.stop();
+    }
     this.syncTabs();
-    if (show) await this.openSession(show);
+    if (shown) await this.showProcess(shown);
+    else if (show) await this.openSession(show);
+  }
+
+  /** Before the webview is ready: show this process first (a tab dragged out into a new tile). */
+  adoptFirst(h: Handover) {
+    this.active = this.adopt(h);
+    this.syncTabs();
+  }
+
+  private adopt(h: Handover): Session {
+    const s = this.wrap(h.pi);
+    s.state = { ...h.state };
+    s.claim = h.file;
+    s.webTitle = h.webTitle;
+    return s;
+  }
+
+  /** Take the process of `s` out of this chat. The integrations forget the session; the other chat's take it up. */
+  private detach(s: Session): Handover {
+    for (const h of this.hooks(s)) h.onExit?.(s.handle);
+    s.pi.removeAllListeners();
+    this.background.delete(s);
+    this.warm = this.warm.filter((w) => w !== s);
+    if (this.active === s) this.active = undefined;
+    return { pi: s.pi, file: s.state.sessionFile ?? s.claim, state: s.state, webTitle: s.webTitle };
+  }
+
+  /** The processes of all idle sessions, for a tile that is merged into another. Call only without work (hasWork). */
+  detachAll(): Handover[] {
+    const all = [this.active, ...this.warm].filter((s): s is Session => !!s?.pi.running && !!(s.state.sessionFile && fs.existsSync(s.state.sessionFile)));
+    return all.map((s) => this.detach(s));
   }
 
   /** Close a tab. A session that works stops (after a question). Closing the shown tab shows its neighbour. */
@@ -1528,6 +1597,13 @@ export class PiController implements vscode.Disposable {
     switch (name) {
       case "new": {
         this.assertNoTerminal();
+        // The spare process has a new session ready: show it, and park the session that was shown.
+        const spare = this.spare;
+        if (spare?.pi.running && spare.state.sessionFile) {
+          this.spare = undefined;
+          await this.showProcess(spare);
+          break;
+        }
         // A busy session keeps working in the background; the new one gets its own process.
         if (this.isRunning) {
           await this.start(undefined, undefined, { keepRunning: true, fresh: true });
@@ -1939,6 +2015,8 @@ export class PiController implements vscode.Disposable {
     clearTimeout(this.prewarmTimer);
     for (const s of this.warm) s.pi.stop();
     this.warm = [];
+    this.spare?.pi.stop();
+    this.spare = undefined;
     PiController.all.delete(this);
     this.terminal = undefined; // leave a user's terminal session running
     this.pi?.stop();

@@ -36,7 +36,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - The last session reopens automatically. *Open in New Tab* starts another chat.
 - The sidebar header shows a tab for each session that is open in the sidebar. + starts a session in a new tab, and a session that you open from the session list gets a tab too. A working tab shows the π spinner; a tab that finished in the background shows a dot. Close a tab with its × or a middle click. The tabs come back when VS Code starts again.
 - Drag a tab to reorder it. A tab is as wide as its title and gets narrower only when the tabs do not fit.
-- Tabs that you used last switch at once: they keep their pi process (`pi.warmTabs`, 3 by default).
+- Tabs that you used last switch at once: they keep their pi process (`pi.warmTabs`, 3 by default). + also shows a new session at once.
 - A session is open in one chat only. If you open a session that another chat has open, that chat comes to the front. The session list shows such sessions as "other chat".
 
 ### Tiles
@@ -80,7 +80,8 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Running child sessions** are not in RPC events. A workaround counts the prompts that run on other agent sessions in the process and reports them, with their session files, in a hidden status. The titles come from the session files. Sessions that an extension keeps only in memory have no title. pi-btw side threads also count while they answer.
 - **Tiles** are chats in one webview: `mountChat` (webview/chat.ts) builds each one in its own element. They are not iframes, because VS Code ignores keys from nested frames, so its shortcuts would not work in a tile.
 - **Session tabs** keep the pi process of up to `pi.warmTabs` idle tabs per tile. A few seconds after a tab opens, the tile starts processes for the tabs next to it, one at a time. Other idle tabs have no process; opening one switches the tile's process to its file (about a second). A busy tab that you leave keeps its process, the same as a background session. A new session that you leave before its first message has no file, so its tab closes.
-- **Moving a tab** to another tile stops its process in the old tile first, so that only one process has the file. A session that works can't move until it finishes, and a tile with a working session can't be merged.
+- **A spare process** with a new, empty session waits in each tile while `pi.warmTabs` is more than 0, so + needs no wait. A new session that you leave before its first message becomes the spare again.
+- **Moving a tab** to another tile moves its pi process too, so nothing restarts and only one process has the file. A session that works can't move until it finishes, and a tile with a working session can't be merged.
 - **One chat per session:** a chat that would open a session that another chat has open (for example after a reload) starts a new session. A session that runs in a chat's background stays in that chat.
 - **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.
 - **Integrations** add support for one pi extension beyond pi's RPC protocol. Each one is in `integrations/<name>/`, and `integrations/host.ts` and `integrations/web.ts` list them. An integration is active only in sessions that load its pi extension. It can also load a small pi extension of its own (`integrations/<name>/pi.ts`), for example the pi-btw workaround for notes that arrive during a run. See [integrations/README.md](integrations/README.md).

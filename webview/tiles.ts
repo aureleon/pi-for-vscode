@@ -171,7 +171,13 @@ export function mountTiles(vscode: ChatApi, logo: string) {
     let zone: HTMLElement | undefined;
     let line: HTMLElement | undefined;
     let drop: Drop | undefined;
+    let dropKey = "";
+    /** Rectangles of the tiles, their headers and their tabs, measured when the drag starts. */
+    let geo: { id: string; rect: DOMRect; bar: DOMRect; strip: DOMRect; tabs: { left: number; right: number }[] }[] = [];
     let suppressClickUntil = 0;
+    /** The last pointer position; one frame handles the moves in between. */
+    let at: { x: number; y: number } | undefined;
+    let frameReq = 0;
 
     const tabCount = (tile: string) => tiles.get(tile)?.el.querySelectorAll('.tab[data-key]:not([data-key=""])').length ?? 0;
 
@@ -182,6 +188,8 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       if (!tileEl || !t.closest(".topbar") || t.closest("button, input, .tb-menu")) return;
       const tab = t.closest<HTMLElement>(".tab");
       if (tab && !tab.dataset.key) return;
+      // No text selection while dragging. (A user-select rule during the drag would restyle the whole page.)
+      e.preventDefault();
       press = {
         x: e.clientX, y: e.clientY, id: e.pointerId, tile: tileEl.dataset.id ?? "", key: tab?.dataset.key,
         label: (tab ?? tileEl.querySelector(".tab.active"))?.querySelector(".tab-label, .topbar-title")?.textContent ?? "Pi",
@@ -195,11 +203,20 @@ export function mountTiles(vscode: ChatApi, logo: string) {
         if (!press.key && tiles.size < 2) return;
         begin();
       }
-      ghost!.style.left = `${e.clientX + 12}px`;
-      ghost!.style.top = `${e.clientY + 10}px`;
-      drop = target(e.clientX, e.clientY);
-      show(drop);
+      at = { x: e.clientX, y: e.clientY };
+      frameReq ||= requestAnimationFrame(update);
     });
+    /** Once per frame: move the ghost, and redraw the drop marker only when the drop changes. */
+    function update() {
+      frameReq = 0;
+      if (!active || !at) return;
+      ghost!.style.transform = `translate(${at.x + 12}px, ${at.y + 10}px)`;
+      drop = target(at.x, at.y);
+      const key = JSON.stringify(drop ?? null);
+      if (key === dropKey) return;
+      dropKey = key;
+      show(drop);
+    }
     const finish = (e: PointerEvent, ok: boolean) => {
       if (!press || e.pointerId !== press.id) return;
       const p = press;
@@ -235,7 +252,7 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       root.classList.add("dragging");
       const src = tiles.get(press!.tile)?.el;
       if (press!.key) src?.querySelector(`.tab[data-key="${CSS.escape(press!.key)}"]`)?.classList.add("drag-source");
-      else src?.classList.add("drag-source");
+      measure();
       ghost = document.createElement("div");
       ghost.className = "drag-ghost";
       ghost.textContent = press!.key ? press!.label : `${press!.label} (tile)`;
@@ -249,6 +266,10 @@ export function mountTiles(vscode: ChatApi, logo: string) {
     function end() {
       active = false;
       drop = undefined;
+      dropKey = "";
+      at = undefined;
+      cancelAnimationFrame(frameReq);
+      frameReq = 0;
       root.classList.remove("dragging");
       root.querySelectorAll(".drag-source").forEach((x) => x.classList.remove("drag-source"));
       ghost?.remove();
@@ -256,24 +277,36 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       line?.remove();
     }
 
-    /** What a drop at (x, y) would do. */
+    function measure() {
+      geo = [...tiles.values()].map((t) => {
+        const bar = t.el.querySelector<HTMLElement>(".topbar")!;
+        return {
+          id: t.id,
+          rect: t.el.getBoundingClientRect(),
+          bar: bar.getBoundingClientRect(),
+          strip: (bar.querySelector(".tb-tabs") ?? bar).getBoundingClientRect(),
+          tabs: [...t.el.querySelectorAll<HTMLElement>('.tab[data-key]:not([data-key=""])')].map((el) => {
+            const r = el.getBoundingClientRect();
+            return { left: r.left, right: r.right };
+          }),
+        };
+      });
+    }
+
+    const inside = (r: DOMRect, x: number, y: number) => x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+
+    /** What a drop at (x, y) would do. Uses the measured rectangles: no hit test on each move. */
     function target(x: number, y: number): Drop | undefined {
       const p = press!;
-      const el = document.elementFromPoint(x, y) as HTMLElement | null;
-      const tileEl = el?.closest<HTMLElement>(".tile");
-      const tile = tileEl?.dataset.id;
-      if (!tileEl || !tile) return undefined;
+      const g = geo.find((t) => inside(t.rect, x, y));
+      if (!g) return undefined;
+      const tile = g.id;
       const canSplit = tiles.size < MAX_TILES && !(tile === p.tile && tabCount(p.tile) < 2);
-      if (el!.closest(".topbar")) {
+      if (inside(g.bar, x, y)) {
         if (!p.key) return tile === p.tile ? undefined : { kind: "into", tile };
-        const tabs = [...tileEl.querySelectorAll<HTMLElement>('.tab[data-key]:not([data-key=""])')];
-        const index = tabs.filter((t) => {
-          const r = t.getBoundingClientRect();
-          return r.left + r.width / 2 < x;
-        }).length;
-        return { kind: "tabs", tile, index };
+        return { kind: "tabs", tile, index: g.tabs.filter((t) => (t.left + t.right) / 2 < x).length };
       }
-      const r = tileEl.getBoundingClientRect();
+      const r = g.rect;
       const row = root.classList.contains("row");
       const f = row ? (x - r.left) / r.width : (y - r.top) / r.height;
       if (!p.key) {
@@ -287,29 +320,33 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       return tile === p.tile ? undefined : { kind: "into", tile };
     }
 
+    /** Draw the drop marker. It is a fixed layer on the body, so the tiles do not lay out again. */
     function show(d: Drop | undefined) {
       zone!.remove();
       line!.remove();
-      const tileEl = d && tiles.get(d.tile)?.el;
-      if (!d || !tileEl) return;
+      const g = d && geo.find((t) => t.id === d.tile);
+      if (!d || !g) return;
+      const box = (el: HTMLElement, r: { left: number; top: number; width: number; height: number }) => {
+        el.style.left = `${r.left}px`;
+        el.style.top = `${r.top}px`;
+        el.style.width = `${r.width}px`;
+        el.style.height = `${r.height}px`;
+        document.body.appendChild(el);
+      };
+      const t = g.rect;
       if (d.kind === "tabs") {
-        const strip = tileEl.querySelector<HTMLElement>(".tb-tabs");
-        const tabs = [...tileEl.querySelectorAll<HTMLElement>('.tab[data-key]:not([data-key=""])')];
-        const base = tileEl.getBoundingClientRect();
-        const s = strip?.getBoundingClientRect();
-        const at = tabs[d.index]?.getBoundingClientRect().left ?? (tabs.length ? tabs[tabs.length - 1].getBoundingClientRect().right : s?.left ?? base.left);
-        line!.style.left = `${at - base.left - 1}px`;
-        line!.style.top = `${(s?.top ?? base.top) - base.top + 4}px`;
-        line!.style.height = `${(s?.height ?? 28) - 8}px`;
-        tileEl.appendChild(line!);
+        const strip = g.strip;
+        const x = g.tabs[d.index]?.left ?? (g.tabs.length ? g.tabs[g.tabs.length - 1].right : strip.left);
+        box(line!, { left: x - 1, top: strip.top + 4, width: 2, height: strip.height - 8 });
         return;
       }
       const row = root.classList.contains("row");
-      const half = d.kind === "edge";
-      zone!.style.inset = !half ? "0" : row
-        ? d.side === "before" ? "0 50% 0 0" : "0 0 0 50%"
-        : d.side === "before" ? "0 0 50% 0" : "50% 0 0 0";
-      tileEl.appendChild(zone!);
+      let r = { left: t.left, top: t.top, width: t.width, height: t.height };
+      if (d.kind === "edge") {
+        if (row) r = { ...r, width: t.width / 2, left: d.side === "before" ? t.left : t.left + t.width / 2 };
+        else r = { ...r, height: t.height / 2, top: d.side === "before" ? t.top : t.top + t.height / 2 };
+      }
+      box(zone!, r);
     }
 
     function send(p: NonNullable<typeof press>, d: Drop) {
