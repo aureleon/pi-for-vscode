@@ -676,3 +676,25 @@ body.in-terminal #empty { display: none; }
   box-shadow: 0 4px 24px rgba(0, 0, 0, .5);
 }
 .lightbox-close { position: absolute; top: 8px; right: 8px; }
+
+/* ---------------------------------------------------------------- narrow chats (tiles side by side, a thin sidebar)
+   The webview is as wide as its tile, so plain media queries follow the tile width. */
+@media (max-width: 420px) {
+  .scroll { padding: 8px 8px 6px; }
+  .bottom { padding: 4px 6px 6px; }
+  .toolbar { gap: 2px; padding: 3px 4px 4px; }
+  .chip { max-width: 55%; padding: 2px 7px; }
+  .ctx { margin-right: 2px; padding: 0 7px 0 5px; }
+  .ctx:hover:not([disabled]) .ctx-action, .ctx:focus-visible .ctx-action { max-width: 0; opacity: 0; margin-left: 0; }
+  .ctx:hover:not([disabled]) .ctx-action::before, .ctx:focus-visible .ctx-action::before { content: none; }
+  .list-menu { top: 4px; left: 4px; right: 4px; bottom: 4px; }
+  .lm-col-1 { display: none; }
+  .statusline { gap: 6px; }
+}
+@media (max-width: 300px) {
+  .topbar { padding-left: 8px; }
+  .ts { display: none !important; }
+  .menu-hint { display: none; }
+  #thinking-level { display: none; }
+  .lm-kids-col { display: none; }
+}
