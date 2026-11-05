@@ -88,17 +88,21 @@ kbd {
 .topbar:has(.tb-tabs) { padding-left: 4px; }
 .tb-tabs { flex: 1; min-width: 0; height: 100%; display: flex; align-items: stretch; overflow-x: auto; scrollbar-width: none; }
 .tb-tabs::-webkit-scrollbar { display: none; }
+/* A tab is as wide as its title. Tabs shrink (long titles most) only when the strip is full. */
 .tab {
-  flex: 0 1 auto; min-width: 56px; max-width: 160px; display: flex; align-items: center; gap: 2px;
+  flex: 0 1 auto; min-width: 56px; display: flex; align-items: center; gap: 2px;
   padding: 0 2px 0 8px; cursor: pointer; color: var(--muted); font-size: 12px; position: relative;
 }
 .tab:hover { color: var(--vscode-foreground); }
-.tab.active { color: var(--vscode-foreground); cursor: default; flex-shrink: .25; min-width: min(110px, 45%); }
+/* The shown tab shrinks last, so its title stays readable. */
+.tab.active { color: var(--vscode-foreground); cursor: default; flex-shrink: .25; }
+/* After a click on a tab, until its session is loaded. */
+.chat-frame.switching #messages, .chat-frame.switching #empty { opacity: .45; transition: opacity .15s .1s; }
+.chat-frame.switching .scroll { cursor: progress; }
 .tab.active::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 0; height: 1px; background: var(--accent); }
 .tab-label { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tab .topbar-title { flex: 0 1 auto; }
 .tab .topbar-rename { margin-left: 0; width: 140px; flex: none; }
-.tab:has(.topbar-rename) { max-width: none; }
 .tab-mark, .tab-close { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; }
 .tab-mark { font-size: 9px; color: var(--accent); }
 .tab-mark:empty { display: none; }
@@ -744,3 +748,23 @@ button.lm-twisty:hover { background: var(--vscode-toolbar-hoverBackground); colo
 .tiles.resizing .tile-sash { pointer-events: auto; }
 /* The tile without focus shows its shown tab more quietly. */
 .tiles > .tile:not(.focused) .tab.active::after { opacity: .35; }
+
+/* ---------------------------------------------------------------- drag tabs and tiles (tiles.ts)
+   Drag a tab to reorder it, to another tile's tabs or middle to move it there, or to a tile's edge
+   to make a new tile. Drag a tile by its header to another tile to merge them, or to an edge to move it. */
+.tiles.dragging, .tiles.dragging * { cursor: grabbing !important; user-select: none; }
+.tiles.dragging .tab.drag-source { opacity: .4; }
+.tiles.dragging .tile.drag-source { opacity: .6; }
+.drag-ghost {
+  position: fixed; z-index: 100; pointer-events: none; max-width: 220px; padding: 3px 10px; border-radius: 5px;
+  font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); color: var(--vscode-foreground);
+  border: 1px solid var(--accent); box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
+/* Where a drop goes: part of a tile (VS Code's drop overlay colour), or a line between two tabs. */
+.drop-zone {
+  position: absolute; z-index: 60; pointer-events: none; transition: inset .08s ease;
+  background: var(--vscode-editorGroup-dropBackground, color-mix(in srgb, var(--accent) 25%, transparent));
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.drop-line { position: absolute; z-index: 60; pointer-events: none; width: 2px; background: var(--accent); border-radius: 1px; }

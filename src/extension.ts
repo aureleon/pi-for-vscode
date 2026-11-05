@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { PiController, type ChatHost } from "./controller";
+import { PiController, type ChatHost, type Tab } from "./controller";
 import { createPiTerminal } from "./piTerminal";
 import { SessionViewer } from "./sessionViewer";
 import { defaultSessionDir } from "./sessions";
@@ -86,7 +86,8 @@ class SidebarTiles implements vscode.Disposable {
     return this.chats.get(this.tiles[0]?.id)?.c;
   }
 
-  private createChat(id: string) {
+  /** `start`: tabs for a new tile (a tab dragged out of another tile) and the session to show. */
+  private createChat(id: string, start?: { tabs: Tab[]; shown: string }) {
     const inbox = new vscode.EventEmitter<any>();
     const host: ChatHost = {
       webview: {
@@ -114,7 +115,12 @@ class SidebarTiles implements vscode.Disposable {
       },
     };
     const first = id === "t1";
-    const c = new PiController(this.context, host, output, { primary: first, tabsKey: first ? "pi.sidebarTabs" : `pi.sidebarTabs:${id}` });
+    const c = new PiController(this.context, host, output, {
+      primary: first && !start,
+      tabsKey: first ? "pi.sidebarTabs" : `pi.sidebarTabs:${id}`,
+      tabs: start?.tabs,
+      sessionFile: start?.shown,
+    });
     this.chats.set(id, { c, inbox, badge: 0 });
     controllers.add(c);
     if (!sidebar) sidebar = c;
@@ -161,6 +167,16 @@ class SidebarTiles implements vscode.Disposable {
         for (const t of this.tiles) if (typeof m.sizes?.[t.id] === "number") t.size = m.sizes[t.id];
         this.save();
         break;
+      case "tiles:moveTab":
+        this.moveTab(String(m.from), String(m.key), String(m.to), typeof m.index === "number" ? m.index : undefined, m.side).catch((err) =>
+          vscode.window.showWarningMessage(`Pi: ${err.message ?? err}`));
+        break;
+      case "tiles:merge":
+        this.merge(String(m.from), String(m.to)).catch((err) => vscode.window.showWarningMessage(`Pi: ${err.message ?? err}`));
+        break;
+      case "tiles:moveTile":
+        this.moveTile(String(m.from), String(m.to), m.side === "before" ? "before" : "after");
+        break;
       case "tiles:focus": {
         const c = this.chats.get(m.tile)?.c;
         if (c) sidebar = lastActive = c;
@@ -171,20 +187,67 @@ class SidebarTiles implements vscode.Disposable {
 
   /** Add a tile after `id` with a new session. All tiles get the same size again. */
   private split(id: string) {
+    this.addTile(id, "after");
+  }
+
+  /** Add a tile before or after `id`. `start`: its tabs (a tab dragged out); else a new session. */
+  private addTile(id: string, side: "before" | "after", start?: { tabs: Tab[]; shown: string }) {
     if (this.tiles.length >= MAX_TILES) return;
     const i = Math.max(0, this.tiles.findIndex((t) => t.id === id));
     let n = 2;
     while (this.tiles.some((t) => t.id === `t${n}`)) n++;
     const tile = { id: `t${n}`, size: 1 };
-    this.tiles.splice(i + 1, 0, tile);
+    this.tiles.splice(side === "before" ? i : i + 1, 0, tile);
     this.evenSizes();
     // A tile id can come back after a close: start it without the old tile's tabs.
     this.context.workspaceState.update(`pi.sidebarTabs:${tile.id}`, undefined);
     this.context.workspaceState.update(`pi.sidebarTabs:${tile.id}:shown`, undefined);
-    this.createChat(tile.id);
+    this.createChat(tile.id, start);
     this.save();
     this.sendLayout();
     this.view.webview.postMessage({ type: "tiles:focus", tile: tile.id });
+  }
+
+  /**
+   * A tab was dropped. In its own tile without `side`: reorder. On another tile: move it there at
+   * `index`. With `side`: a new tile before or after `to` with that tab. A tile that loses its last
+   * tab closes.
+   */
+  private async moveTab(from: string, key: string, to: string, index: number | undefined, side?: "before" | "after") {
+    const src = this.chats.get(from)?.c;
+    const dst = this.chats.get(to)?.c;
+    if (!src || !dst) return;
+    if (from === to && !side) return src.moveTab(key, index ?? src.tabCount);
+    if (side && this.tiles.length >= MAX_TILES) throw new Error(`the sidebar has room for ${MAX_TILES} tiles.`);
+    if (side && from === to && src.tabCount < 2) return;
+    const out = await src.releaseTab(key);
+    if (!out) return;
+    if (side) this.addTile(to, side, { tabs: [out.tab], shown: out.tab.key });
+    else await dst.adoptTabs([out.tab], index, out.tab.key);
+    if (out.empty && this.tiles.length > 1) this.removeTile(from);
+  }
+
+  /** A tile was dropped on another one: its tabs join that tile, and it closes. */
+  private async merge(from: string, to: string) {
+    const src = this.chats.get(from)?.c;
+    const dst = this.chats.get(to)?.c;
+    if (!src || !dst || from === to) return;
+    if (src.hasWork) throw new Error("a session in this tile is still working. Merge the tile when it finishes.");
+    const { tabs, shown } = src.tabList();
+    // Closing the tile stops its processes, so the other tile can open the files.
+    this.removeTile(from);
+    await dst.adoptTabs(tabs, undefined, shown && tabs.some((t) => t.key === shown) ? shown : undefined);
+  }
+
+  /** A tile was dropped on the edge of another one: move it there. */
+  private moveTile(from: string, to: string, side: "before" | "after") {
+    const i = this.tiles.findIndex((t) => t.id === from);
+    if (i < 0 || from === to) return;
+    const [tile] = this.tiles.splice(i, 1);
+    const j = this.tiles.findIndex((t) => t.id === to);
+    this.tiles.splice(j < 0 ? this.tiles.length : side === "before" ? j : j + 1, 0, tile);
+    this.save();
+    this.sendLayout();
   }
 
   /** Close a tile from its menu. A tile whose sessions work asks first. */

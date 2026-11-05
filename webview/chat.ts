@@ -1509,20 +1509,25 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
    * state and the rename in place work as without tabs. Other tabs show the title that the host sends.
    */
   let pendingTabs: TabInfo[] | undefined;
+  let lastTabsJson = "";
   function renderTabs(tabs: TabInfo[]) {
     const strip = $("tb-tabs");
+    // Redraw only on a change: a redraw between mousedown and click would lose the click.
+    const json = JSON.stringify(tabs);
+    if (json === lastTabsJson && !pendingTabs) return;
     // Do not take the rename box away while the user types; draw the tabs when the rename ends.
     if (strip.querySelector(".topbar-rename")) {
       pendingTabs = tabs;
       return;
     }
     pendingTabs = undefined;
+    lastTabsJson = json;
     strip.replaceChildren();
-    // Until the shown session has a file or an id (while pi starts), no tab is the shown one.
-    // The title still needs a tab: it shows "Loading…" or "New session" there.
-    if (!tabs.some((t) => t.shown)) tabs = [{ key: "", title: "", shown: true, busy: false, unread: false }, ...tabs];
+    // The title needs a tab. The host sends a placeholder for a new session; this is a fallback.
+    if (!tabs.some((t) => t.shown)) tabs = [...tabs, { key: "", title: "", shown: true, busy: false, unread: false }];
     for (const t of tabs) {
       const tab = el("div", `tab${t.shown ? " active" : ""}${t.busy ? " busy" : ""}${t.unread ? " unread" : ""}`);
+      tab.dataset.key = t.key;
       tab.setAttribute("role", "tab");
       tab.setAttribute("aria-selected", String(t.shown));
       if (t.shown) {
@@ -1543,7 +1548,14 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       });
       tab.append(mark);
       if (t.key) tab.append(close);
-      tab.addEventListener("click", () => !t.shown && post({ type: "tabPick", key: t.key }));
+      tab.addEventListener("click", () => {
+        if (t.shown || !t.key) return;
+        // Show the switch at once; the host sends the session and the tabs when it is loaded.
+        strip.querySelector(".tab.active")?.classList.remove("active");
+        tab.classList.add("active");
+        frame.classList.add("switching");
+        post({ type: "tabPick", key: t.key });
+      });
       // Middle click closes, like editor tabs.
       tab.addEventListener("auxclick", (e) => e.button === 1 && post({ type: "tabClose", key: t.key }));
       strip.append(tab);
@@ -2772,6 +2784,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     switch (m.type) {
       case "init":
       case "reset":
+        frame.classList.remove("switching");
         if (READONLY) {
           applySnapshot(m);
           showBanner(
@@ -2846,6 +2859,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         );
         break;
       case "error":
+        frame.classList.remove("switching");
         setLoading(false);
         renderNote(`**Error:** ${m.message}`, "error");
         break;
