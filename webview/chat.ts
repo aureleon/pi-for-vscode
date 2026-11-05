@@ -1541,6 +1541,22 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     renderTabs(tabs);
   }
   let lastTabsJson = "";
+  /**
+   * The tab that you clicked last, and the number of the click. Tabs that the host sent before it had the
+   * click (their `pick` is lower) show this tab, so that they do not take the click back.
+   */
+  let picked: { key: string; seq: number } | undefined;
+  let pickSeq = 0;
+  /** Tabs from the host: until the host has the last click, keep the clicked tab shown. */
+  function hostTabs(tabs: TabInfo[], pick: number): TabInfo[] {
+    if (!picked) return tabs;
+    if (pick >= picked.seq || !tabs.some((t) => t.key === picked!.key)) {
+      picked = undefined;
+      return tabs;
+    }
+    const key = picked.key;
+    return tabs.map((t) => (t.shown === (t.key === key) ? t : { ...t, shown: t.key === key }));
+  }
   /** The tabs as the host sent them, to draw them again when the session on screen changes. */
   let lastTabs: TabInfo[] | undefined;
   function renderTabs(tabs: TabInfo[]) {
@@ -1573,6 +1589,9 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         if (t.key && t.key !== state.sessionFile && t.title) {
           titleEl.textContent = t.title;
           titleEl.classList.remove("placeholder");
+        } else if (t.key && t.key === state.sessionFile) {
+          // An earlier draw put another tab's title here: show this session's own title again.
+          updateTitle();
         }
         tab.append(titleEl);
       } else {
@@ -1609,7 +1628,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         // own title, before the kept transcript of the clicked tab changes the title.
         if (lastTabs) setTabsNow(lastTabs.map((x) => (x.shown ? { ...x, shown: false, title: titleEl.textContent || x.title } : x.key === t.key ? { ...x, shown: true } : x)));
         if (!showKept(t.key)) frame.classList.add("switching");
-        post({ type: "tabPick", key: t.key });
+        picked = { key: t.key, seq: ++pickSeq };
+        post({ type: "tabPick", key: t.key, seq: picked.seq });
       });
       // Middle click closes, like editor tabs.
       tab.addEventListener("auxclick", (e) => e.button === 1 && post({ type: "tabClose", key: t.key }));
@@ -2985,7 +3005,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         updateTitle();
         break;
       case "tabs":
-        if (opts.header) renderTabs(m.tabs ?? []);
+        if (opts.header) renderTabs(hostTabs(m.tabs ?? [], Number(m.pick) || 0));
         break;
       case "stats":
         updateStats(m.stats);
