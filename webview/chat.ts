@@ -33,6 +33,7 @@ const I = {
   attach: `<svg viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="M11 4.5 5.6 9.9a1.2 1.2 0 0 0 1.7 1.7l5.4-5.4a2.5 2.5 0 0 0-3.5-3.5L3.8 8.1a3.8 3.8 0 0 0 5.4 5.4L13.5 9"/></svg>`,
   image: `<svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor"/><circle cx="5.5" cy="6" r="1.2" fill="currentColor"/><path d="m2 12 4-4 3 3 2-2 3 3" fill="none" stroke="currentColor"/></svg>`,
   send: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 2.5 13.5 8l-.7.7L8.5 4.4V14h-1V4.4L3.2 8.7l-.7-.7z"/></svg>`,
+  arrowDown: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 13.5 2.5 8l.7-.7 4.3 4.3V2h1v9.6l4.3-4.3.7.7z"/></svg>`,
   stop: `<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg>`,
   retry: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 2.5a5.5 5.5 0 1 0 5.4 6.5l1 .2A6.5 6.5 0 1 1 12.6 3.4V1.5h1v3.5h-3.5V4h1.8A5.5 5.5 0 0 0 8 2.5z"/></svg>`,
   grip: `<svg viewBox="0 0 16 16"><g fill="currentColor"><circle cx="6" cy="4" r="1.1"/><circle cx="10" cy="4" r="1.1"/><circle cx="6" cy="8" r="1.1"/><circle cx="10" cy="8" r="1.1"/><circle cx="6" cy="12" r="1.1"/><circle cx="10" cy="12" r="1.1"/></g></svg>`,
@@ -1386,7 +1387,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
 
   /**
    * Queued messages show as dimmed user messages at the end of the transcript, in the order pi
-   * delivers them (steering first). Each one can be removed, sent now, or dragged to reorder.
+   * delivers them (steering first). Each one can be removed, moved back to the input box to edit,
+   * sent now, or dragged to reorder.
    */
   function renderQueue(steering: string[], followUp: string[]) {
     const q = $("queue");
@@ -1397,7 +1399,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     q.classList.toggle("hidden", !items.length);
     q.innerHTML = "";
     for (const it of items) {
-      const op = (name: "remove" | "sendNow" | "move", to?: number) =>
+      const op = (name: "remove" | "sendNow" | "move" | "edit", to?: number) =>
         post({ type: "queueOp", op: name, kind: it.kind, index: it.index, text: it.text, to });
       const row = el("div", "user-msg queued-msg");
       row.draggable = true;
@@ -1417,6 +1419,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         });
         actions.appendChild(b);
       };
+      btn(I.arrowDown, "Move to input box to edit", () => op("edit"));
       btn(I.send, "Send now (stops the current run)", () => op("sendNow"));
       btn(I.close, "Remove", () => op("remove"));
       const grip = el("span", "queued-grip", I.grip);

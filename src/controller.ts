@@ -1548,9 +1548,10 @@ export class PiController implements vscode.Disposable {
    * out, change it, and queue the messages again in the new order. The webview sends the text it
    * shows, so the edit finds the right message even when pi delivered one in the meantime.
    * During compaction, all messages go back into the compaction queue, and "send now" puts the
-   * message first: stopping would also stop the compaction.
+   * message first: stopping would also stop the compaction. "edit" takes the message out and puts
+   * its text in the input box.
    */
-  private async queueOp(m: { op: "remove" | "sendNow" | "move"; kind: "steer" | "followUp"; index: number; text: string; to?: number }) {
+  private async queueOp(m: { op: "remove" | "sendNow" | "move" | "edit"; kind: "steer" | "followUp"; index: number; text: string; to?: number }) {
     const s = this.active;
     if (!s || !this.pi?.running) return;
     s.queueBusy = true;
@@ -1562,6 +1563,7 @@ export class PiController implements vscode.Disposable {
       if (i >= 0) {
         [item] = list.splice(i, 1);
         if (m.op === "move") list.splice(Math.max(0, Math.min(m.to ?? i, list.length)), 0, item);
+        if (m.op === "edit") this.post({ type: "restoreQueue", text: item.text });
       }
       if (item && m.op === "sendNow") {
         if (s.compactionQueue) steering.unshift({ ...item, mode: "steer" });
