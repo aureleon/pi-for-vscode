@@ -2768,10 +2768,28 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     return list?.filter((c) => !c.name.startsWith("vscode:"));
   }
 
+  /** Messages of the preview that the host sent from the session file while pi starts (sendPreview). */
+  let previewSig: string | undefined;
+  const snapshotSig = (m: any) => {
+    const msgs = m.messages ?? [];
+    const last = msgs[msgs.length - 1];
+    return `${m.state?.sessionFile}|${msgs.length}|${last?.timestamp ?? ""}|${last?.role ?? ""}`;
+  };
+
   function applySnapshot(m: any) {
     state = { ...m.state, cwd: m.cwd ?? state.cwd };
     persistSession(state.sessionFile);
     if (m.commands) commands = visibleCommands(m.commands)!;
+    // pi's snapshot after the preview: keep the transcript (and the scroll position) if it is the same.
+    const same = !m.preview && previewSig !== undefined && previewSig === snapshotSig(m) && !state.isStreaming;
+    previewSig = m.preview ? snapshotSig(m) : undefined;
+    if (same) {
+      updateTitle();
+      updateModel();
+      hideBanner();
+      setLoading(false);
+      return;
+    }
     resetTranscript();
     for (const msg of m.messages ?? []) renderMessage(msg);
     setRunning(!!state.isStreaming);

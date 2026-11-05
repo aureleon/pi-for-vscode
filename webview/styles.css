@@ -757,11 +757,14 @@ button.lm-twisty:hover { background: var(--vscode-toolbar-hoverBackground); colo
 .tiles.dragging { cursor: grabbing; }
 .tiles.dragging .tab.drag-source { opacity: .4; }
 .drag-ghost {
-  position: fixed; left: 0; top: 0; z-index: 100; will-change: transform; pointer-events: none; max-width: 220px; padding: 3px 10px; border-radius: 5px;
-  font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  position: fixed; left: 0; top: 0; z-index: 100; will-change: transform; pointer-events: none; max-width: 260px; padding: 3px 10px; border-radius: 5px;
+  display: flex; gap: 8px; font-size: 12px; white-space: nowrap;
   background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); color: var(--vscode-foreground);
   border: 1px solid var(--accent); box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
 }
+.drag-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.drag-hint { flex: none; color: var(--muted); }
+.drag-hint:empty { display: none; }
 /* Where a drop goes: part of a tile (VS Code's drop overlay colour), or a line between two tabs. */
 .drop-zone {
   position: fixed; z-index: 90; pointer-events: none;
