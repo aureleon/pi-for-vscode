@@ -1526,7 +1526,10 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
    */
   let pendingTabs: TabInfo[] | undefined;
   let lastTabsJson = "";
+  /** The tabs as the host sent them, to draw them again when the session on screen changes. */
+  let lastTabs: TabInfo[] | undefined;
   function renderTabs(tabs: TabInfo[]) {
+    lastTabs = tabs;
     const strip = $("tb-tabs");
     // Redraw only on a change: a redraw between mousedown and click would lose the click.
     const json = JSON.stringify(tabs);
@@ -1540,7 +1543,11 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     lastTabsJson = json;
     strip.replaceChildren();
     // The title needs a tab. The host sends a placeholder for a new session; this is a fallback.
-    if (!tabs.some((t) => t.shown)) tabs = [...tabs, { key: "", title: "", shown: true, busy: false, unread: false }];
+    // No shown tab: the tab of the session on screen (a preview) is the shown one, else a placeholder.
+    if (!tabs.some((t) => t.shown)) {
+      const i = state.sessionFile ? tabs.findIndex((t) => t.key === state.sessionFile) : -1;
+      tabs = i >= 0 ? tabs.map((t, j) => (j === i ? { ...t, shown: true } : t)) : [...tabs, { key: "", title: "", shown: true, busy: false, unread: false }];
+    }
     for (const t of tabs) {
       const tab = el("div", `tab${t.shown ? " active" : ""}${t.busy ? " busy" : ""}${t.unread ? " unread" : ""}`);
       tab.dataset.key = t.key;
@@ -2877,6 +2884,11 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     }
     state = { ...m.state, cwd: m.cwd ?? state.cwd };
     persistSession(state.sessionFile);
+    // Tabs that came before the session was known have no shown tab: mark this session's tab now.
+    if (lastTabs && !lastTabs.some((t) => t.shown)) {
+      lastTabsJson = "";
+      renderTabs(lastTabs);
+    }
     if (m.commands) commands = visibleCommands(m.commands)!;
     // The transcript on screen shows these messages already: keep it (and its scroll position).
     const same = !m.preview && !!shownSig && shownSig === sig && !state.isStreaming;

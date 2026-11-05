@@ -893,7 +893,9 @@ export class PiController implements vscode.Disposable {
       this.unread.delete(key);
     }
     // The tab of a session that is opening counts as shown, and so does the shown one while it loads.
-    const shownTab = key ?? (this.pendingKey && path.resolve(this.pendingKey)) ?? undefined;
+    // Before pi reports the session (also before the process exists): the file that this start opens.
+    const opening = this.pendingKey ?? (this.starting ? this.startingFile : undefined);
+    const shownTab = key ?? (opening && this.tabs.find((t) => path.resolve(t.key) === path.resolve(opening))?.key) ?? undefined;
     this.tabs = this.tabs.filter((t) => {
       const s = this.sessionOfTab(t.key);
       if (s) {
