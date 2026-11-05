@@ -148,6 +148,8 @@ interface Session {
   hiddenWidgets?: Set<string>;
   /** What the hooks of integrations and workarounds see of this session. */
   handle: ExtSession;
+  /** Session file the process was started with. It counts as open before pi reports `sessionFile`. */
+  claim?: string;
 }
 
 interface StartOptions {
@@ -277,6 +279,36 @@ export class PiController implements vscode.Disposable {
     return s.state.sessionName || s.webTitle || "Untitled session";
   }
 
+  // ---------------------------------------------------------------- one chat per session
+
+  /** Session file of `s`: the file that pi reports, or the file it was started with until pi reports one. */
+  private static fileOf(s: Session): string | undefined {
+    const f = s.state.sessionFile ?? s.claim;
+    return f ? path.resolve(f) : undefined;
+  }
+
+  /**
+   * The chat that has the session file open: in a running process (shown or in the background),
+   * or in the terminal. A second chat must not open the same file, so that only one process writes it.
+   */
+  static ownerOf(file: string, except?: PiController): PiController | undefined {
+    const f = path.resolve(file);
+    for (const c of PiController.all) {
+      if (c === except) continue;
+      if (c.active && PiController.fileOf(c.active) === f && (c.active.pi.running || c.terminal)) return c;
+      if ([...c.background].some((b) => b.pi.running && PiController.fileOf(b) === f)) return c;
+    }
+    return undefined;
+  }
+
+  /** Bring this chat to the front and show the session file, if it is one of its background sessions. */
+  async showSession(file: string) {
+    this.host.reveal();
+    const f = path.resolve(file);
+    const bg = [...this.background].find((b) => PiController.fileOf(b) === f);
+    if (bg) await this.showBackground(bg);
+  }
+
   // ---------------------------------------------------------------- process
 
   async start(sessionFile?: string, sessionId?: string, opts: StartOptions = {}): Promise<void> {
@@ -310,17 +342,26 @@ export class PiController implements vscode.Disposable {
       (this.options.primary && cfg.get<boolean>("resumeLastSession", true)
         ? this.context.workspaceState.get<string>(LAST_SESSION_KEY)
         : undefined);
+    const asked = !!(sessionFile ?? this.options.sessionFile);
     this.options.sessionFile = undefined;
     const pinned = args.some((a) => ["--session", "--session-id", "--continue", "-c", "--no-session"].includes(a));
+    let claim: string | undefined;
     if (sessionId && !pinned) {
       // Exact session (resumes it, or creates it if it was never written).
       args.push("--session-id", sessionId);
     } else if (resume && fs.existsSync(resume) && !pinned) {
-      args.push("--session", resume);
+      // Another chat has the session open (for example a restored tab and the sidebar after a reload): start a new one.
+      if (PiController.ownerOf(resume, this)) {
+        if (asked) vscode.window.showInformationMessage("Pi: this session is open in another chat. This chat starts a new session.");
+      } else {
+        args.push("--session", resume);
+        claim = resume;
+      }
     }
 
     this.args = args;
     this.active = this.spawn(command, args, env);
+    this.active.claim = claim;
     this.updateStatus();
     this.post({ type: "starting" });
     await this.sendInit("init");
@@ -1382,15 +1423,17 @@ export class PiController implements vscode.Disposable {
       const file = path.resolve(s.file);
       const b = bgByFile.get(file);
       const isCurrent = file === current;
+      const elsewhere = !isCurrent && !b && !!PiController.ownerOf(file, this);
       return {
         id: idOf(s.file),
         label: s.name || b?.state.sessionName || b?.webTitle || s.firstMessage?.split("\n")[0].slice(0, 200) || "(empty session)",
         name: b ? b.state.sessionName : s.name,
-        cols: [b ? (this.isBusy(b) ? "working" : "idle") : relativeTime(s.mtime), msgs(s.messageCount)],
+        cols: [b ? (this.isBusy(b) ? "working" : "idle") : elsewhere ? "other chat" : relativeTime(s.mtime), msgs(s.messageCount)],
         group: r === 0 ? "Current session" : r === 1 ? "Running in background" : dayGroup(latest),
         search: [s.name, b && this.titleOf(b), s.firstMessage?.slice(0, 500)].filter(Boolean).join(" "),
         current: isCurrent,
-        archived: !isCurrent && !b && archived.has(s.file),
+        archived: !isCurrent && !b && !elsewhere && archived.has(s.file),
+        elsewhere: elsewhere || undefined,
         running: (isCurrent && !!this.state.isStreaming) || (!!b && this.isBusy(b)) || inUse.has(file),
         busy: !!b || undefined,
         parent: parent && idOf(parent),
@@ -1438,6 +1481,8 @@ export class PiController implements vscode.Disposable {
     if (bg) return this.showBackground(bg);
     if (id === this.state.sessionFile && this.pi?.running) return;
     if (id.startsWith("bg:")) return; // a background session without a file that has since gone away
+    const owner = PiController.ownerOf(id, this);
+    if (owner) return owner.showSession(id);
     // Another pi process must not write to a file that a running child session (a subagent) writes to.
     if (this.filesInUse().has(path.resolve(id))) {
       vscode.window.showWarningMessage("Pi: this session is still running inside another session (for example as a subagent). Open it when it finishes.");

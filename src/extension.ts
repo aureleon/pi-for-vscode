@@ -84,7 +84,12 @@ class SidebarProvider implements vscode.WebviewViewProvider {
   }
 }
 
+/** Open a chat in an editor tab. A session file that another chat has open is shown there instead. */
 function openPanel(context: vscode.ExtensionContext, sessionFile?: string) {
+  if (sessionFile) {
+    const owner = PiController.ownerOf(sessionFile);
+    if (owner) return void owner.showSession(sessionFile);
+  }
   const panel = vscode.window.createWebviewPanel("pi.panel", "Pi", vscode.ViewColumn.Beside, {
     ...webviewOptions(context.extensionUri),
     retainContextWhenHidden: true,
