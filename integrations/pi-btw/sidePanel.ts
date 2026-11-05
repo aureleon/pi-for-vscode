@@ -84,13 +84,13 @@ export class SidePanel {
     private size: PanelSize,
     private onChange: () => void,
   ) {
-    // Split layout: body is a flex container [#app | splitter | side panel].
+    // Split layout: the chat's frame is a flex container [#app | splitter | side panel].
     // Wide views split left/right, narrow views (the usual sidebar) split top/bottom,
     // so the main conversation always stays visible next to the side thread.
     this.splitter = document.createElement("div");
     this.splitter.className = "side-splitter hidden";
     this.splitter.title = "Drag to resize · double-click to reset";
-    document.body.appendChild(this.splitter);
+    api.frame.appendChild(this.splitter);
     this.initSplitter();
     this.root = document.createElement("aside");
     this.root.className = "side-panel hidden";
@@ -105,7 +105,7 @@ export class SidePanel {
       <div class="sp-composer">
         <textarea rows="2"></textarea>
       </div>`;
-    document.body.appendChild(this.root);
+    api.frame.appendChild(this.root);
     this.root.querySelector(".sp-title")!.textContent = TITLE;
     this.body = this.root.querySelector(".sp-body")!;
     this.input = this.root.querySelector("textarea")!;
@@ -136,11 +136,11 @@ export class SidePanel {
   // ------------------------------------------------------------ split sizing
 
   private get horizontal() {
-    return window.matchMedia("(min-width: 640px)").matches;
+    return this.api.frame.classList.contains("wide");
   }
 
   private applySize() {
-    const b = document.body.style;
+    const b = this.api.frame.style;
     if (this.size.row) b.setProperty("--side-w", `${this.size.row}px`);
     else b.removeProperty("--side-w");
     if (this.size.col) b.setProperty("--side-h", `${this.size.col}px`);
@@ -159,16 +159,17 @@ export class SidePanel {
       e.preventDefault();
       dragging = true;
       try { this.splitter.setPointerCapture(e.pointerId); } catch {}
-      document.body.classList.add("side-resizing");
+      this.api.frame.classList.add("side-resizing");
     });
     this.splitter.addEventListener("pointermove", (e) => {
       if (!dragging) return;
+      const r = this.api.frame.getBoundingClientRect();
       if (this.horizontal) {
-        const w = Math.round(window.innerWidth - e.clientX);
-        this.size.row = Math.max(220, Math.min(w, window.innerWidth - 260));
+        const w = Math.round(r.right - e.clientX);
+        this.size.row = Math.max(220, Math.min(w, r.width - 260));
       } else {
-        const h = Math.round(window.innerHeight - e.clientY);
-        this.size.col = Math.max(140, Math.min(h, window.innerHeight - 180));
+        const h = Math.round(r.bottom - e.clientY);
+        this.size.col = Math.max(140, Math.min(h, r.height - 180));
       }
       this.applySize();
     });
@@ -176,7 +177,7 @@ export class SidePanel {
       if (!dragging) return;
       dragging = false;
       try { this.splitter.releasePointerCapture(e.pointerId); } catch {}
-      document.body.classList.remove("side-resizing");
+      this.api.frame.classList.remove("side-resizing");
       this.saveSize();
     };
     this.splitter.addEventListener("pointerup", end);

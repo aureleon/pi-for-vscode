@@ -177,7 +177,8 @@ interface StartOptions {
 
 /** Anything that can host the chat webview (sidebar view or editor panel). */
 export interface ChatHost {
-  webview: vscode.Webview;
+  /** The chat's channel to its webview. A sidebar tile shares the view's webview with the other tiles. */
+  webview: Pick<vscode.Webview, "postMessage" | "onDidReceiveMessage">;
   /** `busy`: the shown session works (editor tabs mark their title). */
   setTitle(title: string | undefined, busy?: boolean): void;
   /** Optional: a badge on the native view (integrations use it for unread items). */
@@ -187,6 +188,8 @@ export interface ChatHost {
   openBeside?(file: string): void;
   /** Where the chat is, for lists of chats ("sidebar", "tab"). */
   kind: string;
+  /** Close the chat (a sidebar tile, when there are others). Returns false if it can't. */
+  closeChat?(): boolean;
 }
 
 /**
@@ -263,6 +266,11 @@ export class PiController implements vscode.Disposable {
 
   private get state(): any {
     return this.active?.state ?? {};
+  }
+
+  /** A session of this chat works: the shown one or one in the background. */
+  get hasWork(): boolean {
+    return [this.active, ...this.background].some((s) => !!s && this.isBusy(s));
   }
 
   get isRunning(): boolean {
@@ -359,6 +367,7 @@ export class PiController implements vscode.Disposable {
     for (const p of modulePiExtensions(this.modules)) args.push("-e", path.join(this.context.extensionPath, "dist", p));
 
     const resume = opts.fresh ? undefined : sessionFile ?? this.options.sessionFile ??
+      (this.options.tabsKey ? this.context.workspaceState.get<string>(`${this.options.tabsKey}:shown`) : undefined) ??
       (this.options.primary && cfg.get<boolean>("resumeLastSession", true)
         ? this.context.workspaceState.get<string>(LAST_SESSION_KEY)
         : undefined);
@@ -703,6 +712,7 @@ export class PiController implements vscode.Disposable {
     if (key) {
       this.shownKey = key;
       this.unread.delete(key);
+      if (!key.startsWith("bg:")) this.context.workspaceState.update(`${this.options.tabsKey}:shown`, key);
     }
     this.tabs = this.tabs.filter((t) => {
       const s = this.sessionOfTab(t.key);
@@ -741,6 +751,8 @@ export class PiController implements vscode.Disposable {
     }
     const next = this.tabs[Math.min(i, this.tabs.length - 1)];
     if (next) return this.openSession(next.key);
+    // The last tab of a sidebar tile closes the tile, like the last editor of an editor group.
+    if (this.host.closeChat?.()) return;
     if (this.pi?.running) {
       const r = await this.req({ type: "new_session" });
       if (!r?.cancelled) await this.sendInit("reset");

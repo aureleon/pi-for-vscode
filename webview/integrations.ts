@@ -19,6 +19,12 @@ export interface PiCommand {
 export interface WebIntegrationApi {
   /** Send a payload to the host side of this integration. */
   post(payload: unknown): void;
+  /**
+   * The chat's container: a flex column with the chat (`#app`) in it. A side panel goes here, next to
+   * `#app`. It has the class `wide` when it is wide enough for a panel beside the chat. The page can hold
+   * several chats (sidebar tiles), so do not use `document.body` for layout.
+   */
+  frame: HTMLElement;
   /** Add a transcript item (`.item <cls>`) at the end of the transcript. */
   addItem(cls: string): HTMLElement;
   /**

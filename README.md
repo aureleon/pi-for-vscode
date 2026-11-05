@@ -37,6 +37,12 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - The sidebar header shows a tab for each session that is open in the sidebar. + starts a session in a new tab, and a session that you open from the session list gets a tab too. A working tab shows the π spinner; a tab that finished in the background shows a dot. Close a tab with its × or a middle click. The tabs come back when VS Code starts again.
 - A session is open in one chat only. If you open a session that another chat has open, that chat comes to the front. The session list shows such sessions as "other chat".
 
+### Tiles
+- Split the sidebar into up to 4 chats with the split button in the header. Each tile has its own session tabs and runs its own sessions.
+- Tiles stack top to bottom, or sit side by side when the sidebar is wide enough. Drag the line between two tiles to resize them; double-click it to make all tiles the same size.
+- Close a tile with *Close Tile* in its More Actions menu, or by closing its last tab.
+- The tiles, their tabs and their sizes come back when VS Code starts again.
+
 ### Chat tabs
 - *Open in New Tab* opens a chat in the editor area. In the session list, the split button, <kbd>⌥</kbd>-click or <kbd>⌥↵</kbd> opens a session in a new chat tab to the side.
 - Chat tabs and their sessions come back after a window reload.
@@ -68,6 +74,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Queue edits** take the whole queue out of pi and queue it again, because RPC mode can only add to the queue or clear it. Images in queued messages are not kept. **Send now** stops the run and sends the message as the next run.
 - **Factory widgets** (for example todo lists and agent bars) are dropped by RPC mode. A workaround renders them to text lines at the width of the chat view and sends them again when they change (at most 4 times a second).
 - **Running child sessions** are not in RPC events. A workaround counts the prompts that run on other agent sessions in the process and reports them, with their session files, in a hidden status. The titles come from the session files. Sessions that an extension keeps only in memory have no title. pi-btw side threads also count while they answer.
+- **Tiles** are chats in one webview: `mountChat` (webview/chat.ts) builds each one in its own element. They are not iframes, because VS Code ignores keys from nested frames, so its shortcuts would not work in a tile.
 - **Session tabs** of idle sessions have no pi process. Opening one switches the sidebar's process to its file. A busy tab that you leave keeps its process, the same as a background session. A new session that you leave before its first message has no file, so its tab closes.
 - **One chat per session:** a chat that would open a session that another chat has open (for example after a reload) starts a new session. A session that runs in a chat's background stays in that chat.
 - **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.

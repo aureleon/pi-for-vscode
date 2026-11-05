@@ -18,9 +18,13 @@ interface ChildRun {
 export const childRunsWeb: WebIntegration = {
   id: "child-runs",
   create(api) {
-    const style = document.createElement("style");
-    style.textContent = css;
-    document.head.appendChild(style);
+    // Once per page: the sidebar can hold several chats.
+    if (!document.getElementById("style-child-runs")) {
+      const style = document.createElement("style");
+      style.id = "style-child-runs";
+      style.textContent = css;
+      document.head.appendChild(style);
+    }
 
     const button = document.createElement("button");
     button.className = "runs hidden";
