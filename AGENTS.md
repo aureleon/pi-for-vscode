@@ -9,7 +9,9 @@ Notes for coding agents that work on Pi for VS Code.
 - `src/piProcess.ts`: JSONL RPC client. Split stdout only on `\n`.
 - `src/sessionViewer.ts`, `src/sessionView.ts`: read-only session tab. It reads the session file and starts no pi process.
 - `src/bridge/piBridge.ts`: pi extension loaded with `pi -e`. It adds hidden `vscode:*` commands (tree navigation, labels). Keep it free of dependencies.
-- `webview/main.ts`: the chat UI, in plain TypeScript and DOM (no framework). `webview/styles.css` holds all styles.
+- `webview/chat.ts`: the chat UI, in plain TypeScript and DOM (no framework). `mountChat()` builds one chat in an element; a page can hold several. Use `$()` and `frame`, not `document.getElementById` or `document.body`, and add document listeners with `on()`. `webview/styles.css` holds all styles.
+- `webview/main.ts`: the webview entry. Editor tabs and the session viewer mount one chat; the sidebar mounts `webview/tiles.ts`.
+- `webview/tiles.ts`, `SidebarTiles` in `src/extension.ts`: sidebar tiles. Each tile is a chat with its own `PiController`; messages carry the tile id (`{ tile, msg }`).
 - `webview/treeMenu.ts`, `webview/streamMd.ts`: `/tree` navigator, streaming markdown.
 - `src/integrations.ts`, `webview/integrations.ts`: hooks for integrations and workarounds. The two sides talk with `{ type: "ext", id, payload }`.
 - `integrations/<name>/`: one integration (`host.ts`, `web.ts`, styles). `integrations/host.ts` and `integrations/web.ts` list them. Put code for one pi extension here, never in `src/` or `webview/`. Code in `integrations/` can import from the core; the core imports only the two lists.
@@ -34,7 +36,7 @@ There are no unit tests. If a change is visual or depends on timing, check it in
 - Split long files into sections with the existing divider comments:
   - TS: `// ------------------------------------------------------------------ name`
   - CSS: `/* ---------------------------------------------------------------- name */`
-- The host and the webview talk with `{ type: "…" }` messages. The handlers are `onWebviewMessage` in `controller.ts` and the `window.addEventListener("message", …)` switch in `main.ts`. If you add a message, add it to both sides.
+- The host and the webview talk with `{ type: "…" }` messages. The handlers are `onWebviewMessage` in `controller.ts` and `receive()` in `chat.ts`. If you add a message, add it to both sides.
 - Do not send large data to the webview. For example, `slimTree()` sends previews, not full tool outputs.
 - Never let two pi processes write to the same session file (see the terminal hand-off and `withoutSessionArgs`).
 - Remote-SSH: build file URIs on the extension host (`vscode.Uri.file`). Open files with `vscode.open`. Do not open a local browser for a remote file.

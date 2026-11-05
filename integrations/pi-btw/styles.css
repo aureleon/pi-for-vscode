@@ -1,8 +1,8 @@
 /* pi-btw integration: side panel, its toggle button, and links in the main transcript.
    Loaded by integrations/pi-btw/web.ts. Uses the theme tokens of webview/styles.css. */
 
-/* The panel is a sibling of #app in <body>. Wide views split left/right. */
-@media (min-width: 640px) { body { flex-direction: row; } }
+/* The panel is a sibling of #app in the chat's frame. Wide frames split left/right. */
+.chat-frame.wide { flex-direction: row; }
 
 /* ---------------------------------------------------------------- toggle button */
 .btw-toggle { position: relative; }
@@ -27,13 +27,11 @@
   background: transparent; border-top: 1px solid var(--border); margin-top: -2px;
   touch-action: none;
 }
-.side-splitter:hover, body.side-resizing .side-splitter { background: var(--accent); opacity: .6; }
-body.side-resizing { user-select: none; cursor: row-resize; }
-@media (min-width: 640px) {
-  .side-panel { flex-basis: min(var(--side-w, min(42%, 520px)), calc(100% - 260px)); }
-  .side-splitter { cursor: col-resize; border-top: none; border-left: 1px solid var(--border); margin: 0 0 0 -2px; }
-  body.side-resizing { cursor: col-resize; }
-}
+.side-splitter:hover, .side-resizing .side-splitter { background: var(--accent); opacity: .6; }
+.side-resizing { user-select: none; cursor: row-resize; }
+.chat-frame.wide .side-panel { flex-basis: min(var(--side-w, min(42%, 520px)), calc(100% - 260px)); }
+.chat-frame.wide .side-splitter { cursor: col-resize; border-top: none; border-left: 1px solid var(--border); margin: 0 0 0 -2px; }
+.chat-frame.wide.side-resizing { cursor: col-resize; }
 /* Side panel header: one row at VS Code's title-bar height. Title left; text actions,
    icon actions and the close button right-aligned with toolbar-sized hit areas. */
 .sp-header {

@@ -14,10 +14,10 @@ let sidebar: PiController | undefined;
 let lastActive: PiController | undefined;
 
 /**
- * `header`: render the in-webview session row (sidebar only; editor tabs use their own title bar).
- * `readonly`: the session viewer, with no composer.
+ * `tiles`: the sidebar, which holds one or more chats in tiles, each with its header row.
+ * `readonly`: the session viewer, with no composer. Editor tabs use their own title bar.
  */
-function html(webview: vscode.Webview, extUri: vscode.Uri, opts: { header?: boolean; readonly?: boolean } = {}): string {
+function html(webview: vscode.Webview, extUri: vscode.Uri, opts: { tiles?: boolean; readonly?: boolean } = {}): string {
   const nonce = crypto.randomBytes(16).toString("base64");
   const script = webview.asWebviewUri(vscode.Uri.joinPath(extUri, "dist", "webview.js"));
   const style = webview.asWebviewUri(vscode.Uri.joinPath(extUri, "webview", "styles.css"));
@@ -38,8 +38,7 @@ function html(webview: vscode.Webview, extUri: vscode.Uri, opts: { header?: bool
 <link rel="stylesheet" href="${style}">
 <title>Pi</title>
 </head>
-<body data-logo="${logo}"${opts.header ? ' data-header="1"' : ""}${opts.readonly ? ' data-readonly="1"' : ""}>
-<div id="app"></div>
+<body data-logo="${logo}"${opts.tiles ? ' data-tiles="1"' : ""}${opts.readonly ? ' data-readonly="1"' : ""}>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
 </html>`;
@@ -52,37 +51,204 @@ function webviewOptions(extUri: vscode.Uri): vscode.WebviewOptions {
   };
 }
 
+// ------------------------------------------------------------------ sidebar tiles
+
+/** Most tiles in the sidebar (also `MAX_TILES` in webview/chat.ts). */
+const MAX_TILES = 4;
+const TILES_KEY = "pi.sidebarTiles";
+
+interface TileState {
+  id: string;
+  /** Share of the space (flex-grow in the webview). */
+  size: number;
+}
+
+/**
+ * The chats in the sidebar view, one per tile. Each tile has its own PiController. The tiles share the
+ * view's webview: messages carry the tile id (`{ tile, msg }`), and `tiles:*` messages change the layout.
+ * The first tile is the primary chat (it resumes the workspace's last session); each tile keeps its own tabs.
+ */
+class SidebarTiles implements vscode.Disposable {
+  private tiles: TileState[];
+  private chats = new Map<string, { c: PiController; inbox: vscode.EventEmitter<any>; badge: number; tooltip?: string }>();
+  private subs: vscode.Disposable[] = [];
+
+  constructor(private readonly context: vscode.ExtensionContext, private readonly view: vscode.WebviewView) {
+    const saved = context.workspaceState.get<TileState[]>(TILES_KEY) ?? [];
+    this.tiles = saved.filter((t) => typeof t?.id === "string").slice(0, MAX_TILES);
+    if (!this.tiles.length) this.tiles = [{ id: "t1", size: 1 }];
+    for (const t of this.tiles) this.createChat(t.id);
+    this.subs.push(view.webview.onDidReceiveMessage((m) => this.onMessage(m)));
+  }
+
+  /** The chat of the first tile, for commands when no tile had focus yet. */
+  get first(): PiController | undefined {
+    return this.chats.get(this.tiles[0]?.id)?.c;
+  }
+
+  private createChat(id: string) {
+    const inbox = new vscode.EventEmitter<any>();
+    const host: ChatHost = {
+      webview: {
+        postMessage: (msg) => this.view.webview.postMessage({ tile: id, msg }),
+        onDidReceiveMessage: inbox.event,
+      },
+      // The native title is just "Pi Coding Agent"; each tile's header shows its session tabs.
+      setTitle: () => {},
+      setBadge: (count, tooltip) => {
+        const e = this.chats.get(id);
+        if (e) (e.badge = count), (e.tooltip = tooltip);
+        this.updateBadge();
+      },
+      reveal: () => {
+        this.view.show(true);
+        this.view.webview.postMessage({ type: "tiles:focus", tile: id });
+      },
+      openBeside: (file) => openPanel(this.context, file, { column: vscode.ViewColumn.Beside }),
+      kind: "sidebar",
+      closeChat: () => {
+        if (this.tiles.length < 2) return false;
+        // After the controller's own call returns.
+        setTimeout(() => this.removeTile(id), 0);
+        return true;
+      },
+    };
+    const first = id === "t1";
+    const c = new PiController(this.context, host, output, { primary: first, tabsKey: first ? "pi.sidebarTabs" : `pi.sidebarTabs:${id}` });
+    this.chats.set(id, { c, inbox, badge: 0 });
+    controllers.add(c);
+    if (!sidebar) sidebar = c;
+    lastActive ??= c;
+  }
+
+  /** One badge on the view: the sum of the tiles' badges. */
+  private updateBadge() {
+    const all = [...this.chats.values()];
+    const count = all.reduce((n, e) => n + e.badge, 0);
+    const tooltip = all.filter((e) => e.badge).map((e) => e.tooltip).filter(Boolean).join("\n");
+    this.view.badge = count > 0 ? { value: count, tooltip: tooltip || String(count) } : undefined;
+  }
+
+  private save() {
+    this.context.workspaceState.update(TILES_KEY, this.tiles);
+  }
+
+  private sendLayout() {
+    this.view.webview.postMessage({ type: "tiles:layout", tiles: this.tiles });
+  }
+
+  private onMessage(m: any) {
+    if (m?.tile && !m.type) {
+      this.chats.get(m.tile)?.inbox.fire(m.msg);
+      return;
+    }
+    switch (m?.type) {
+      case "tiles:ready":
+        this.sendLayout();
+        break;
+      case "tiles:split":
+        this.split(String(m.tile));
+        break;
+      case "tiles:close":
+        void this.closeTile(String(m.tile));
+        break;
+      case "tiles:sizes":
+        for (const t of this.tiles) if (typeof m.sizes?.[t.id] === "number") t.size = m.sizes[t.id];
+        this.save();
+        break;
+      case "tiles:focus": {
+        const c = this.chats.get(m.tile)?.c;
+        if (c) sidebar = lastActive = c;
+        break;
+      }
+    }
+  }
+
+  /** Add a tile after `id` with a new session. The two tiles share the space of the old one. */
+  private split(id: string) {
+    if (this.tiles.length >= MAX_TILES) return;
+    const i = Math.max(0, this.tiles.findIndex((t) => t.id === id));
+    const src = this.tiles[i];
+    let n = 2;
+    while (this.tiles.some((t) => t.id === `t${n}`)) n++;
+    const half = (src?.size ?? 1) / 2;
+    if (src) src.size = half;
+    const tile = { id: `t${n}`, size: half || 1 };
+    this.tiles.splice(i + 1, 0, tile);
+    // A tile id can come back after a close: start it without the old tile's tabs.
+    this.context.workspaceState.update(`pi.sidebarTabs:${tile.id}`, undefined);
+    this.context.workspaceState.update(`pi.sidebarTabs:${tile.id}:shown`, undefined);
+    this.createChat(tile.id);
+    this.save();
+    this.sendLayout();
+    this.view.webview.postMessage({ type: "tiles:focus", tile: tile.id });
+  }
+
+  /** Close a tile from its menu. A tile whose sessions work asks first. */
+  private async closeTile(id: string) {
+    const e = this.chats.get(id);
+    if (!e || this.tiles.length < 2) return;
+    if (e.c.hasWork) {
+      const pick = await vscode.window.showWarningMessage("Pi: a session in this tile is still working. Stop it and close the tile?", { modal: true }, "Stop and Close");
+      if (pick !== "Stop and Close") return;
+    }
+    this.removeTile(id);
+  }
+
+  private removeTile(id: string) {
+    const i = this.tiles.findIndex((t) => t.id === id);
+    const e = this.chats.get(id);
+    if (i < 0 || !e || this.tiles.length < 2) return;
+    const [gone] = this.tiles.splice(i, 1);
+    // The neighbour takes the space.
+    const nb = this.tiles[Math.max(0, i - 1)];
+    nb.size += gone.size;
+    this.chats.delete(id);
+    e.c.dispose();
+    e.inbox.dispose();
+    controllers.delete(e.c);
+    const next = this.chats.get(nb.id)?.c;
+    if (sidebar === e.c) sidebar = next;
+    if (lastActive === e.c) lastActive = next;
+    this.context.workspaceState.update(`pi.sidebarTabs:${id}`, undefined);
+    this.context.workspaceState.update(`pi.sidebarTabs:${id}:shown`, undefined);
+    this.updateBadge();
+    this.save();
+    this.sendLayout();
+    this.view.webview.postMessage({ type: "tiles:focus", tile: nb.id });
+  }
+
+  dispose() {
+    for (const e of this.chats.values()) {
+      e.c.dispose();
+      e.inbox.dispose();
+      controllers.delete(e.c);
+      if (sidebar === e.c) sidebar = undefined;
+      if (lastActive === e.c) lastActive = undefined;
+    }
+    this.chats.clear();
+    for (const d of this.subs) d.dispose();
+  }
+}
+
 class SidebarProvider implements vscode.WebviewViewProvider {
+  private tiles?: SidebarTiles;
+
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
     view.webview.options = webviewOptions(this.context.extensionUri);
-    const host: ChatHost = {
-      webview: view.webview,
-      // The native title is just "Pi Coding Agent"; the webview's own header row shows
-      // the session name next to the session actions.
-      setTitle: () => {},
-      setBadge: (count, tooltip) => {
-        view.badge = count > 0 ? { value: count, tooltip: tooltip ?? String(count) } : undefined;
-      },
-      reveal: () => view.show(true),
-      openBeside: (file) => openPanel(this.context, file, { column: vscode.ViewColumn.Beside }),
-      kind: "sidebar",
-    };
-    // A re-resolved view (e.g. moved to another container) gets a fresh controller
-    // bound to the new webview; the previous one is disposed with its process.
-    sidebar?.dispose();
-    const c = new PiController(this.context, host, output, { primary: true, tabsKey: "pi.sidebarTabs" });
-    sidebar = c;
-    lastActive = c;
-    controllers.add(c);
-    view.onDidChangeVisibility(() => view.visible && (lastActive = c));
+    // A re-resolved view (e.g. moved to another container) gets fresh chats bound to the new
+    // webview; the previous ones are disposed with their processes.
+    this.tiles?.dispose();
+    const tiles = new SidebarTiles(this.context, view);
+    this.tiles = tiles;
+    view.onDidChangeVisibility(() => view.visible && (lastActive = sidebar ?? tiles.first));
     view.onDidDispose(() => {
-      c.dispose();
-      controllers.delete(c);
-      if (sidebar === c) sidebar = undefined;
+      tiles.dispose();
+      if (this.tiles === tiles) this.tiles = undefined;
     });
-    view.webview.html = html(view.webview, this.context.extensionUri, { header: true });
+    view.webview.html = html(view.webview, this.context.extensionUri, { tiles: true });
   }
 }
 

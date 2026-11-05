@@ -10,9 +10,13 @@ export const btwWeb: WebIntegration = {
   id: "pi-btw",
   matches: hasPiBtw,
   create(api) {
-    const style = document.createElement("style");
-    style.textContent = css;
-    document.head.appendChild(style);
+    // Once per page: the sidebar can hold several chats.
+    if (!document.getElementById("style-pi-btw")) {
+      const style = document.createElement("style");
+      style.id = "style-pi-btw";
+      style.textContent = css;
+      document.head.appendChild(style);
+    }
 
     const button = api.addToolbarButton({ icon: SIDE_ICON, title: "Toggle BTW Side Panel", onClick: () => panel.toggle() });
     button.classList.add("btw-toggle", "hidden");
