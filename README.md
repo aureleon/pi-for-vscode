@@ -4,6 +4,8 @@ Use the [Pi coding agent](https://pi.dev) in the VS Code sidebar, in a UI like C
 
 The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the workspace folder. Your Pi setup applies without changes: settings, models, auth, **extensions**, skills, prompt templates, MCP adapters, and sessions.
 
+<p align="center"><img src="media/screenshots/chat.png" width="440" alt="A chat in the sidebar: session tabs, tool cards with a diff, and the composer"></p>
+
 ## Features
 
 ### Chat
@@ -23,6 +25,8 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - The model menu lists the models in Pi's `enabledModels`, or all models if the setting is empty.
 - The effort (thinking level) slider is at the bottom of the same menu.
 
+<img src="media/screenshots/models.png" width="440" alt="The model menu with the effort slider">
+
 ### Sessions
 - Resume or fork from a searchable list. Archive a session to hide it from the list.
 - Rename the current session: double-click its name in the sidebar header, or use *Rename Session…* (in the sidebar's *More Actions* menu, the tab's overflow menu, or the command palette). `/name <name>` also works.
@@ -41,6 +45,9 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - A session is open in one chat only. If you open a session that another chat has open, that chat comes to the front. The session list shows such sessions as "other chat".
 
 ### Tiles
+
+![Two tiles side by side: a finished session and a session that works, with a queued message and a todo widget](media/screenshots/tiles.png)
+
 - Split the sidebar into up to 4 chats with the split button in the header. Each tile has its own session tabs and runs its own sessions. The new tile shows a new session at once: it takes the tile's spare process.
 - Tiles stack top to bottom, or sit side by side when the sidebar is wide enough. All tiles have the same size after a split or a close. Drag the line between two tiles to resize them; double-click it to make all tiles the same size again.
 - Drag a tab out of its tabs into the chat to open it in a new tile, on the half where you drop it. Drag it to another tile's tabs or middle to move it there, or to that tile's edge for a new tile next to it. The label at the pointer says what the drop does.
@@ -131,7 +138,7 @@ npm install
 npm run build        # or: npm run watch
 npm run typecheck
 npm run package      # creates pi-for-vscode-<version>.vsix
-code --install-extension pi-for-vscode-0.2.0.vsix
+code --install-extension pi-for-vscode-0.2.1.vsix
 ```
 
 To debug, press <kbd>F5</kbd> with `.vscode/launch.json` ("Run Extension"). Logs from pi's stderr go to the **Pi** output channel.

@@ -2,7 +2,7 @@
   "name": "pi-for-vscode",
   "displayName": "Pi Coding Agent",
   "description": "Use the Pi coding agent (with all your Pi extensions, skills and prompts) from the VS Code sidebar.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "dhguz",
   "license": "MIT",
   "engines": {
@@ -48,7 +48,7 @@
       },
       {
         "command": "pi.history",
-        "title": "Pi: Resume Session\u2026",
+        "title": "Pi: Resume Session…",
         "icon": "$(history)"
       },
       {
@@ -67,7 +67,7 @@
       },
       {
         "command": "pi.renameSession",
-        "title": "Pi: Rename Session\u2026",
+        "title": "Pi: Rename Session…",
         "icon": "$(edit)"
       },
       {
@@ -96,7 +96,7 @@
       },
       {
         "command": "pi.viewSession",
-        "title": "Pi: View Session File (Read-Only)\u2026"
+        "title": "Pi: View Session File (Read-Only)…"
       },
       {
         "command": "pi.tree",
@@ -217,7 +217,7 @@
         "pi.useLoginShellEnv": {
           "type": "boolean",
           "default": true,
-          "description": "Load environment variables (PATH, API keys, \u2026) from your login shell before starting pi."
+          "description": "Load environment variables (PATH, API keys, …) from your login shell before starting pi."
         },
         "pi.terminalLocation": {
           "type": "string",

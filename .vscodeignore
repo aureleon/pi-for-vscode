@@ -5,7 +5,7 @@
 !dist/integrations/*.mjs
 !dist/workarounds/*.mjs
 !webview/styles.css
-!media/**
+!media/*
 !package.json
 !README.md
 !LICENSE
