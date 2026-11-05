@@ -189,12 +189,17 @@ class SidebarTiles implements vscode.Disposable {
 
   /** Add a tile after `id` with a new session. All tiles get the same size again. */
   private split(id: string) {
-    this.addTile(id, "after");
+    // The tile's spare process has a new session ready: the new tile shows it at once.
+    const handover = this.chats.get(id)?.c.takeSpare();
+    this.addTile(id, "after", handover ? { tabs: [], shown: handover.file ?? "", handover } : undefined);
   }
 
   /** Add a tile before or after `id`. `start`: its tabs (a tab dragged out); else a new session. */
   private addTile(id: string, side: "before" | "after", start?: { tabs: Tab[]; shown: string; handover?: Handover }) {
-    if (this.tiles.length >= MAX_TILES) return;
+    if (this.tiles.length >= MAX_TILES) {
+      start?.handover?.pi.stop();
+      return;
+    }
     const i = Math.max(0, this.tiles.findIndex((t) => t.id === id));
     let n = 2;
     while (this.tiles.some((t) => t.id === `t${n}`)) n++;

@@ -41,7 +41,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - A session is open in one chat only. If you open a session that another chat has open, that chat comes to the front. The session list shows such sessions as "other chat".
 
 ### Tiles
-- Split the sidebar into up to 4 chats with the split button in the header. Each tile has its own session tabs and runs its own sessions.
+- Split the sidebar into up to 4 chats with the split button in the header. Each tile has its own session tabs and runs its own sessions. The new tile shows a new session at once: it takes the tile's spare process.
 - Tiles stack top to bottom, or sit side by side when the sidebar is wide enough. All tiles have the same size after a split or a close. Drag the line between two tiles to resize them; double-click it to make all tiles the same size again.
 - Drag a tab out of its tabs into the chat to open it in a new tile, on the half where you drop it. Drag it to another tile's tabs or middle to move it there, or to that tile's edge for a new tile next to it. The label at the pointer says what the drop does.
 - Drag a tile by the empty part of its header: to the middle of another tile to merge the two into tabs, or to its edge to move the tile.
