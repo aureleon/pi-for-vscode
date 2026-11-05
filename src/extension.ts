@@ -3,10 +3,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { ARCHIVED_SESSIONS_KEY, PiController, type ChatHost } from "./controller";
+import { PiController, type ChatHost } from "./controller";
 import { createPiTerminal } from "./piTerminal";
 import { SessionViewer } from "./sessionViewer";
-import { defaultSessionDir, listSessions, relativeTime } from "./sessions";
+import { defaultSessionDir } from "./sessions";
 
 let output: vscode.OutputChannel;
 const controllers = new Set<PiController>();
@@ -132,78 +132,6 @@ function openPanel(context: vscode.ExtensionContext, sessionFile?: string, opts:
   panel.webview.html = html(panel.webview, context.extensionUri);
 }
 
-// ------------------------------------------------------------------ tiles
-
-/** A new chat in a new editor group to the right of (or below) the active group. */
-async function splitChat(context: vscode.ExtensionContext, direction: "right" | "down") {
-  // The command adds the group and makes it the active one.
-  await vscode.commands.executeCommand(direction === "right" ? "workbench.action.newGroupRight" : "workbench.action.newGroupBelow");
-  openPanel(context, undefined, { column: vscode.ViewColumn.Active });
-}
-
-const isPiTab = (t: vscode.Tab) => t.input instanceof vscode.TabInputWebview && /pi\.panel$/.test(t.input.viewType);
-
-/** Cells per row of a grid for `n` tiles: 2 side by side, 3 in columns, 4 as 2×2, 5–6 as 3+2 and 3×2. */
-function gridRows(n: number): number[] {
-  const cols = n <= 3 ? n : n === 4 ? 2 : 3;
-  const rows: number[] = [];
-  for (let left = n; left > 0; left -= cols) rows.push(Math.min(cols, left));
-  return rows;
-}
-
-const GRID_MAX = 6;
-
-/**
- * Pick sessions and open each one in a cell of an editor grid. The grid takes the right part of the
- * editor area, and the open editors stay on the left. When only Pi tabs are open, it takes the whole area.
- */
-async function openGrid(context: vscode.ExtensionContext) {
-  const cwd = workspaceCwd();
-  const archived = new Set(context.globalState.get<string[]>(ARCHIVED_SESSIONS_KEY, []));
-  const sessions = (await listSessions(defaultSessionDir(cwd), 150))
-    .filter((s) => s.messageCount > 0 && !archived.has(s.file) && !PiController.ownerOf(s.file));
-  if (!sessions.length) {
-    vscode.window.showInformationMessage("Pi: there are no other sessions for this folder to open.");
-    return;
-  }
-  const picks = await vscode.window.showQuickPick(
-    sessions.map((s) => ({
-      label: s.name || s.firstMessage?.split("\n")[0].slice(0, 120) || "(empty session)",
-      description: `${relativeTime(s.mtime)} · ${s.messageCount} msg${s.messageCount === 1 ? "" : "s"}`,
-      file: s.file,
-    })),
-    { canPickMany: true, placeHolder: `Select up to ${GRID_MAX} sessions to open side by side`, matchOnDescription: true },
-  );
-  if (!picks?.length) return;
-  if (picks.length > GRID_MAX) vscode.window.showInformationMessage(`Pi: opened the first ${GRID_MAX} sessions. The grid has room for ${GRID_MAX}.`);
-  const files = picks.slice(0, GRID_MAX).map((p) => p.file);
-
-  const groups = vscode.window.tabGroups.all;
-  const editors = groups.some((g) => g.tabs.some((t) => !isPiTab(t)));
-  if (editors && groups.length > 1) {
-    const ok = await vscode.window.showInformationMessage(
-      "Pi: the grid changes the editor layout. Your open editors move into one group on the left.",
-      { modal: true },
-      "Open Grid",
-    );
-    if (ok !== "Open Grid") return;
-    await vscode.commands.executeCommand("workbench.action.joinAllGroups");
-  }
-  const rows = gridRows(files.length);
-  const cells = (k: number, size?: number) => Array.from({ length: k }, () => (size ? { size } : {}));
-  // Nested groups alternate between horizontal (0) and vertical (1).
-  const grid = rows.length === 1 ? cells(rows[0]) : rows.map((k) => ({ groups: cells(k) }));
-  const layout = !editors
-    ? { orientation: rows.length === 1 ? 0 : 1, groups: grid }
-    : rows.length === 1
-      ? { orientation: 0, groups: [{ size: 0.4 }, ...cells(rows[0], 0.6 / rows[0])] }
-      : { orientation: 0, groups: [{ size: 0.4 }, { size: 0.6, groups: grid }] };
-  await vscode.commands.executeCommand("vscode.setEditorLayout", layout);
-  // View columns count the groups from left to right and top to bottom.
-  const first = editors ? 2 : 1;
-  files.forEach((f, i) => openPanel(context, f, { column: first + i, preserveFocus: i > 0 }));
-}
-
 const workspaceCwd = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
 
 /** Open a session file read-only in a new tab. The tab shows new entries as pi writes them. */
@@ -255,9 +183,6 @@ export function activate(context: vscode.ExtensionContext) {
 
   cmd("pi.focus", () => vscode.commands.executeCommand("pi.chat.focus"));
   cmd("pi.openInTab", () => openPanel(context));
-  cmd("pi.splitRight", () => splitChat(context, "right"));
-  cmd("pi.splitDown", () => splitChat(context, "down"));
-  cmd("pi.openGrid", () => openGrid(context));
   cmd("pi.showRunning", () => PiController.pickRunning());
   // Editor tabs come back after a reload. The webview keeps its session file in its state (see `persistSession` in webview/main.ts).
   context.subscriptions.push(
