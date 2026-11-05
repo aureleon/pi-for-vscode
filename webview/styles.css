@@ -82,6 +82,35 @@ body.has-topbar #app.scrolled::before { box-shadow: none; }
   border: 1px solid var(--vscode-focusBorder); border-radius: 2px; outline: none;
 }
 .topbar-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+/* Session tabs: the shown tab has the normal text colour and an accent underline, the others are muted. */
+.topbar:has(.tb-tabs) { padding-left: 4px; }
+.tb-tabs { flex: 1; min-width: 0; height: 100%; display: flex; align-items: stretch; overflow-x: auto; scrollbar-width: none; }
+.tb-tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: 0 1 auto; min-width: 56px; max-width: 160px; display: flex; align-items: center; gap: 2px;
+  padding: 0 2px 0 8px; cursor: pointer; color: var(--muted); font-size: 12px; position: relative;
+}
+.tab:hover { color: var(--vscode-foreground); }
+.tab.active { color: var(--vscode-foreground); cursor: default; flex-shrink: .25; min-width: min(110px, 45%); }
+.tab.active::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 0; height: 1px; background: var(--accent); }
+.tab-label { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab .topbar-title { flex: 0 1 auto; }
+.tab .topbar-rename { margin-left: 0; width: 140px; flex: none; }
+.tab:has(.topbar-rename) { max-width: none; }
+.tab-mark, .tab-close { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; }
+.tab-mark { font-size: 9px; color: var(--accent); }
+.tab-mark:empty { display: none; }
+.tab-mark .spinner { width: 11px; height: 11px; }
+.tab-close {
+  padding: 1px; border: none; border-radius: 4px; background: none; cursor: pointer; color: inherit; visibility: hidden;
+}
+.tab-close svg { width: 14px; height: 14px; }
+.tab-close:hover { background: var(--vscode-toolbar-hoverBackground); }
+.tab.active .tab-close, .tab:hover .tab-close { visibility: visible; }
+/* A mark (spinner, unread dot) takes the place of the close button until hover. */
+.tab:has(.tab-mark:not(:empty)) .tab-close { display: none; }
+.tab:hover:has(.tab-mark:not(:empty)) .tab-mark { display: none; }
+.tab:hover:has(.tab-mark:not(:empty)) .tab-close { display: inline-flex; visibility: visible; }
 .topbar .sp-icon { position: relative; }
 .topbar .sp-icon.active { background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
 .messages { display: flex; flex-direction: column; }

@@ -152,6 +152,22 @@ interface Session {
   claim?: string;
 }
 
+/** How a chat starts. */
+export interface ChatOptions {
+  /** The sidebar chat: it resumes the last session of the workspace. */
+  primary: boolean;
+  sessionFile?: string;
+  /** Show session tabs in the header, and keep them in workspace state under this key. */
+  tabsKey?: string;
+}
+
+/** A session tab in the header. Tabs of idle sessions have no process; opening one resumes its file. */
+interface Tab {
+  /** Session key (see `sessionKey`): the session file, or `bg:<id>` without a file. */
+  key: string;
+  title: string;
+}
+
 interface StartOptions {
   /** Keep the current session running in the background if it is busy. */
   keepRunning?: boolean;
@@ -205,8 +221,9 @@ export class PiController implements vscode.Disposable {
     private readonly context: vscode.ExtensionContext,
     private readonly host: ChatHost,
     private readonly output: vscode.OutputChannel,
-    private readonly options: { primary: boolean; sessionFile?: string },
+    private readonly options: ChatOptions,
   ) {
+    if (options.tabsKey) this.tabs = (context.workspaceState.get<Tab[]>(options.tabsKey) ?? []).filter((t) => typeof t?.key === "string");
     this.disposables.push(host.webview.onDidReceiveMessage((m) => this.onWebviewMessage(m)));
     const enabled = vscode.workspace.getConfiguration("pi").get<Record<string, boolean>>("workarounds", {}) ?? {};
     this.modules = hostModules((id) => enabled[id] !== false);
@@ -439,6 +456,7 @@ export class PiController implements vscode.Disposable {
       this.background.delete(s);
       s.pi.stop();
     }
+    this.unread.add(this.sessionKey(s));
     this.updateStatus();
     const title = this.titleOf(s);
     vscode.window.showInformationMessage(`Pi finished "${title}" in the background.`, "Open").then((pick) => {
@@ -648,6 +666,85 @@ export class PiController implements vscode.Disposable {
 
   private updateTitle() {
     this.host.setTitle(this.state.sessionName || this.active?.webTitle, !!this.active && this.isBusy(this.active));
+    this.syncTabs();
+  }
+
+  // ---------------------------------------------------------------- tabs
+
+  /** Session tabs of the header, in order. */
+  private tabs: Tab[] = [];
+  /** Tabs whose session finished in the background and that the user has not looked at yet. */
+  private unread = new Set<string>();
+  /** Key of the tab shown last. A new session gets its tab after it. */
+  private shownKey?: string;
+
+  /** The session of a tab, if it has a process. */
+  private sessionOfTab(key: string): Session | undefined {
+    if (this.active && this.sessionKey(this.active) === key) return this.active;
+    return [...this.background].find((b) => this.sessionKey(b) === key);
+  }
+
+  /**
+   * Add tabs for the shown session and the background sessions, update the titles and send the tabs to
+   * the webview. A tab of a session that was never written (an empty new session) goes away when you leave it.
+   */
+  private syncTabs() {
+    if (!this.options.tabsKey) return;
+    const a = this.active;
+    const key = a && (a.state.sessionFile || a.state.sessionId) ? this.sessionKey(a) : undefined;
+    if (key && !this.tabs.some((t) => t.key === key)) {
+      const i = this.tabs.findIndex((t) => t.key === this.shownKey);
+      this.tabs.splice(i < 0 ? this.tabs.length : i + 1, 0, { key, title: "" });
+    }
+    for (const b of this.background) {
+      const k = this.sessionKey(b);
+      if (!this.tabs.some((t) => t.key === k)) this.tabs.push({ key: k, title: "" });
+    }
+    if (key) {
+      this.shownKey = key;
+      this.unread.delete(key);
+    }
+    this.tabs = this.tabs.filter((t) => {
+      const s = this.sessionOfTab(t.key);
+      if (s) t.title = this.titleOf(s);
+      return !!s || (!t.key.startsWith("bg:") && fs.existsSync(t.key));
+    });
+    this.post({
+      type: "tabs",
+      tabs: this.tabs.map((t) => {
+        const s = this.sessionOfTab(t.key);
+        return { key: t.key, title: t.title || "Untitled session", shown: t.key === key, busy: !!s && this.isBusy(s), unread: this.unread.has(t.key) };
+      }),
+    });
+    this.context.workspaceState.update(this.options.tabsKey, this.tabs.filter((t) => !t.key.startsWith("bg:")));
+  }
+
+  /** Close a tab. A session that works stops (after a question). Closing the shown tab shows its neighbour. */
+  private async closeTab(key: string) {
+    const i = this.tabs.findIndex((t) => t.key === key);
+    if (i < 0) return;
+    const s = this.sessionOfTab(key);
+    const shown = !!s && s === this.active;
+    if (shown) this.assertNoTerminal();
+    if (s && this.isBusy(s)) {
+      const pick = await vscode.window.showWarningMessage(`Pi: "${this.titleOf(s)}" is still working. Stop it and close the tab?`, { modal: true }, "Stop and Close");
+      if (pick !== "Stop and Close") return;
+      s.pi.stop();
+      s.state.isStreaming = false;
+    }
+    this.tabs.splice(i, 1);
+    this.unread.delete(key);
+    if (!shown) {
+      if (s) this.background.delete(s);
+      this.updateStatus();
+      return;
+    }
+    const next = this.tabs[Math.min(i, this.tabs.length - 1)];
+    if (next) return this.openSession(next.key);
+    if (this.pi?.running) {
+      const r = await this.req({ type: "new_session" });
+      if (!r?.cancelled) await this.sendInit("reset");
+    } else await this.start(undefined, undefined, { fresh: true });
   }
 
   // ---------------------------------------------------------------- pi -> ui
@@ -824,6 +921,12 @@ export class PiController implements vscode.Disposable {
         case "title":
           if (this.active) this.active.webTitle = m.title;
           this.updateTitle();
+          break;
+        case "tabPick":
+          await this.openSession(String(m.key));
+          break;
+        case "tabClose":
+          await this.closeTab(String(m.key));
           break;
         case "runCommand":
           // Overflow menu of the sidebar header row; only our own commands.

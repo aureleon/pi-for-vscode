@@ -72,7 +72,7 @@ class SidebarProvider implements vscode.WebviewViewProvider {
     // A re-resolved view (e.g. moved to another container) gets a fresh controller
     // bound to the new webview; the previous one is disposed with its process.
     sidebar?.dispose();
-    const c = new PiController(this.context, host, output, { primary: true });
+    const c = new PiController(this.context, host, output, { primary: true, tabsKey: "pi.sidebarTabs" });
     sidebar = c;
     lastActive = c;
     controllers.add(c);

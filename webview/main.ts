@@ -59,7 +59,7 @@ const I = {
 const app = document.getElementById("app")!;
 app.innerHTML = `
   <header id="topbar" class="topbar hidden">
-    <span id="topbar-title" class="topbar-title placeholder">Loading…</span>
+    <div id="tb-tabs" class="tb-tabs" role="tablist"><div class="tab active" role="tab"><span id="topbar-title" class="topbar-title tab-label placeholder">Loading…</span></div></div>
     <span class="topbar-actions">
       <button class="sp-icon" id="tb-terminal" title="Continue Session in Terminal" aria-label="Continue session in terminal">${I.terminal}</button>
       <button class="sp-icon" id="tb-tree" title="Session Tree (/tree)" aria-label="Session tree">${I.tree}</button>
@@ -1409,6 +1409,65 @@ if (document.body.dataset.header) {
   document.addEventListener("click", (e) => !menu.contains(e.target as Node) && closeMenu());
   window.addEventListener("blur", closeMenu);
   $("topbar-title").addEventListener("dblclick", renameInline);
+  // A vertical wheel scrolls the tabs sideways.
+  $("tb-tabs").addEventListener("wheel", (e) => {
+    if (!e.deltaY || e.deltaX) return;
+    $("tb-tabs").scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
+}
+
+/** A session tab in the sidebar header (see `syncTabs` in controller.ts). */
+interface TabInfo {
+  key: string;
+  title: string;
+  shown: boolean;
+  busy: boolean;
+  unread: boolean;
+}
+
+/**
+ * Draw the session tabs. The shown tab uses `#topbar-title` as its label, so the title, the loading
+ * state and the rename in place work as without tabs. Other tabs show the title that the host sends.
+ */
+let pendingTabs: TabInfo[] | undefined;
+function renderTabs(tabs: TabInfo[]) {
+  const strip = $("tb-tabs");
+  const titleEl = $("topbar-title");
+  // Do not take the rename box away while the user types; draw the tabs when the rename ends.
+  if (strip.querySelector(".topbar-rename")) {
+    pendingTabs = tabs;
+    return;
+  }
+  pendingTabs = undefined;
+  strip.replaceChildren();
+  for (const t of tabs) {
+    const tab = el("div", `tab${t.shown ? " active" : ""}${t.busy ? " busy" : ""}${t.unread ? " unread" : ""}`);
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(t.shown));
+    if (t.shown) {
+      tab.append(titleEl);
+    } else {
+      const label = el("span", "tab-label", escapeHtml(t.title));
+      tab.title = t.busy ? `${t.title}\nWorking…` : t.unread ? `${t.title}\nFinished in the background` : t.title;
+      tab.append(label);
+    }
+    // While the session works, the π spinner sits where the close button is; hover shows the button.
+    const mark = el("span", "tab-mark", t.busy ? SPINNER : t.unread ? "●" : "");
+    const close = el("button", "tab-close", I.close);
+    close.title = "Close Tab";
+    close.setAttribute("aria-label", "Close tab");
+    close.addEventListener("click", (e) => {
+      e.stopPropagation();
+      post({ type: "tabClose", key: t.key });
+    });
+    tab.append(mark, close);
+    tab.addEventListener("click", () => !t.shown && post({ type: "tabPick", key: t.key }));
+    // Middle click closes, like editor tabs.
+    tab.addEventListener("auxclick", (e) => e.button === 1 && post({ type: "tabClose", key: t.key }));
+    strip.append(tab);
+  }
+  strip.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 /**
@@ -1434,6 +1493,7 @@ function renameInline() {
     const name = box.value.trim();
     box.remove();
     titleEl.classList.remove("hidden");
+    if (pendingTabs) renderTabs(pendingTabs);
     if (save && name && name !== state.sessionName) post({ type: "builtin", name: "name", arg: name });
   };
   box.addEventListener("keydown", (e) => {
@@ -2652,6 +2712,9 @@ window.addEventListener("message", (ev) => {
       persistSession(state.sessionFile);
       updateModel();
       updateTitle();
+      break;
+    case "tabs":
+      if (document.body.dataset.header) renderTabs(m.tabs ?? []);
       break;
     case "stats":
       updateStats(m.stats);
