@@ -2193,6 +2193,8 @@ interface ListItem {
   running?: boolean;
   /** Open in a background process; can't be archived. */
   busy?: boolean;
+  /** Open in another chat (sidebar or tab); opening it shows that chat. */
+  elsewhere?: boolean;
   /** Id of the item this one is nested under (a forked or extension-started session). */
   parent?: string;
   depth?: number;
@@ -2276,7 +2278,7 @@ class ListMenu {
       }
       else if (e.key === "Backspace" && (e.metaKey || e.ctrlKey) && this.kind === "session") {
         const it = this.flat[this.sel];
-        if (it && !it.current && !it.busy) this.act(it, it.archived ? "unarchive" : "archive");
+        if (it && !it.current && !it.busy && !it.elsewhere) this.act(it, it.archived ? "unarchive" : "archive");
         e.preventDefault();
       } else if (e.key === "Escape") { this.hide(); e.preventDefault(); e.stopPropagation(); }
     });
@@ -2399,8 +2401,8 @@ class ListMenu {
           this.rename(it);
         });
         const b = el("button", "lm-action lm-archive", it.archived ? UNARCHIVE_ICON : ARCHIVE_ICON);
-        b.title = it.current ? "The current session can't be archived" : it.busy ? "A running session can't be archived" : it.archived ? "Unarchive (⌘⌫)" : "Archive: hide from this list (⌘⌫)";
-        b.disabled = !!it.current || !!it.busy;
+        b.title = it.current ? "The current session can't be archived" : it.busy ? "A running session can't be archived" : it.elsewhere ? "A session that is open in another chat can't be archived" : it.archived ? "Unarchive (⌘⌫)" : "Archive: hide from this list (⌘⌫)";
+        b.disabled = !!it.current || !!it.busy || !!it.elsewhere;
         b.addEventListener("click", (e) => {
           e.stopPropagation();
           this.act(it, it.archived ? "unarchive" : "archive");
