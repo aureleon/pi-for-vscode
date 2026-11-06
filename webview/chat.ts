@@ -6,6 +6,7 @@ import { SPINNER } from "./spinner";
 import { highlightMarkdown } from "./mdHighlight";
 import { StreamingMarkdown } from "./streamMd";
 import { fmtDuration } from "./duration";
+import { selectionMarkdown } from "./copyMd";
 
 // ------------------------------------------------------------------ markdown
 
@@ -417,16 +418,27 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
    * Copy of selected transcript text through the host clipboard. VS Code routes Cmd/Ctrl+C and the
    * menu's Copy to the webview itself, and that copy can do nothing (seen on table cells). The host
    * write is the same path as the code-block Copy button. Text fields keep the native copy.
+   * Rendered markdown is copied as markdown (`selectionMarkdown`), so bold, code and lists stay.
    */
   let lastCopy = { text: "", at: 0 };
-  function copySelection(): boolean {
+  function copySelection(e?: ClipboardEvent): boolean {
     const a = document.activeElement;
     if (a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement) return false;
     const sel = getSelection();
     // Several chats share the page (sidebar tiles): copy only a selection in this one.
     if (!sel || !frame.contains(sel.anchorNode)) return false;
-    const text = sel.toString();
+    let text = sel.toString();
     if (!text.trim()) return false;
+    try {
+      text = selectionMarkdown(sel) ?? text;
+    } catch (err) {
+      console.warn("pi: markdown copy failed", err);
+    }
+    // Also give the copy event the markdown, so the native copy does not put plain text over it.
+    if (e?.clipboardData) {
+      e.clipboardData.setData("text/plain", text);
+      e.preventDefault();
+    }
     // A keypress and the copy event that VS Code sends for it give the same text: write it once.
     const now = performance.now();
     if (text !== lastCopy.text || now - lastCopy.at > 500) post({ type: "copy", text, quiet: true });
@@ -437,7 +449,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     const mod = /Mac/.test(navigator.platform) ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
     if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "c") copySelection();
   }, true);
-  on(document, "copy", () => copySelection(), true);
+  on(document, "copy", (e) => copySelection(e as ClipboardEvent), true);
 
   // ------------------------------------------------------------------ timeline items
 
