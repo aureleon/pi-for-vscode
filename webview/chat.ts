@@ -2949,6 +2949,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     const same = !m.preview && !!shownSig && shownSig === sig && !state.isStreaming;
     shownSig = sig;
     if (same) {
+      // The kept view of an idle session can follow a busy one: stop the busy one's working line.
+      if (running) setRunning(false);
       updateTitle();
       updateModel();
       hideBanner();
