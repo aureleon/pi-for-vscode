@@ -758,13 +758,19 @@ export class PiController implements vscode.Disposable {
     return this.pi.request<T>(cmd);
   }
 
+  /** Take pi's state of `s`. A process that has another session now (new_session) loses the title of the one it had. */
+  private setSessionState(s: Session, state: any) {
+    if (s.state.sessionFile && state?.sessionFile !== s.state.sessionFile) s.webTitle = undefined;
+    s.state = state;
+  }
+
   private async refreshState() {
     const s = this.active;
     if (!s) return;
     try {
       const state = await this.req({ type: "get_state" });
       if (this.active !== s) return;
-      s.state = state;
+      this.setSessionState(s, state);
       if (this.state.sessionFile && this.options.primary) {
         this.context.workspaceState.update(LAST_SESSION_KEY, this.state.sessionFile);
       }
@@ -807,7 +813,7 @@ export class PiController implements vscode.Disposable {
       if (this.active !== s) return;
       // A newer switch of this process runs (a quick click on another tab): it sends its own snapshot.
       if (gen !== this.openGen && this.switching) return;
-      s.state = state;
+      this.setSessionState(s, state);
       this.setActiveModules(s, commands.commands);
       if (state.sessionFile && this.options.primary) {
         this.context.workspaceState.update(LAST_SESSION_KEY, state.sessionFile);
@@ -1416,8 +1422,11 @@ export class PiController implements vscode.Disposable {
           break;
         case "title": {
           // Only for the session that the title is of: after a click on a tab, the webview shows (and
-          // reports) that tab before this chat has switched to it.
-          const s = m.file ? [this.active, ...this.background, ...this.warm].find((x) => x && PiController.fileOf(x) === path.resolve(m.file)) : this.active;
+          // reports) that tab before this chat has switched to it. A title without a file is of a new session that
+          // pi has not reported yet (a click on +): it is not the title of the session that the process still has.
+          const s = m.file
+            ? [this.active, ...this.background, ...this.warm].find((x) => x && PiController.fileOf(x) === path.resolve(m.file))
+            : this.active && !PiController.fileOf(this.active) ? this.active : undefined;
           if (s) s.webTitle = m.title;
           this.updateTitle();
           break;
@@ -2180,7 +2189,7 @@ export class PiController implements vscode.Disposable {
     // A newer open, or a close of this tab, came while pi switched: it shows the next session.
     if (gen !== this.openGen) {
       if (s && s !== this.active && !r?.cancelled) void s.pi.request({ type: "get_state" }).then((st: any) => {
-        s.state = st;
+        this.setSessionState(s, st);
         this.syncTabs();
       }, () => {});
       return;
