@@ -1036,7 +1036,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         getToolCard(e.toolCallId, e.toolName, e.parentToolCallId).setResult(e.result, e.isError);
         break;
       case "queue_update":
-        renderQueue(e.steering ?? [], e.followUp ?? []);
+        renderQueue(e.steering ?? [], e.followUp ?? [], e.steeringImages ?? [], e.followUpImages ?? []);
         break;
       case "compaction_start":
         compacting = true;
@@ -1400,13 +1400,13 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   /**
    * Queued messages show as dimmed user messages at the end of the transcript, in the order pi
    * delivers them (steering first). Each one can be removed, moved back to the input box to edit,
-   * sent now, or dragged to reorder.
+   * sent now, or dragged to reorder. A message with images shows them as small thumbnails.
    */
-  function renderQueue(steering: string[], followUp: string[]) {
+  function renderQueue(steering: string[], followUp: string[], steeringImages: (any[] | null)[] = [], followUpImages: (any[] | null)[] = []) {
     const q = $("queue");
     const items = [
-      ...steering.map((text, index) => ({ text, index, kind: "steer" as QueueKind })),
-      ...followUp.map((text, index) => ({ text, index, kind: "followUp" as QueueKind })),
+      ...steering.map((text, index) => ({ text, index, kind: "steer" as QueueKind, images: steeringImages[index] ?? [] })),
+      ...followUp.map((text, index) => ({ text, index, kind: "followUp" as QueueKind, images: followUpImages[index] ?? [] })),
     ];
     q.classList.toggle("hidden", !items.length);
     q.innerHTML = "";
@@ -1420,6 +1420,16 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       const text = el("span", "queued-text");
       text.textContent = it.text.replace(/\s+/g, " ").trim();
       text.title = it.text;
+      const thumbs = el("span", "queued-images");
+      for (const img of it.images) {
+        if (!img?.data) continue;
+        const t = document.createElement("img");
+        t.src = `data:${img.mimeType};base64,${img.data}`;
+        t.alt = "Attached image";
+        t.draggable = false;
+        thumbs.appendChild(t);
+      }
+      thumbs.title = it.images.length === 1 ? "1 image" : `${it.images.length} images`;
       const actions = el("span", "queued-actions");
       const btn = (icon: string, title: string, fn: () => void) => {
         const b = el("button", "icon-btn", icon);
@@ -1436,7 +1446,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       btn(I.close, "Remove", () => op("remove"));
       const grip = el("span", "queued-grip", I.grip);
       grip.title = "Drag to reorder";
-      row.append(grip, tag, text, actions);
+      row.append(grip, tag, ...(thumbs.childElementCount ? [thumbs] : []), text, actions);
       row.addEventListener("dragstart", (e) => {
         queueDrag = { kind: it.kind, index: it.index };
         e.dataTransfer!.effectAllowed = "move";
@@ -2016,7 +2026,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   // ------------------------------------------------------------------ image preview
 
   /** Images that open enlarged on click: user and tool images, composer attachments, markdown images. */
-  const PREVIEWABLE = ".user-images img, img.tool-image, .attachment img, .md img";
+  const PREVIEWABLE = ".user-images img, img.tool-image, .attachment img, .queued-images img, .md img";
   let lightbox: HTMLElement | null = null;
 
   function openLightbox(src: string, alt: string) {
@@ -3080,6 +3090,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         break;
       case "restoreQueue":
         if (m.text) insertText(m.text, !input.value.trim());
+        for (const image of m.images ?? []) attachments.push({ kind: "image", image, name: "image" });
+        if (m.images?.length) renderAttachments();
         break;
       case "models":
         picker.setData(m.models, m.levels, m.recent, m.enabled, m.scopeSource, m.unmatched);
