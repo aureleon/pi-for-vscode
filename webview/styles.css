@@ -169,6 +169,8 @@ kbd {
 .queued-grip { flex: none; display: inline-flex; margin-right: -4px; color: var(--muted); opacity: .6; }
 .queued-grip svg { width: 14px; height: 14px; }
 .queued-msg:hover .queued-grip { opacity: 1; }
+.queued-images { flex: none; display: inline-flex; gap: 3px; }
+.queued-images img { height: 20px; max-width: 40px; object-fit: cover; border-radius: 3px; border: 1px solid var(--border); }
 .queued-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .queued-actions { flex: none; display: inline-flex; gap: 2px; visibility: hidden; }
 .queued-actions .icon-btn { padding: 3px; color: var(--muted); }
@@ -702,7 +704,7 @@ button.lm-twisty:hover { background: var(--vscode-toolbar-hoverBackground); colo
 }
 
 /* ---------------------------------------------------------------- image preview */
-.user-images img, img.tool-image, .attachment img, .md img { cursor: zoom-in; }
+.user-images img, img.tool-image, .attachment img, .queued-images img, .md img { cursor: zoom-in; }
 .md img { max-width: 100%; }
 .lightbox {
   position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
