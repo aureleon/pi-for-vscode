@@ -572,6 +572,12 @@ export class PiController implements vscode.Disposable {
     // A newer open (or a close of this tab) came while the environment loaded.
     if (gen !== this.openGen) return;
     env.PI_VSCODE = "1";
+    // Short titles for new sessions, written by the bridge (src/bridge/sessionTitle.ts).
+    if (cfg.get<boolean>("autoTitle", false)) {
+      env.PI_VSCODE_AUTO_TITLE = "1";
+      const model = cfg.get<string>("titleModel")?.trim();
+      if (model) env.PI_VSCODE_TITLE_MODEL = model;
+    }
     for (const h of this.integrations.values()) Object.assign(env, h.env?.());
     this.env = env;
     const command = cfg.get<string>("path")?.trim() || "pi";
