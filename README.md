@@ -31,6 +31,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - Resume or fork from a searchable list. Archive a session to hide it from the list.
 - Rename the current session: double-click its name in the sidebar header, or use *Rename Session…* (in the sidebar's *More Actions* menu, the tab's overflow menu, or the command palette). `/name <name>` also works.
 - Rename any session in the session list with the pencil button or F2.
+- Short session titles: turn on `pi.autoTitle`, and a small model names each new session from its first prompt (for example `Fix flaky tab titles`).
 - Forks and sessions that extensions start (for example subagents) are nested under the session they came from. They are collapsed until you expand them.
 - Sessions run in parallel. If you start a new session or open another one while Pi works, the busy session continues in the background. It shows below the current session in the session list, and a notification tells you when it finishes or needs an answer.
 - The session list shows the current session first, then the sessions that run in the background, then the other sessions by date. Nested sessions stay under their parent session in each group.
@@ -90,6 +91,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **Tiles** are chats in one webview: `mountChat` (webview/chat.ts) builds each one in its own element. They are not iframes, because VS Code ignores keys from nested frames, so its shortcuts would not work in a tile.
 - **Session tabs** keep the pi process of up to `pi.warmTabs` idle tabs per tile. A few seconds after a tab opens, the tile starts processes for the tabs next to it, one at a time. Other idle tabs have no process; opening one switches the tile's process to its file (about a second). A busy tab that you leave keeps its process, the same as a background session. A new session that you leave before its first message has no file, so its tab closes.
 - **Kept views:** the chat keeps the transcripts of the last 8 tabs that you left in the page (hidden). A click on such a tab shows it at once, at the same scroll position. pi's snapshot follows; if it has the same messages, nothing is drawn again. A session that works is drawn again from pi when you come back.
+- **Session titles** (`pi.autoTitle`) come from the bridge extension. It sends the first prompt (4000 characters at most) to the title model and saves the answer as the session name, so the pi TUI shows it too. It does not replace a name that the session has. The setting applies to pi processes that start after you change it.
 - **A spare process** with a new, empty session waits in each tile while `pi.warmTabs` is more than 0, so + needs no wait. If you close the tab of a new session before its first message, its process becomes the spare again.
 - **New sessions without a message** have no file: pi writes it with the first message. Their tab keeps the session id and opens it again with `--session-id`.
 - **Startup:** the chat starts pi as soon as the sidebar opens, not when the webview is ready, and the login shell environment is read when the extension activates. Until pi answers, the chat shows the session from its file (the same reader as the session viewer). Tabs get their own processes only after all chats have started.
@@ -122,6 +124,8 @@ VS Code apps opened from the Dock often do not get your shell `PATH`. For this r
 | `pi.useLoginShellEnv` | `true` | Load the environment of your login shell. |
 | `pi.terminalLocation` | `"editor"` | Where terminals open: as an editor tab or in the terminal panel. |
 | `pi.warmTabs` | `3` | Idle session tabs per tile that keep their pi process, so that switching to them is quick. Each process uses about 200 MB. |
+| `pi.autoTitle` | `false` | Give each new session a short title, written by a small model from the first prompt. |
+| `pi.titleModel` | `""` | Model for the titles, as `provider/id`. Empty: a Haiku model of the session's provider, else the session's model. |
 | `pi.continuePrompt` | `"Continue as you left off."` | The prompt that the Continue button sends. |
 | `pi.workarounds` | `{}` | Turn off a workaround for a gap in RPC mode, for example `{ "child-runs": false }`. All are on by default. |
 

@@ -9,10 +9,14 @@
  * `vscode:fork` does the same for `ctx.fork()`: RPC's `fork` command can only
  * fork before a user prompt, but /tree can start a new session at any entry.
  *
+ * It also gives new sessions a short title when the setting `pi.autoTitle` is on (`sessionTitle.ts`).
+ *
  * Workarounds for gaps in RPC mode are separate pi extensions in `workarounds/`.
  *
  * Kept dependency-free: only the few API shapes used here are typed locally.
  */
+
+import { sessionTitle } from "./sessionTitle";
 
 interface NavigateOptions {
   summarize?: boolean;
@@ -42,6 +46,7 @@ function parse<T>(args: string): T {
 }
 
 export default function piVscodeBridge(pi: PiApi) {
+  sessionTitle(pi as any);
   pi.registerCommand("vscode:tree", {
     description: "(VS Code) Navigate the session tree",
     handler: async (args, ctx) => {
