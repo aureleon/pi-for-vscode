@@ -807,6 +807,23 @@ export class PiController implements vscode.Disposable {
     } catch {}
   }
 
+  /** Counts the snapshots that went to the webview (see `openTab`). */
+  private snapshots = 0;
+
+  /**
+   * Open a tab that the webview shows already (a click on a tab, a close of the shown tab). The webview
+   * waits for a snapshot. An open that sends none (the session is the shown one already, another chat
+   * has it, an older open took over) sends the shown session, so that the webview does not wait forever.
+   */
+  private async openTab(key: string) {
+    const n = this.snapshots;
+    await this.openSession(key);
+    const s = this.active;
+    // `s.queue`: a snapshot is on its way.
+    if (n !== this.snapshots || !s?.pi.running || s.queue || this.starting || this.switching || this.terminal) return;
+    await this.sendInit("reset");
+  }
+
   /** Send full snapshot (state, commands, transcript) to the webview. */
   private async sendInit(kind: "init" | "reset") {
     const s = this.active;
@@ -846,6 +863,7 @@ export class PiController implements vscode.Disposable {
       }
       // For the preview at the next start (sendPreview): the model and the commands.
       this.context.workspaceState.update(PREVIEW_KEY, { model: state.model, thinkingLevel: state.thinkingLevel, commands: commands.commands });
+      this.snapshots++;
       this.post({
         type: kind,
         state,
@@ -948,7 +966,7 @@ export class PiController implements vscode.Disposable {
   private tabs: Tab[] = [];
   /** Tabs whose session finished in the background and that the user has not looked at yet. */
   private unread = new Set<string>();
-  /** Key of the tab shown last. A new session gets its tab after it. */
+  /** Key of the tab shown last. */
   private shownKey?: string;
   /** Session file that the shown process opens, until pi reports it: its tab shows as the shown one. */
   private pendingKey?: string;
@@ -978,10 +996,8 @@ export class PiController implements vscode.Disposable {
       const id = a?.state.sessionId;
       const same = id && this.tabs.find((t) => t.id === id);
       if (same) same.key = key;
-      else {
-        const i = this.tabs.findIndex((t) => t.key === this.shownKey);
-        this.tabs.splice(i < 0 ? this.tabs.length : i + 1, 0, { key, title: "" });
-      }
+      // A new tab goes after all the tabs.
+      else this.tabs.push({ key, title: "" });
     }
     for (const b of this.background) {
       const k = this.sessionKey(b);
@@ -1013,11 +1029,8 @@ export class PiController implements vscode.Disposable {
       const s = this.sessionOfTab(t.key);
       return { key: t.key, title: t.title || "Untitled session", shown: t.key === shownTab, busy: !!s && this.isBusy(s), unread: this.unread.has(t.key) };
     });
-    // A new session that pi has not reported yet: a placeholder tab after the one shown before.
-    if (a && !tabs.some((t) => t.shown)) {
-      const i = tabs.findIndex((t) => t.key === this.shownKey);
-      tabs.splice(i < 0 ? tabs.length : i + 1, 0, { key: "", title: "", shown: true, busy: false, unread: false });
-    }
+    // A new session that pi has not reported yet: a placeholder tab after all the tabs.
+    if (a && !tabs.some((t) => t.shown)) tabs.push({ key: "", title: "", shown: true, busy: false, unread: false });
     // pi reports state often (titles, busy changes); send and save only what changed.
     const json = JSON.stringify({ tabs, pick: this.pickSeq });
     if (json !== this.lastTabs) {
@@ -1221,7 +1234,7 @@ export class PiController implements vscode.Disposable {
       return;
     }
     const next = this.tabs[Math.min(Math.max(at, 0), this.tabs.length - 1)];
-    if (next) return this.openSession(next.key);
+    if (next) return this.openTab(next.key);
     // The last tab of a sidebar tile closes the tile, like the last editor of an editor group.
     if (this.host.closeChat?.()) return;
     if (this.pi?.running) {
@@ -1480,9 +1493,11 @@ export class PiController implements vscode.Disposable {
         }
         case "tabPick":
           // Tabs sent from now on know of this click (the webview keeps its own choice until then).
-          this.pickSeq = Number(m.seq) || 0;
-          await this.openSession(String(m.key));
+          this.pickSeq = Math.max(this.pickSeq, Number(m.seq) || 0);
+          await this.openTab(String(m.key));
           this.syncTabs();
+          // The click is done: the webview stops waiting, also when no snapshot went out.
+          this.post({ type: "tabShown", seq: Number(m.seq) || 0 });
           break;
         case "tabClose":
           await this.closeTab(String(m.key));
