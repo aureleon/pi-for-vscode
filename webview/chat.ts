@@ -142,6 +142,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       </span>
       <div id="tb-menu" class="tb-menu hidden" role="menu">
         <button role="menuitem" data-action="rename">Rename Session…</button>
+        <button role="menuitem" data-action="title">Generate Session Title</button>
         <button role="menuitem" data-cmd="pi.newTerminal">Open in Terminal</button>
         <button role="menuitem" data-cmd="pi.openInTab">Open in New Tab</button>
         <button role="menuitem" data-msg="restart">Restart Agent Process</button>
@@ -222,6 +223,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     { name: "thinking", description: "Select thinking level", source: "builtin" },
     { name: "compact", description: "Compact context [instructions]", source: "builtin" },
     { name: "name", description: "Name this session", source: "builtin" },
+    { name: "title", description: "Write a short title for this session with a small model", source: "builtin" },
     { name: "tree", description: "Navigate the session tree (branches, labels, summaries)", source: "builtin" },
     { name: "fork", description: "Fork from a previous message", source: "builtin" },
     { name: "clone", description: "Clone the current branch into a new session", source: "builtin" },
@@ -1516,6 +1518,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       if (!b) return;
       closeMenu();
       if (b.dataset.action === "rename") renameInline();
+      else if (b.dataset.action === "title") post({ type: "builtin", name: "title", arg: "" });
     else if (b.dataset.action === "closeTile") opts.tiles?.close();
       else if (b.dataset.cmd) post({ type: "runCommand", command: b.dataset.cmd });
       else if (b.dataset.msg) post({ type: b.dataset.msg });

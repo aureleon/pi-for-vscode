@@ -2,7 +2,7 @@
   "name": "pi-for-vscode",
   "displayName": "Pi Coding Agent",
   "description": "Use the Pi coding agent (with all your Pi extensions, skills and prompts) from the VS Code sidebar.",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "publisher": "dhguz",
   "license": "MIT",
   "engines": {
@@ -69,6 +69,11 @@
         "command": "pi.renameSession",
         "title": "Pi: Rename Session…",
         "icon": "$(edit)"
+      },
+      {
+        "command": "pi.generateTitle",
+        "title": "Pi: Generate Session Title",
+        "icon": "$(sparkle)"
       },
       {
         "command": "pi.selectModel",
@@ -169,6 +174,11 @@
           "group": "overflow@0"
         },
         {
+          "command": "pi.generateTitle",
+          "when": "activeWebviewPanelId == 'pi.panel'",
+          "group": "overflow@0"
+        },
+        {
           "command": "pi.newTerminal",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "overflow@0"
@@ -247,7 +257,7 @@
         "pi.titleModel": {
           "type": "string",
           "default": "",
-          "description": "Model that writes the session titles when pi.autoTitle is on, as provider/id (for example \"anthropic/claude-haiku-4-5\"). Empty: a Haiku model of the session's provider, else the session's model."
+          "description": "Model that writes the session titles (pi.autoTitle and \"Generate Session Title\"), as provider/id (for example \"anthropic/claude-haiku-4-5\"). Empty: a Haiku model of the session's provider, else the session's model."
         },
         "pi.continuePrompt": {
           "type": "string",

@@ -573,11 +573,9 @@ export class PiController implements vscode.Disposable {
     if (gen !== this.openGen) return;
     env.PI_VSCODE = "1";
     // Short titles for new sessions, written by the bridge (src/bridge/sessionTitle.ts).
-    if (cfg.get<boolean>("autoTitle", false)) {
-      env.PI_VSCODE_AUTO_TITLE = "1";
-      const model = cfg.get<string>("titleModel")?.trim();
-      if (model) env.PI_VSCODE_TITLE_MODEL = model;
-    }
+    if (cfg.get<boolean>("autoTitle", false)) env.PI_VSCODE_AUTO_TITLE = "1";
+    const titleModel = cfg.get<string>("titleModel")?.trim();
+    if (titleModel) env.PI_VSCODE_TITLE_MODEL = titleModel;
     for (const h of this.integrations.values()) Object.assign(env, h.env?.());
     this.env = env;
     const command = cfg.get<string>("path")?.trim() || "pi";
@@ -1963,6 +1961,11 @@ export class PiController implements vscode.Disposable {
         this.req({ type: "compact", customInstructions: arg || undefined })
           .then(() => this.refreshStats())
           .catch(() => {}); // failures arrive as compaction_end { errorMessage } and are shown there
+        break;
+      case "title":
+        // The bridge asks the title model and names the session; pi reports the name (session_info_changed).
+        vscode.window.setStatusBarMessage("Pi: writing a session title…", 4000);
+        await this.req({ type: "prompt", message: "/vscode:title" });
         break;
       case "name": {
         const value = this.state.sessionName || this.active?.webTitle || "";
