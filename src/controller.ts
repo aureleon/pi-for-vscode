@@ -358,6 +358,9 @@ export class PiController implements vscode.Disposable {
     return s.state.sessionFile ?? s.claim ?? `bg:${s.state.sessionId}`;
   }
 
+  /** Tab titles that stand for "no title". A tab with a real title does not go back to one of these. */
+  private static readonly NO_TITLE = new Set(["New session", "Untitled session"]);
+
   private titleOf(s: Session): string {
     if (s.state.sessionName || s.webTitle) return s.state.sessionName || s.webTitle;
     // pi writes the file with the first message: without one it is a new session (the webview says the same).
@@ -994,7 +997,10 @@ export class PiController implements vscode.Disposable {
     this.tabs = this.tabs.filter((t) => {
       const s = this.sessionOfTab(t.key);
       if (s) {
-        t.title = this.titleOf(s);
+        // A process that has just started for the tab (prewarm) knows no title yet: the tab keeps its own.
+        const own = s.state.sessionName || s.webTitle;
+        if (own) t.title = own;
+        else if (!t.title || PiController.NO_TITLE.has(t.title)) t.title = this.titleOf(s);
         t.id = s.state.sessionFile && !fs.existsSync(s.state.sessionFile) ? s.state.sessionId : undefined;
       }
       return !!s || t.key === shownTab || !!t.id || (!t.key.startsWith("bg:") && fs.existsSync(t.key));
@@ -1291,6 +1297,7 @@ export class PiController implements vscode.Disposable {
       case "session_info_changed":
         s.state.sessionName = e.name;
         if (s === this.active) this.updateTitle();
+        else this.syncTabs();
         break;
       case "thinking_level_changed":
         s.state.thinkingLevel = e.level;
@@ -1448,8 +1455,23 @@ export class PiController implements vscode.Disposable {
           const s = m.file
             ? [this.active, ...this.background, ...this.warm].find((x) => x && PiController.fileOf(x) === path.resolve(m.file))
             : this.active && !PiController.fileOf(this.active) ? this.active : undefined;
-          if (s) s.webTitle = m.title;
+          // An empty title does not take a title away: a session gets a new one only with a new file (setSessionState).
+          if (s && m.title) s.webTitle = m.title;
           this.updateTitle();
+          break;
+        }
+        case "rename": {
+          // The session that the rename box was opened for: the chat can show another one by now.
+          const name = String(m.name ?? "").replace(/[\r\n]+/g, " ").trim();
+          if (!name) break;
+          if (!m.file) {
+            await this.runBuiltin("name", name);
+            break;
+          }
+          await this.renameSession(String(m.file), name);
+          const tab = this.tabs.find((t) => path.resolve(t.key) === path.resolve(String(m.file)));
+          if (tab) tab.title = name;
+          this.syncTabs();
           break;
         }
         case "tabPick":
@@ -2244,7 +2266,7 @@ export class PiController implements vscode.Disposable {
     if (s && !r?.cancelled) {
       const title = this.tabs.find((t) => t.key === id)?.title;
       s.state = { ...s.state, sessionFile: id, sessionName: undefined };
-      s.webTitle = title && title !== "Untitled session" ? title : undefined;
+      s.webTitle = title && !PiController.NO_TITLE.has(title) ? title : undefined;
     }
     // A newer open, or a close of this tab, came while pi switched: it shows the next session.
     if (gen !== this.openGen) {

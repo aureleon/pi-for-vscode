@@ -1676,6 +1676,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   function renameInline() {
     if (titleEl.classList.contains("hidden")) return;
     const old = state.sessionName || lastTitle || "";
+    // The session that the box is for: a click on another tab ends the rename after the webview shows that tab.
+    const file = state.sessionFile;
     const box = el("input", "topbar-rename");
     box.value = old;
     box.placeholder = "Session name";
@@ -1692,7 +1694,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       box.remove();
       titleEl.classList.remove("hidden");
       if (pendingTabs) renderTabs(pendingTabs);
-      if (save && name && name !== state.sessionName) post({ type: "builtin", name: "name", arg: name });
+      // Only a name that you changed: a box that closes as it was (a click elsewhere) does not name the session.
+      if (save && name && name !== old) post({ type: "rename", file, name });
     };
     box.addEventListener("keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); finish(true); }
