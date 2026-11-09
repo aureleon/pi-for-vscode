@@ -1500,8 +1500,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     $("tb-new").addEventListener("click", () => {
     // Show the new session now; the host sends it when it is ready (at once if a spare process waits).
     if (!running) {
-      // Draw the new tab now, after the shown one. The shown tab keeps its title as a plain tab.
-      if (lastTabs) setTabsNow(lastTabs.flatMap((t) => (t.shown ? [{ ...t, shown: false, title: titleEl.textContent || t.title }, NEW_TAB] : [t])));
+      // Draw the new tab now, after all the tabs. The shown tab keeps its title as a plain tab.
+      if (lastTabs) setTabsNow([...lastTabs.map((t) => (t.shown ? { ...t, shown: false, title: titleEl.textContent || t.title } : t)), NEW_TAB]);
       showNewSession();
     }
     post({ type: "builtin", name: "new", arg: "" });
@@ -3039,6 +3039,10 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         break;
       case "tabs":
         if (opts.header) renderTabs(hostTabs(m.tabs ?? [], Number(m.pick) || 0));
+        break;
+      case "tabShown":
+        // The host is done with the last click on a tab: stop waiting for its session.
+        if (m.seq === pickSeq) frame.classList.remove("switching");
         break;
       case "stats":
         updateStats(m.stats);
