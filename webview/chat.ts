@@ -956,7 +956,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         }
         break;
       case "compactionSummary":
-        renderCollapsible("Context compacted", msg.summary);
+        renderCollapsible(msg.tokensBefore ? `Context compacted (from ${fmtTokens(msg.tokensBefore)} tokens)` : "Context compacted", msg.summary);
         break;
       case "branchSummary":
         renderCollapsible("Branch summary", msg.summary);
@@ -1044,10 +1044,11 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         compacting = true;
         updateStats();
         updatePlaceholder();
-        renderNote(`Compacting context (${e.reason})…`, "muted compaction");
+        renderNote(`Compacting context (${e.reason})…`, "muted compaction live");
         break;
       case "compaction_end":
         compacting = false;
+        for (const n of messagesEl.querySelectorAll(".note.compaction.live")) n.classList.remove("live");
         updateStats();
         updatePlaceholder();
         if (e.result) renderNote(`Context compacted: ${fmtTokens(e.result.tokensBefore)} → ~${fmtTokens(e.result.estimatedTokensAfter ?? 0)} tokens`, "muted");
@@ -3030,6 +3031,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         renderQueue([], []);
         compacting = false;
         applySnapshot(m);
+        // A kept view can have the note of a compaction that still ran. The host sends `compaction_start` again if it still runs.
+        for (const n of messagesEl.querySelectorAll(".note.compaction.live")) n.remove();
         break;
       case "state":
         state = { ...state, ...m.state };

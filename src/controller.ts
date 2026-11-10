@@ -331,9 +331,12 @@ export class PiController implements vscode.Disposable {
     return !!this.active && this.isBusy(this.active);
   }
 
-  /** The main agent runs, or a module reports work in the process (for example agent sessions that extensions run). Stopping it loses that work. */
+  /**
+   * The main agent runs, pi compacts, or a module reports work in the process (for example agent sessions that extensions run).
+   * Stopping the process, or switching it to another session, loses that work.
+   */
   private isBusy(s: Session): boolean {
-    return !!s.state.isStreaming || this.hooks(s).some((h) => h.isBusy?.(s.handle));
+    return !!s.state.isStreaming || !!s.compactionQueue || this.hooks(s).some((h) => h.isBusy?.(s.handle));
   }
 
   /** Session files that a running process of this chat writes to apart from its own session (reported by modules). */
@@ -1306,10 +1309,23 @@ export class PiController implements vscode.Disposable {
       case "compaction_start":
         s.ui.set("compaction", e);
         s.compactionQueue ??= [];
+        // A warm session that compacts (a compaction that the session itself starts) works: it must not stop.
+        if (this.warm.includes(s)) {
+          this.warm = this.warm.filter((w) => w !== s);
+          this.background.add(s);
+        }
+        this.updateStatus();
         break;
       case "compaction_end":
         s.ui.delete("compaction");
-        void this.flushCompactionQueue(s, !!e.willRetry);
+        // pi's messages are now the summary and the kept messages. Show them at once, so that the transcript is
+        // the same as after a switch to another tab and back. The event waits (`s.queue`) and follows the snapshot.
+        if (e.result && s === this.active && !s.queue) void this.sendInit("reset");
+        void this.flushCompactionQueue(s, !!e.willRetry).then((runFollows) => {
+          // No run follows (its `agent_settled` would do this): the session is not busy any more.
+          if (!runFollows) this.onBusyChanged(s);
+          else this.updateStatus();
+        });
         break;
       case "session_info_changed":
         s.state.sessionName = e.name;
@@ -1770,12 +1786,13 @@ export class PiController implements vscode.Disposable {
   /**
    * Compaction ended: send the messages that waited for it, in order. If pi retries the run
    * (after an overflow), queue them into that run; else the first one starts a new run.
-   * Messages that pi refuses go back into the input box.
+   * Messages that pi refuses go back into the input box. Returns true if a run follows.
    */
-  private async flushCompactionQueue(s: Session, willRetry: boolean) {
+  private async flushCompactionQueue(s: Session, willRetry: boolean): Promise<boolean> {
     const held = s.compactionQueue ?? [];
     s.compactionQueue = undefined;
-    if (!held.length) return;
+    if (!held.length) return willRetry;
+    let runFollows = willRetry;
     s.queueBusy = true;
     let i = 0;
     try {
@@ -1783,7 +1800,7 @@ export class PiController implements vscode.Disposable {
         const x = held[i];
         if (willRetry && !this.isExtensionCommand(s, x.text)) {
           await this.sendPrompt(s, x, { type: x.mode === "steer" ? "steer" : "follow_up", message: x.text, ...(x.images?.length ? { images: x.images } : {}) });
-        } else await this.sendPrompt(s, x);
+        } else if ((await this.sendPrompt(s, x))?.disposition !== "handled") runFollows = true;
       }
     } catch (err: any) {
       if (s === this.active) {
@@ -1794,6 +1811,7 @@ export class PiController implements vscode.Disposable {
       s.queueBusy = false;
       this.showQueue(s);
     }
+    return runFollows;
   }
 
   private async bash(command: string, exclude: boolean) {
