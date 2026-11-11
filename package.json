@@ -109,6 +109,10 @@
         "title": "Pi: View Session File (Read-Only)…"
       },
       {
+        "command": "pi.find",
+        "title": "Pi: Find in Chat"
+      },
+      {
         "command": "pi.tree",
         "title": "Pi: Session Tree (/tree)",
         "icon": "$(list-tree)"

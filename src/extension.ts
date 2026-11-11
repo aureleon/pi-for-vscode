@@ -442,6 +442,7 @@ export function activate(context: vscode.ExtensionContext) {
   cmd("pi.history", async () => (await target())?.runBuiltin("resume", ""));
   cmd("pi.renameSession", async () => (await target())?.runBuiltin("name", ""));
   cmd("pi.generateTitle", async () => (await target())?.runBuiltin("title", ""));
+  cmd("pi.find", async () => (await target())?.find());
   cmd("pi.tree", async () => (await target())?.runBuiltin("tree", ""));
   cmd("pi.openInTerminal", async () => (await target())?.openInTerminal());
   // "Pi: Open in Terminal": a fresh pi TUI session in a terminal, no chat attached.

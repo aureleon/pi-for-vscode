@@ -3,6 +3,7 @@ import { ansiToHtml, escapeHtml, stripAnsi } from "./ansi";
 import { WEB_INTEGRATIONS, WEB_WORKAROUNDS, type PiCommand, type WebIntegration, type WebIntegrationInstance } from "./integrations";
 import { TreeMenu } from "./treeMenu";
 import { SPINNER } from "./spinner";
+import { createFind } from "./find";
 import { highlightMarkdown } from "./mdHighlight";
 import { StreamingMarkdown } from "./streamMd";
 import { fmtDuration } from "./duration";
@@ -143,6 +144,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       <div id="tb-menu" class="tb-menu hidden" role="menu">
         <button role="menuitem" data-action="rename">Rename Session…</button>
         <button role="menuitem" data-action="title">Generate Session Title</button>
+        <button role="menuitem" data-action="find">Find in Chat…</button>
         <button role="menuitem" data-cmd="pi.newTerminal">Open in Terminal</button>
         <button role="menuitem" data-cmd="pi.openInTab">Open in New Tab</button>
         <button role="menuitem" data-msg="restart">Restart Agent Process</button>
@@ -452,6 +454,32 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "c") copySelection();
   }, true);
   on(document, "copy", (e) => copySelection(e as ClipboardEvent), true);
+
+  // ------------------------------------------------------------------ find
+
+  const find = createFind({ scroll: scrollEl, messages: messagesEl, icons: { close: I.close, chevron: I.chevron } });
+  life.signal.addEventListener("abort", () => find.hide());
+  /** Open the find bar, with the selected text of the transcript (one line) in it. */
+  function openFind() {
+    const sel = window.getSelection();
+    const text = sel && !sel.isCollapsed && sel.anchorNode && messagesEl.contains(sel.anchorNode) ? sel.toString() : "";
+    find.show(text && !text.includes("\n") ? text.slice(0, 200) : undefined);
+  }
+  on(document, "keydown", (e) => {
+    if (!isFocusedChat() || e.altKey) return;
+    const mod = /Mac/.test(navigator.platform) ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+    const key = e.key.toLowerCase();
+    // Cmd/Ctrl+F opens the bar. With the bar open, F3 and Cmd/Ctrl+G go to the next match (with Shift: the previous one).
+    if (mod && !e.shiftKey && key === "f") {
+      // A navigator has its own search field.
+      if (frame.querySelector(".list-menu:not(.hidden), .model-picker:not(.hidden)")) return;
+      e.preventDefault();
+      openFind();
+    } else if (find.open && (e.key === "F3" || (mod && key === "g"))) {
+      e.preventDefault();
+      find.step(e.shiftKey ? -1 : 1);
+    }
+  }, true);
 
   // ------------------------------------------------------------------ timeline items
 
@@ -1520,6 +1548,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       closeMenu();
       if (b.dataset.action === "rename") renameInline();
       else if (b.dataset.action === "title") post({ type: "builtin", name: "title", arg: "" });
+      else if (b.dataset.action === "find") openFind();
     else if (b.dataset.action === "closeTile") opts.tiles?.close();
       else if (b.dataset.cmd) post({ type: "runCommand", command: b.dataset.cmd });
       else if (b.dataset.msg) post({ type: b.dataset.msg });
@@ -2086,6 +2115,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
    */
   function closeOverlay(): boolean {
     if (closeLightbox()) return true;
+    if (find.open) { find.hide(); return true; }
     if (treeMenu.open) { treeMenu.escape(); return true; }
     if (listMenu.open) { listMenu.hide(); return true; }
     if (picker.open) { picker.hide(); return true; }
@@ -3115,6 +3145,9 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       case "openTree":
         if (treeMenu.open && !m.refresh && !m.selectId) treeMenu.hide();
         else treeMenu.show(m);
+        break;
+      case "openFind":
+        openFind();
         break;
       case "treeBusy":
         treeMenu.setBusy(m.text ?? "");

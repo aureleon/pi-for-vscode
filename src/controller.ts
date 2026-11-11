@@ -2024,6 +2024,12 @@ export class PiController implements vscode.Disposable {
     return !!this.terminal;
   }
 
+  /** Open the find bar of the chat. */
+  find() {
+    this.host.reveal();
+    this.post({ type: "openFind" });
+  }
+
   insertText(text: string) {
     this.host.reveal();
     this.post({ type: "insertText", text });

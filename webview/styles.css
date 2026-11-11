@@ -493,6 +493,33 @@ kbd {
 .statusline:empty { display: none; }
 .status-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 
+/* ---------------------------------------------------------------- find */
+
+/* A bar at the top right of the transcript. It has no height, so the transcript does not move when it opens. */
+.find-bar { position: sticky; top: 6px; height: 0; z-index: 15; display: flex; justify-content: flex-end; }
+.find-box {
+  display: flex; align-items: center; gap: 2px; height: 30px; padding: 0 3px 0 0; max-width: 100%; flex: none;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, .35));
+}
+.find-input {
+  width: 170px; min-width: 60px; height: 22px; margin: 0 2px 0 3px; padding: 0 6px; border-radius: 4px; outline: none; font: inherit; font-size: 12.5px;
+  color: var(--vscode-input-foreground, var(--vscode-foreground)); background: var(--input-bg); border: 1px solid var(--accent);
+}
+.find-input::placeholder { color: var(--muted); }
+.find-bar.none .find-input { border-color: var(--err); }
+.find-count { min-width: 56px; padding: 0 4px; font-size: 11.5px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.find-btn {
+  width: 22px; height: 22px; padding: 3px; flex: none; border: none; border-radius: 4px; background: none; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--vscode-icon-foreground, var(--vscode-foreground));
+}
+.find-btn svg { width: 16px; height: 16px; }
+.find-btn.find-next svg { transform: rotate(180deg); }
+.find-btn:hover { background: var(--vscode-toolbar-hoverBackground); }
+.chat-frame.narrow .find-input { width: 110px; }
+::highlight(pi-find) { background-color: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 92, 0, .33)); color: inherit; }
+::highlight(pi-find-current) { background-color: var(--vscode-editor-findMatchBackground, rgba(234, 92, 0, .7)); color: var(--vscode-editor-findMatchForeground, inherit); }
+
 /* ---------------------------------------------------------------- model chip + picker */
 .chip { background: var(--vscode-badge-background); font-size: 12px; }
 .chip.active { outline: 1px solid var(--accent); }

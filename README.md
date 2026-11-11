@@ -18,6 +18,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - While Pi works: <kbd>Enter</kbd> steers, <kbd>⌥ Enter</kbd> queues a follow-up, <kbd>Esc</kbd> stops.
 - Queued messages show at the end of the chat. Drag to reorder them, or remove or send one now.
 - `/` for commands, `@` for file paths, `!cmd` for shell commands. Paste, drop or attach files. Images go to the model as images; other files go as `@path` references.
+- <kbd>⌘F</kbd> (<kbd>Ctrl+F</kbd>) finds text in the chat. <kbd>Enter</kbd> and <kbd>⇧ Enter</kbd> go to the next and the previous match. A match in collapsed text (thinking, a long prompt, a tool output) opens it. Also in the ⋯ menu and as **Pi: Find in Chat**.
 - The context pill shows how full the context is. Click it to compact.
 - A π with a count shows next to the context pill while sessions run inside the chat (for example subagents or workflow agents). Click it to see them.
 
