@@ -36,7 +36,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - Forks and sessions that extensions start (for example subagents) are nested under the session they came from. They are collapsed until you expand them.
 - Sessions run in parallel. If you start a new session or open another one while Pi works, the busy session continues in the background. It shows below the current session in the session list, and a notification tells you when it finishes or needs an answer.
 - Sessions can keep working without VS Code (`pi.keepSessionsAlive`). A session daemon then runs the pi processes. If the window closes or a Remote-SSH connection drops, a session that works continues on the host. When you open the folder again, the session comes back with its tab. A notification tells you which sessions finished in the meantime.
-- The status bar shows **Pi daemon** while the daemon is in use, and the number of sessions that run without a window ("detached"). Click it to list the daemon's sessions, open one or stop one.
+- The status bar has one **Pi** item. It spins while a session works, and shows the number of sessions that run without a window ("detached"). Click it to list the sessions, show one or stop a detached one, and to change the two daemon settings.
 - `pi.detachedDialogs` sets what happens when a detached session asks a question: it waits for you (default), the question is cancelled, or the recommended option is accepted.
 - The session list shows the current session first, then the sessions that run in the background, then the other sessions by date. Nested sessions stay under their parent session in each group.
 - *View* (the eye button in the session list, or *Pi: View Session File*) opens a session read-only in a new tab. It starts no pi process and shows new messages as pi writes them. Use it to follow a session that an extension runs, for example a subagent.
@@ -64,7 +64,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 ### Chat tabs
 - *Open in New Tab* opens a chat in the editor area. In the session list, the split button, <kbd>⌥</kbd>-click or <kbd>⌥↵</kbd> opens a session in a new chat tab to the side.
 - Chat tabs and their sessions come back after a window reload.
-- A chat tab whose session works shows ● before its title. The status bar counts the working sessions in all chats. Click it to go to one.
+- A chat tab whose session works shows ● before its title. The Pi item in the status bar counts the working sessions in all chats. Click it to go to one.
 - Narrow chats use a compact layout.
 
 ### Pi extensions
