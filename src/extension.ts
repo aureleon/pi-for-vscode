@@ -428,7 +428,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   cmd("pi.focus", () => vscode.commands.executeCommand("pi.chat.focus"));
   cmd("pi.openInTab", () => openPanel(context));
-  cmd("pi.showRunning", () => PiController.pickRunning());
+  cmd("pi.showRunning", () => vscode.commands.executeCommand("pi.daemonSessions"));
   // Editor tabs come back after a reload. The webview keeps its session file in its state (see `persistSession` in webview/main.ts).
   context.subscriptions.push(
     vscode.window.registerWebviewPanelSerializer("pi.panel", {
@@ -487,6 +487,7 @@ export function activate(context: vscode.ExtensionContext) {
   // The session daemon in the status bar (setting `pi.keepSessionsAlive`).
   const daemonUi = initDaemonUi(context, {
     cwd: workspaceCwd,
+    running: () => PiController.running(),
     open: (file) => void target().then((c) => c?.open(file)).then(() => daemonUi.refresh(), (err) => vscode.window.showErrorMessage(`Pi: ${err.message ?? err}`)),
     show: (file) => {
       const owner = PiController.ownerOf(file);
@@ -494,6 +495,9 @@ export function activate(context: vscode.ExtensionContext) {
       return !!owner;
     },
   });
+
+  PiController.onStatusChanged = () => daemonUi.render();
+  context.subscriptions.push({ dispose: () => (PiController.onStatusChanged = undefined) });
 
   output.appendLine(`[pi] extension activated (${path.basename(context.extensionPath)})`);
 }

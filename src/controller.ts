@@ -244,8 +244,8 @@ export interface ChatHost {
 export class PiController implements vscode.Disposable {
   /** All open chats. A rename in one chat's session list goes to the chat whose process has the session. */
   private static readonly all = new Set<PiController>();
-  /** One status bar item for all chats: it counts the sessions that work. */
-  private static statusItem?: vscode.StatusBarItem;
+  /** Called when the sessions that work change. The status bar item (src/daemon/ui.ts) counts them. */
+  static onStatusChanged?: () => void;
   /** The session shown in the webview. */
   private active?: Session;
   /** Busy sessions the user switched away from. */
@@ -802,37 +802,20 @@ export class PiController implements vscode.Disposable {
   }
 
   private static updateSharedStatus() {
-    const busy = PiController.working();
-    if (!busy.length) {
-      PiController.statusItem?.hide();
-      return;
-    }
-    const item = (PiController.statusItem ??= vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100));
-    item.command = "pi.showRunning";
-    const bg = busy.filter((b) => b.background).length;
-    item.text = busy.length > 1 ? `$(loading~spin) Pi (${busy.length})` : "$(loading~spin) Pi";
-    item.tooltip = (bg ? `Pi is working… (${bg} session${bg === 1 ? "" : "s"} in the background)` : "Pi is working…") + "\nClick to show the running sessions.";
-    item.show();
+    PiController.onStatusChanged?.();
   }
 
-  /** Pick a running session from all chats and show it. With one, show it at once. */
-  static async pickRunning() {
-    const busy = PiController.working();
-    if (!busy.length) return vscode.commands.executeCommand("pi.focus");
-    const go = (b: (typeof busy)[number]) => {
-      b.chat.host.reveal();
-      if (b.background) void b.chat.showBackground(b.s);
-    };
-    if (busy.length === 1) return go(busy[0]);
-    const pick = await vscode.window.showQuickPick(
-      busy.map((b) => ({
-        label: `$(loading~spin) ${b.chat.titleOf(b.s)}`,
-        description: b.background ? `${b.chat.host.kind} · in the background` : b.chat.host.kind,
-        b,
-      })),
-      { placeHolder: "Show a running Pi session" },
-    );
-    if (pick) go(pick.b);
+  /** The sessions that work in this window, for the status bar item and its list. */
+  static running(): { title: string; where: string; file?: string; show(): void }[] {
+    return PiController.working().map((b) => ({
+      title: b.chat.titleOf(b.s),
+      where: b.background ? `${b.chat.host.kind} · in the background` : b.chat.host.kind,
+      file: PiController.fileOf(b.s),
+      show: () => {
+        b.chat.host.reveal();
+        if (b.background) void b.chat.showBackground(b.s);
+      },
+    }));
   }
 
   restart() {
@@ -2513,9 +2496,5 @@ export class PiController implements vscode.Disposable {
     this.background.clear();
     for (const d of this.disposables) d.dispose();
     PiController.updateSharedStatus();
-    if (!PiController.all.size) {
-      PiController.statusItem?.dispose();
-      PiController.statusItem = undefined;
-    }
   }
 }

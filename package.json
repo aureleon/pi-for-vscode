@@ -14,7 +14,8 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onWebviewPanel:pi.panel"
+    "onWebviewPanel:pi.panel",
+    "onStartupFinished"
   ],
   "contributes": {
     "viewsContainers": {
@@ -62,7 +63,7 @@
       },
       {
         "command": "pi.daemonSessions",
-        "title": "Pi: Show Sessions in the Daemon"
+        "title": "Pi: Show Sessions and Daemon Settings"
       },
       {
         "command": "pi.restart",
@@ -270,9 +271,9 @@
           ],
           "default": "wait",
           "enumDescriptions": [
-            "The session waits until you open it again",
-            "Cancel the question, so that the session goes on without the action",
-            "Accept: confirm a yes/no question, and select the option marked \"(Recommended)\" or else the first option. A question for free text waits."
+            "Hold the question until you reconnect",
+            "Cancel the question and keep going",
+            "Answer yes, or pick the recommended option (else the first). Free-text questions wait."
           ],
           "description": "What happens when a session asks a question (a confirmation or a selection) while no VS Code window has it (see pi.keepSessionsAlive). Applies to sessions that start after the change."
         },
@@ -326,6 +327,13 @@
         "default": {
           "fontPath": "media/pi-icons.woff",
           "fontCharacter": "\\E900"
+        }
+      },
+      "pi-logo-small": {
+        "description": "Pi logo for the status bar",
+        "default": {
+          "fontPath": "media/pi-icons.woff",
+          "fontCharacter": "\\E901"
         }
       }
     }
