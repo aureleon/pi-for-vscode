@@ -1449,12 +1449,15 @@ export class PiController implements vscode.Disposable {
     // While pi starts, show the session from its file: the transcript is there at once.
     // Start now if the chat has not started yet, so that the preview below shows while pi starts.
     if (!this.pi?.running && !this.starting) this.start().catch(() => {});
-    if (this.starting) {
+    // Keep the promise: the start can end while the preview loads (a session that the daemon gives
+    // back answers at once), and `this.starting` is then empty.
+    const starting = this.starting;
+    if (starting) {
       const file = this.active?.state.sessionFile ?? this.active?.claim ?? this.startingFile;
       // A session file: show it from the file. None (a new session): show the new session, not "Loading session".
       if (file && fs.existsSync(file)) await this.sendPreview(file);
       else this.post({ type: "starting", fresh: true });
-      await this.starting.catch(() => {});
+      await starting.catch(() => {});
     }
     if (!this.pi?.running) await this.start();
     else if (!this.active?.delivered) await this.sendInit("init");
