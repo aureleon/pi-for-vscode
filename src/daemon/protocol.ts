@@ -4,6 +4,13 @@ import * as path from "node:path";
 /** Version of the records between the extension and the daemon. A daemon with another version is not used. */
 export const PROTOCOL = 1;
 
+declare const __PI_BUILD__: number | undefined;
+/**
+ * When this code was built (set by esbuild.mjs; 0 without it). The daemon outlives the extension that
+ * started it, so after an update an old daemon still runs. The extension of a newer build ends it.
+ */
+export const BUILD: number = typeof __PI_BUILD__ === "number" ? __PI_BUILD__ : 0;
+
 /** What the daemon does with a dialog (select, confirm, input, editor) of a session that no VS Code window shows. */
 export type DialogPolicy = "wait" | "deny" | "acceptRecommended";
 
@@ -19,11 +26,17 @@ export function socketPath(): string {
 
 /** First record of a connection. `open` turns the connection into the RPC stream of one pi process. */
 export type DaemonOp =
-  | { op: "open"; command: string; args: string[]; cwd: string; env: Record<string, string | undefined>; policy: DialogPolicy }
+  | {
+    op: "open"; command: string; args: string[]; cwd: string; env: Record<string, string | undefined>; policy: DialogPolicy;
+    /** Take the session from the client that has it (the user opened it here). Without it, such an open is refused. */
+    takeover?: boolean;
+  }
   | { op: "list" }
   | { op: "kill"; key: string }
   | { op: "ack"; files: string[] }
-  | { op: "shutdown" };
+  | { op: "shutdown" }
+  /** Stop all sessions and exit, so that a daemon of a newer build can start. */
+  | { op: "retire" };
 
 /** A dialog that the daemon answered for the user. */
 export interface AutoAnswer {
@@ -63,6 +76,8 @@ export interface DaemonFinished {
 
 export interface DaemonList {
   protocol: number;
+  /** `BUILD` of the daemon. The first daemons did not send it. */
+  build?: number;
   pid: number;
   sessions: DaemonSession[];
   finished: DaemonFinished[];
