@@ -1,13 +1,15 @@
 import { spawn } from "node:child_process";
 import * as net from "node:net";
 import * as os from "node:os";
-import { lineSplitter, PROTOCOL, socketPath, type DaemonList, type DaemonOp, type DialogPolicy } from "./protocol";
+import { BUILD, lineSplitter, PROTOCOL, socketPath, type DaemonList, type DaemonOp, type DialogPolicy } from "./protocol";
 
 /** How a PiProcess reaches the session daemon (src/daemon/piDaemon.ts). */
 export interface DaemonOptions {
   /** Path of the daemon's script (dist/pi-daemon.js). */
   script: string;
   policy: DialogPolicy;
+  /** Take the session from another client that has it (see `open` in protocol.ts). */
+  takeover?: boolean;
 }
 
 function tryConnect(): Promise<net.Socket> {
@@ -73,17 +75,62 @@ async function startDaemon(script: string) {
   throw new Error("the pi session daemon did not start");
 }
 
-/** A daemon of another extension version: stop it if it has no sessions, else do not use it. */
+/** The daemon is of an older build than this extension (or speaks another protocol). */
+export function isStale(list: DaemonList): boolean {
+  return list.protocol !== PROTOCOL || (list.build ?? 0) < BUILD;
+}
+
+/** Sessions of the daemon with a run or an open question: they would lose their work if the daemon stopped. */
+export function workingIn(list: DaemonList): number {
+  return list.sessions.filter((s) => s.busy || s.waiting).length;
+}
+
+const connectable = () => tryConnect().then((s) => (s.destroy(), true), () => false);
+
+/** Stop the daemon and all its sessions, and wait until it is gone. */
+async function endDaemon(list: DaemonList) {
+  const kill = () => {
+    try {
+      process.kill(list.pid, "SIGTERM");
+    } catch {}
+  };
+  // The first daemons know no `retire` (they sent no build).
+  if (list.build === undefined) kill();
+  else await daemonCall({ op: "retire" });
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    if (!(await connectable())) return;
+    if (i === 30) kill();
+  }
+}
+
+let replacing: Promise<DaemonList | undefined> | undefined;
+
+/**
+ * End a daemon of an older build, so that the next start gets a daemon of this build. A stale daemon
+ * with working sessions stays (its list is returned) unless `force` is set: ending it stops them.
+ * Idle sessions are on disk; their chats start them again (see PI_DAEMON_LOST in controller.ts).
+ */
+export function replaceStale(force = false): Promise<DaemonList | undefined> {
+  replacing ??= (async () => {
+    const list = await daemonList();
+    if (!list || !isStale(list)) return undefined;
+    if (!force && workingIn(list)) return list;
+    await endDaemon(list);
+    return undefined;
+  })().finally(() => (replacing = undefined));
+  return replacing;
+}
+
+/** Replace a stale daemon if no session works in it. One that stays is used if it speaks this protocol. */
 async function checkVersion() {
-  const list = await daemonList();
-  if (!list || list.protocol === PROTOCOL) return;
-  const r = await daemonCall<{ ok: boolean }>({ op: "shutdown" });
-  if (!r?.ok) throw new Error("a session daemon of another Pi for VS Code version still runs sessions; it is replaced when they end");
-  await new Promise((r) => setTimeout(r, 300));
+  const stale = await replaceStale();
+  if (stale && stale.protocol !== PROTOCOL) throw new Error("a session daemon of another Pi for VS Code version still runs sessions; it is replaced when they end");
 }
 
 /** A connection to the daemon. Starts the daemon if it does not run. */
 export async function connectDaemon(script: string): Promise<net.Socket> {
+  // Checked once: after that the status bar item looks for a stale daemon (src/daemon/ui.ts).
   usable ??= checkVersion();
   try {
     await usable;

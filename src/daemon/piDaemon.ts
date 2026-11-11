@@ -13,7 +13,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
-import { daemonDir, lineSplitter, PROTOCOL, socketPath, type AutoAnswer, type DaemonAttached, type DaemonFinished, type DaemonList, type DaemonOp, type DialogPolicy } from "./protocol";
+import { BUILD, daemonDir, lineSplitter, PROTOCOL, socketPath, type AutoAnswer, type DaemonAttached, type DaemonFinished, type DaemonList, type DaemonOp, type DialogPolicy } from "./protocol";
 
 /** A detached session that has no work and no pi output for this long stops. Its session is on disk. */
 const QUIET_MS = Number(process.env.PI_VSCODE_DAEMON_QUIET_MS) || 60_000;
@@ -104,12 +104,21 @@ function toPi(s: Session, rec: object) {
 
 function openSession(op: Extract<DaemonOp, { op: "open" }>, sock: net.Socket): Session | undefined {
   const target = targetOf(op.args, op.cwd);
-  const held = [...sessions.values()].find((s) => !s.exited && ((!!target.file && !!s.file && path.resolve(s.file) === target.file) || (!!target.id && s.id === target.id)));
+  // A process that the daemon stopped is on its way out: it is not given to a client again.
+  const held = [...sessions.values()].find((s) => !s.exited && !s.stopped && ((!!target.file && !!s.file && path.resolve(s.file) === target.file) || (!!target.id && s.id === target.id)));
   if (held) {
     if (held.client) {
-      // Two processes must not write to one session file.
-      sock.end(JSON.stringify({ type: "daemon_exit", code: null, signal: null, error: "This session is open in another VS Code window." }) + "\n");
-      return undefined;
+      if (!op.takeover) {
+        // Two processes must not write to one session file.
+        log(`refuse ${held.key}: it has a client`);
+        sock.end(JSON.stringify({ type: "daemon_exit", code: null, signal: null, error: "This session is open in another VS Code window." }) + "\n");
+        return undefined;
+      }
+      // The window where the user opens the session gets it. The client that had it is often not a
+      // window any more: after a reload or a new connection, the old extension host can stay for hours.
+      log(`takeover ${held.key}`);
+      held.client.end(JSON.stringify({ type: "daemon_exit", code: null, signal: null, error: "This session moved to another VS Code window." }) + "\n");
+      held.client = undefined;
     }
     attach(held, sock, op.policy);
     return held;
@@ -185,6 +194,10 @@ function onExit(s: Session, code: number | null, signal: string | null, err?: Er
   clearTimeout(s.quiet);
   for (const d of s.dialogs.values()) clearTimeout(d.timer);
   log(`exit ${s.key} code=${code} signal=${signal} ${err?.message ?? ""}`);
+  if (retiring) {
+    if (!sessions.size) shutdown();
+    return;
+  }
   if (s.client) {
     s.client.end(JSON.stringify({ type: "daemon_exit", code, signal, error: err?.message, errorCode: (err as any)?.code }) + "\n");
     s.client = undefined;
@@ -311,6 +324,7 @@ function listing(): DaemonList {
   finished = finished.filter((f) => Date.now() - f.finishedAt < FINISHED_TTL_MS);
   return {
     protocol: PROTOCOL,
+    build: BUILD,
     pid: process.pid,
     sessions: [...sessions.values()].map((s) => ({
       key: s.key, pid: s.proc.pid, cwd: s.cwd, file: s.file, id: s.id, name: s.name, busy: s.busy,
@@ -320,9 +334,32 @@ function listing(): DaemonList {
   };
 }
 
+let retiring = false;
+
+/**
+ * Stop all sessions and exit: a daemon of a newer build takes over. The clients lose their
+ * connection without a word, so they know that the daemon went away and start their session again.
+ */
+function retire() {
+  if (retiring) return;
+  retiring = true;
+  log("retire");
+  // Closing the server removes the socket file, so the new daemon can listen at once.
+  server.close();
+  for (const s of sessions.values()) {
+    s.silent = true;
+    s.client = undefined;
+    stop(s);
+  }
+  for (const c of conns) c.destroy();
+  if (!sessions.size) return shutdown();
+  setTimeout(shutdown, 4000);
+}
+
 function shutdown() {
   log("exit");
-  if (process.platform !== "win32") {
+  // After `retire` the path can belong to the new daemon already.
+  if (process.platform !== "win32" && !retiring) {
     try {
       fs.unlinkSync(socketPath());
     } catch {}
@@ -382,6 +419,9 @@ const server = net.createServer((sock) => {
         sock.end("{}\n");
         break;
       }
+      case "retire":
+        sock.end("{}\n", () => retire());
+        break;
       case "shutdown":
         // Only a daemon without sessions stops on request (a newer extension starts its own).
         sock.end(JSON.stringify({ ok: !sessions.size }) + "\n", () => !sessions.size && shutdown());
@@ -416,7 +456,7 @@ server.on("error", (err: NodeJS.ErrnoException) => {
 
 server.on("listening", () => {
   if (process.platform !== "win32") fs.chmodSync(socketPath(), 0o600);
-  log(`listening pid=${process.pid} protocol=${PROTOCOL}`);
+  log(`listening pid=${process.pid} protocol=${PROTOCOL} build=${BUILD}`);
   idleCheck();
 });
 
@@ -426,5 +466,6 @@ try {
 } catch {}
 // The terminal of the process that started the daemon goes away; the daemon stays.
 process.on("SIGHUP", () => {});
+process.on("SIGTERM", () => retire());
 process.on("uncaughtException", (err) => log(`uncaught: ${err.stack ?? err}`));
 server.listen(socketPath());

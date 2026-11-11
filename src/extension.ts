@@ -488,6 +488,8 @@ export function activate(context: vscode.ExtensionContext) {
   const daemonUi = initDaemonUi(context, {
     cwd: workspaceCwd,
     running: () => PiController.running(),
+    files: () => PiController.openFiles(),
+    log: (line) => output.appendLine(line),
     open: (file) => void target().then((c) => c?.open(file)).then(() => daemonUi.refresh(), (err) => vscode.window.showErrorMessage(`Pi: ${err.message ?? err}`)),
     show: (file) => {
       const owner = PiController.ownerOf(file);

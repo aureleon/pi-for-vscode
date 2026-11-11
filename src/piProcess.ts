@@ -60,12 +60,12 @@ export class PiProcess extends EventEmitter {
         // Stopped while the connection came up: nothing is open in the daemon yet.
         if (!this.alive) return sock.destroy();
         this.sock = sock;
-        sock.write(JSON.stringify({ op: "open", command: this.command, args: this.args, cwd: this.cwd, env: this.env, policy: daemon.policy }) + "\n");
+        sock.write(JSON.stringify({ op: "open", command: this.command, args: this.args, cwd: this.cwd, env: this.env, policy: daemon.policy, takeover: daemon.takeover }) + "\n");
         for (const line of this.outbox ?? []) sock.write(line);
         this.outbox = undefined;
         sock.on("data", lineSplitter((line) => this.handleLine(line)));
         sock.on("error", () => {});
-        sock.on("close", () => this.onDaemonExit(null, null, new Error("lost the connection to the pi session daemon")));
+        sock.on("close", () => this.onDaemonExit(null, null, Object.assign(new Error("lost the connection to the pi session daemon"), { code: "PI_DAEMON_LOST" })));
       },
       (err) => {
         if (!this.alive) return;

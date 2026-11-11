@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import type { DaemonFinished, DaemonSession, DialogPolicy } from "./protocol";
-import { daemonCall, daemonList, type DaemonOptions } from "./client";
+import type { DaemonFinished, DaemonList, DaemonSession, DialogPolicy } from "./protocol";
+import { daemonCall, daemonList, isStale, replaceStale, workingIn, type DaemonOptions } from "./client";
 
 /**
  * The one Pi item in the status bar. It shows the sessions that work in this window and the
@@ -17,11 +17,15 @@ export function daemonOptions(context: vscode.ExtensionContext): DaemonOptions |
   return { script: path.join(context.extensionPath, "dist", "pi-daemon.js"), policy: cfg.get<DialogPolicy>("detachedDialogs", "wait") };
 }
 
-/** Session files that detached processes in the daemon have open. Another process must not open them: start them, and the daemon gives the process back. */
-export async function detachedFiles(context: vscode.ExtensionContext): Promise<Set<string>> {
+/**
+ * Session files that processes in the daemon have open: detached ones, and the ones of other clients
+ * (another window, or an extension host that stayed after a reload). A second process must not open
+ * such a file: start it, and the daemon gives the process that has it.
+ */
+export async function daemonFiles(context: vscode.ExtensionContext): Promise<Set<string>> {
   if (!daemonOptions(context)) return new Set();
   const list = await daemonList();
-  return new Set((list?.sessions ?? []).filter((s) => !s.attached && s.file).map((s) => path.resolve(s.file!)));
+  return new Set((list?.sessions ?? []).filter((s) => s.file).map((s) => path.resolve(s.file!)));
 }
 
 export function duration(ms: number): string {
@@ -37,6 +41,10 @@ export interface DaemonUiHost {
   cwd(): string;
   /** The sessions that work in this window. */
   running(): { title: string; where: string; file?: string; show(): void }[];
+  /** The session files that the processes of this window have open. */
+  files(): Set<string>;
+  /** Write a line to the Pi output. */
+  log(line: string): void;
   /** Open the session file in a chat. */
   open(file: string): void;
   /** Show the chat that has the session file, if one has. */
@@ -44,6 +52,7 @@ export interface DaemonUiHost {
 }
 
 export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHost) {
+  const output = (line: string) => host.log(line);
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   item.command = "pi.daemonSessions";
   const here = (cwd: string) => path.resolve(cwd) === path.resolve(host.cwd());
@@ -88,13 +97,43 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
     item.show();
   };
 
+  let warned = false;
+  /**
+   * A daemon of an older build runs (the extension was updated). End it when no session works in it,
+   * so that the daemon of this build starts. Until then, say so once and offer to end it now.
+   */
+  const replace = async (stale: DaemonList) => {
+    // The daemon does not see all work (child sessions, a compaction); this window sees its own.
+    const working = Math.max(workingIn(stale), host.running().length);
+    if (!working) {
+      output(`[pi] replacing the session daemon of an older build (pid ${stale.pid})`);
+      await replaceStale();
+      return;
+    }
+    if (warned) return;
+    warned = true;
+    const now = "Stop and Replace Now";
+    const pick = await vscode.window.showInformationMessage(
+      `Pi: a session daemon from before the update still runs ${working} working session${working === 1 ? "" : "s"}. The new daemon starts when ${working === 1 ? "it finishes" : "they finish"}.`,
+      now,
+    );
+    if (pick !== now) return;
+    output(`[pi] replacing the session daemon of an older build (pid ${stale.pid}); its working sessions stop`);
+    await replaceStale(true);
+    void refresh();
+  };
+
   let refreshing = false;
   /** Ask the daemon for its sessions, then draw the item. */
   const refresh = async () => {
     if (refreshing) return;
     refreshing = true;
     try {
-      const list = await daemonList();
+      let list = await daemonList();
+      if (list && isStale(list) && daemonOptions(context)) {
+        await replace(list);
+        list = await daemonList();
+      }
       known = list?.sessions ?? [];
       render();
       if (list?.finished.length) await report(list.finished);
@@ -147,9 +186,11 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
     const list = await daemonList();
     known = list?.sessions ?? known;
     const running = host.running();
-    const mine = new Set(running.map((r) => r.file).filter(Boolean));
-    // From the daemon: the sessions without a window, and the ones that work in another window.
-    const sessions = known.filter((s) => (!s.attached || s.busy || s.waiting) && !(s.attached && s.file && mine.has(path.resolve(s.file))));
+    const mine = host.files();
+    // From the daemon: the sessions without a window, and the ones of other clients (another window, or an
+    // extension host that stayed after a reload), also idle ones: they block the session here until they stop.
+    // This window's own sessions are in `running`, or idle (warm tabs) and not listed.
+    const sessions = known.filter((s) => (s.file ? !(s.attached && mine.has(path.resolve(s.file))) : !s.attached && (s.busy || !!s.waiting)));
     type Item = vscode.QuickPickItem & { s?: DaemonSession; setting?: Setting; show?: () => void };
     const qp = vscode.window.createQuickPick<Item>();
     const stopButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon("debug-stop"), tooltip: "Stop this session" };
@@ -188,9 +229,9 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
       if (show) return show();
       if (setting) return void change(setting);
       if (!s?.file) return;
-      if (s.attached) {
-        if (!host.show(s.file)) vscode.window.showInformationMessage("Pi: this session is open in another VS Code window.");
-      } else if (here(s.cwd)) host.open(s.file);
+      // A session of this window is shown. Another one comes to this window (the daemon takes it from the client that has it).
+      if (host.show(s.file)) return;
+      if (here(s.cwd)) host.open(s.file);
       else vscode.window.showInformationMessage(`Pi: this session belongs to ${s.cwd}. Open that folder to get it back.`);
     });
     qp.onDidHide(() => qp.dispose());

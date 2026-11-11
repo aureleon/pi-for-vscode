@@ -3,11 +3,15 @@ import * as esbuild from "esbuild";
 
 const watch = process.argv.includes("--watch");
 
+// The time of the build. A daemon of an older build is replaced by the extension of a newer one (src/daemon/client.ts).
+const define = { __PI_BUILD__: String(Date.now()) };
+
 const configs = [
   {
     entryPoints: ["src/extension.ts"],
     bundle: true,
     outfile: "dist/extension.js",
+    define,
     platform: "node",
     format: "cjs",
     target: "node18",
@@ -30,6 +34,7 @@ const configs = [
     entryPoints: ["src/daemon/piDaemon.ts"],
     bundle: true,
     outfile: "dist/pi-daemon.js",
+    define,
     platform: "node",
     format: "cjs",
     target: "node18",

@@ -11,7 +11,7 @@ import { slimTree } from "./treeData";
 import { createPiTerminal, piTerminalName } from "./piTerminal";
 import { completePath } from "./pathComplete";
 import { openDirectory, openPath } from "./openPath";
-import { daemonOptions, detachedFiles, duration } from "./daemon/ui";
+import { daemonOptions, daemonFiles, duration } from "./daemon/ui";
 import { daemonList } from "./daemon/client";
 import { activeModules, hiddenWidgets, hostModules, moduleEntryTypes, modulePiExtensions, type ExtSession, type HostIntegration, type HostIntegrationInstance } from "./integrations";
 
@@ -471,8 +471,8 @@ export class PiController implements vscode.Disposable {
           s.pi.stop();
         }
       }
-      // A session that works in the daemon without a window is not a warm tab: it opens when you ask for it.
-      const detached = await detachedFiles(this.context);
+      // A session that the daemon has for another client or without a window is not a warm tab: it opens when you ask for it.
+      const held = await daemonFiles(this.context);
       const shown = this.tabs.findIndex((t) => t.key === this.shownKey);
       // The nearest tabs first: the ones you are most likely to open next.
       const order = this.tabs
@@ -482,7 +482,7 @@ export class PiController implements vscode.Disposable {
       for (const key of order) {
         if (this.disposed || this.warm.length >= this.warmLimit || !this.active || this.terminal) break;
         if (key.startsWith("bg:") || this.sessionOfTab(key) || !fs.existsSync(key)) continue;
-        if (PiController.ownerOf(key) || this.filesInUse().has(path.resolve(key)) || detached.has(path.resolve(key))) continue;
+        if (PiController.ownerOf(key) || this.filesInUse().has(path.resolve(key)) || held.has(path.resolve(key))) continue;
         const args = [...withoutSessionArgs(user), ...this.extensionArgs(), "--session", key];
         const s = this.spawn(command, args, this.env);
         s.claim = key;
@@ -618,7 +618,7 @@ export class PiController implements vscode.Disposable {
 
     this.args = args;
     this.pendingKey = claim ?? (sessionId ? this.tabs.find((t) => t.id === sessionId)?.key : undefined);
-    this.active = this.spawn(command, args, env);
+    this.active = this.spawn(command, args, env, true);
     this.active.claim = claim;
     void this.adoptDetached(command, env);
     this.updateStatus();
@@ -627,10 +627,12 @@ export class PiController implements vscode.Disposable {
     await this.sendInit("init");
   }
 
-  private spawn(command: string, args: string[], env: NodeJS.ProcessEnv): Session {
+  /** `takeover`: the user opens this session here, so it comes to this window if another client of the daemon has it. */
+  private spawn(command: string, args: string[], env: NodeJS.ProcessEnv, takeover = false): Session {
     this.output.appendLine(`[pi] starting: ${command} --mode rpc ${args.join(" ")} (cwd ${this.cwd})`);
     // With the session daemon, the process runs there and outlives this window (setting `pi.keepSessionsAlive`).
-    const pi = new PiProcess(command, args, this.cwd, env, daemonOptions(this.context));
+    const daemon = daemonOptions(this.context);
+    const pi = new PiProcess(command, args, this.cwd, env, daemon && { ...daemon, takeover });
     const s = this.wrap(pi, command);
     pi.start();
     return s;
@@ -659,6 +661,7 @@ export class PiController implements vscode.Disposable {
     pi.on("attached", (info: any) => this.onAttached(s, info));
     pi.on("exit", (code: number | null, signal: string | null, err?: Error) => {
       this.output.appendLine(`[pi] exited code=${code} signal=${signal} ${err?.message ?? ""}`);
+      const wasBusy = this.isBusy(s);
       s.state.isStreaming = false;
       for (const h of this.hooks(s)) h.onExit?.(s.handle);
       if (this.spare === s) {
@@ -677,6 +680,14 @@ export class PiController implements vscode.Disposable {
         return;
       }
       if (this.active !== s) return;
+      // The daemon went away (a newer build replaced it, or it crashed): the session is on disk, start it again.
+      if ((err as any)?.code === "PI_DAEMON_LOST" && !this.disposed && Date.now() - this.daemonLostAt > 30_000) {
+        this.daemonLostAt = Date.now();
+        this.output.appendLine("[pi] the session daemon went away; the session starts again");
+        if (wasBusy) vscode.window.showWarningMessage(`Pi: the session daemon stopped while "${this.titleOf(s)}" worked. The session starts again; its run did not finish.`);
+        this.start(PiController.fileOf(s)).catch((e) => this.output.appendLine(`[pi] start failed: ${e.message ?? e}`));
+        return;
+      }
       const hint = (err as any)?.code === "ENOENT"
         ? `Could not find the \`${command}\` executable. Install pi or set "pi.path" in settings.`
         : undefined;
@@ -743,6 +754,9 @@ export class PiController implements vscode.Disposable {
     await this.openSession(file);
   }
 
+  /** When this chat last started its session again because the daemon went away: not again at once, if the new daemon fails too. */
+  private daemonLostAt = 0;
+
   /** Keep a busy session running while the webview shows another one. */
   private sendToBackground(s: Session) {
     this.background.add(s);
@@ -803,6 +817,18 @@ export class PiController implements vscode.Disposable {
 
   private static updateSharedStatus() {
     PiController.onStatusChanged?.();
+  }
+
+  /** The session files that the processes of this window have open. */
+  static openFiles(): Set<string> {
+    const files = new Set<string>();
+    for (const c of PiController.all) {
+      for (const s of [c.active, c.spare, ...c.background, ...c.warm]) {
+        const f = s?.pi.running ? PiController.fileOf(s) : undefined;
+        if (f) files.add(f);
+      }
+    }
+    return files;
   }
 
   /** The sessions that work in this window, for the status bar item and its list. */
@@ -2338,15 +2364,16 @@ export class PiController implements vscode.Disposable {
       return;
     }
     if (!this.pi?.running) return this.start(id);
-    // A process in the daemon works on this session without a window. A start of the file gets that
-    // process; a switch of this process to the file would make a second writer.
+    // A process in the daemon has this session, without a window or for another client (this window's
+    // own processes were found above). A start of the file gets that process; a switch of this
+    // process to the file would make a second writer.
     if (!this.isRunning && daemonOptions(this.context)) {
       const gen = ++this.openGen;
       this.pendingKey = id;
-      const detached = await detachedFiles(this.context);
+      const held = await daemonFiles(this.context);
       if (gen !== this.openGen) return;
       this.pendingKey = undefined;
-      if (detached.has(path.resolve(id))) return this.start(id, undefined, { keepRunning: true });
+      if (held.has(path.resolve(id))) return this.start(id, undefined, { keepRunning: true });
     }
     // switch_session would end the extensions' work (session_shutdown), so a busy process gets replaced instead.
     if (this.isRunning) return this.start(id, undefined, { keepRunning: true });
