@@ -61,6 +61,10 @@
         "title": "Pi: Show Running Sessions"
       },
       {
+        "command": "pi.daemonSessions",
+        "title": "Pi: Show Sessions in the Daemon"
+      },
+      {
         "command": "pi.restart",
         "title": "Pi: Restart Agent Process",
         "icon": "$(debug-restart)"
@@ -241,6 +245,36 @@
             "Open the pi TUI in the terminal panel"
           ],
           "description": "Where \"Pi: Open Session in Terminal\" opens the pi TUI."
+        },
+        "pi.keepSessionsAlive": {
+          "type": "string",
+          "enum": [
+            "off",
+            "remote",
+            "always"
+          ],
+          "default": "off",
+          "enumDescriptions": [
+            "Sessions stop when the VS Code window closes or disconnects",
+            "Only in remote windows (for example Remote-SSH): sessions run in a daemon on the remote host",
+            "Sessions always run in a daemon, also on the local machine"
+          ],
+          "description": "Run pi sessions in a daemon apart from VS Code. A session that works keeps working when the window closes or the connection to a remote host drops. You get it back when you open the folder again. Applies to sessions that start after the change."
+        },
+        "pi.detachedDialogs": {
+          "type": "string",
+          "enum": [
+            "wait",
+            "deny",
+            "acceptRecommended"
+          ],
+          "default": "wait",
+          "enumDescriptions": [
+            "The session waits until you open it again",
+            "Cancel the question, so that the session goes on without the action",
+            "Accept: confirm a yes/no question, and select the option marked \"(Recommended)\" or else the first option. A question for free text waits."
+          ],
+          "description": "What happens when a session asks a question (a confirmation or a selection) while no VS Code window has it (see pi.keepSessionsAlive). Applies to sessions that start after the change."
         },
         "pi.warmTabs": {
           "type": "number",

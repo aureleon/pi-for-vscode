@@ -7,6 +7,7 @@ Notes for coding agents that work on Pi for VS Code.
 - `src/extension.ts`: activation, commands, sidebar view and editor tabs. Each chat gets one `PiController`.
 - `src/controller.ts`: the host side of one chat. It runs `pi --mode rpc` processes (one per session; busy sessions can run in the background), sends snapshots and events to the webview, and handles the built-in slash commands that RPC mode does not have.
 - `src/piProcess.ts`: JSONL RPC client. Split stdout only on `\n`.
+- `src/daemon/piDaemon.ts`: the session daemon (setting `pi.keepSessionsAlive`). It runs the pi processes apart from the extension host, so that sessions outlive the window. `PiProcess` connects to it (`src/daemon/client.ts`); `src/daemon/ui.ts` is its status bar item. `piDaemon.ts` runs with plain node: it imports only `protocol.ts`, never `vscode` or the other files. Change `PROTOCOL` in `src/daemon/protocol.ts` when its records change.
 - `src/sessionViewer.ts`, `src/sessionView.ts`: read-only session tab. It reads the session file and starts no pi process.
 - `src/bridge/piBridge.ts`: pi extension loaded with `pi -e`. It adds hidden `vscode:*` commands (tree navigation, labels). Keep it free of dependencies.
 - `webview/chat.ts`: the chat UI, in plain TypeScript and DOM (no framework). `mountChat()` builds one chat in an element; a page can hold several. Use `$()` and `frame`, not `document.getElementById` or `document.body`, and add document listeners with `on()`. `webview/styles.css` holds all styles.

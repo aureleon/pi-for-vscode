@@ -11,6 +11,8 @@ import { slimTree } from "./treeData";
 import { createPiTerminal, piTerminalName } from "./piTerminal";
 import { completePath } from "./pathComplete";
 import { openDirectory, openPath } from "./openPath";
+import { daemonOptions, detachedFiles, duration } from "./daemon/ui";
+import { daemonList } from "./daemon/client";
 import { activeModules, hiddenWidgets, hostModules, moduleEntryTypes, modulePiExtensions, type ExtSession, type HostIntegration, type HostIntegrationInstance } from "./integrations";
 
 const LAST_SESSION_KEY = "pi.lastSessionFile";
@@ -469,6 +471,8 @@ export class PiController implements vscode.Disposable {
           s.pi.stop();
         }
       }
+      // A session that works in the daemon without a window is not a warm tab: it opens when you ask for it.
+      const detached = await detachedFiles(this.context);
       const shown = this.tabs.findIndex((t) => t.key === this.shownKey);
       // The nearest tabs first: the ones you are most likely to open next.
       const order = this.tabs
@@ -478,7 +482,7 @@ export class PiController implements vscode.Disposable {
       for (const key of order) {
         if (this.disposed || this.warm.length >= this.warmLimit || !this.active || this.terminal) break;
         if (key.startsWith("bg:") || this.sessionOfTab(key) || !fs.existsSync(key)) continue;
-        if (PiController.ownerOf(key) || this.filesInUse().has(path.resolve(key))) continue;
+        if (PiController.ownerOf(key) || this.filesInUse().has(path.resolve(key)) || detached.has(path.resolve(key))) continue;
         const args = [...withoutSessionArgs(user), ...this.extensionArgs(), "--session", key];
         const s = this.spawn(command, args, this.env);
         s.claim = key;
@@ -616,6 +620,7 @@ export class PiController implements vscode.Disposable {
     this.pendingKey = claim ?? (sessionId ? this.tabs.find((t) => t.id === sessionId)?.key : undefined);
     this.active = this.spawn(command, args, env);
     this.active.claim = claim;
+    void this.adoptDetached(command, env);
     this.updateStatus();
     // After a preview of this file, "starting" would replace it with "Loading session".
     if (!(claim && this.previewFile === claim)) this.post({ type: "starting", fresh: !claim && !sessionId });
@@ -624,7 +629,8 @@ export class PiController implements vscode.Disposable {
 
   private spawn(command: string, args: string[], env: NodeJS.ProcessEnv): Session {
     this.output.appendLine(`[pi] starting: ${command} --mode rpc ${args.join(" ")} (cwd ${this.cwd})`);
-    const pi = new PiProcess(command, args, this.cwd, env);
+    // With the session daemon, the process runs there and outlives this window (setting `pi.keepSessionsAlive`).
+    const pi = new PiProcess(command, args, this.cwd, env, daemonOptions(this.context));
     const s = this.wrap(pi, command);
     pi.start();
     return s;
@@ -650,6 +656,7 @@ export class PiController implements vscode.Disposable {
     this.sessionOf.set(s.handle, s);
     pi.on("event", (e: RpcRecord) => this.onPiEvent(s, e));
     pi.on("stderr", (t: string) => this.output.append(t));
+    pi.on("attached", (info: any) => this.onAttached(s, info));
     pi.on("exit", (code: number | null, signal: string | null, err?: Error) => {
       this.output.appendLine(`[pi] exited code=${code} signal=${signal} ${err?.message ?? ""}`);
       s.state.isStreaming = false;
@@ -677,6 +684,63 @@ export class PiController implements vscode.Disposable {
       this.updateStatus();
     });
     return s;
+  }
+
+  /** The daemon gave this chat a session that ran without a VS Code window: say what happened in the meantime. */
+  private onAttached(s: Session, info: any) {
+    this.output.appendLine(`[pi] took a detached session from the daemon (detached for ${duration(info.detachedMs ?? 0)})`);
+    if (info.runStartedAt) s.runStartedAt = info.runStartedAt;
+    const auto: { title: string; answer: string }[] = info.auto ?? [];
+    for (const a of auto) this.output.appendLine(`[pi] answered automatically: "${a.title}" -> ${a.answer}`);
+    // A window reload is no news; a long time without a window, or an answer that the user did not give, is.
+    if (!auto.length && (info.detachedMs ?? 0) < 60_000) return;
+    const answers = auto.length ? ` ${auto.length} question${auto.length === 1 ? " was" : "s were"} answered automatically (see the Pi output).` : "";
+    const msg = `Pi: "${info.name || s.webTitle || "A session"}" kept working for ${duration(info.detachedMs ?? 0)} without VS Code.${answers}`;
+    vscode.window.showInformationMessage(msg, ...(auto.length ? ["Show Output"] : [])).then((pick) => pick && this.output.show());
+  }
+
+  /** The first chat that starts takes the detached sessions that are in no chat's tabs. */
+  private static restAdopter?: PiController;
+  private adopted = false;
+
+  /**
+   * Once for each chat, after its first start: take the sessions of this folder that work in the
+   * daemon without a window. They go on in the background of the chat that has their tab.
+   */
+  private async adoptDetached(command: string, env: NodeJS.ProcessEnv) {
+    if (this.adopted || !daemonOptions(this.context)) return;
+    this.adopted = true;
+    const list = await daemonList();
+    const user = withoutSessionArgs(vscode.workspace.getConfiguration("pi").get<string[]>("args") ?? []);
+    if (user.some((a) => ["--session-id", "--no-session"].includes(a))) return;
+    const hasTab = (c: PiController, f: string) => c.tabs.some((t) => path.resolve(t.key) === f);
+    for (const d of list?.sessions ?? []) {
+      if (this.disposed) return;
+      if (d.attached || !d.file || !(d.busy || d.waiting) || path.resolve(d.cwd) !== path.resolve(this.cwd)) continue;
+      const f = path.resolve(d.file);
+      if (PiController.ownerOf(f)) continue;
+      if (!hasTab(this, f)) {
+        if ([...PiController.all].some((c) => c !== this && hasTab(c, f))) continue;
+        if ((PiController.restAdopter ??= this) !== this) continue;
+      }
+      // The daemon answers the start of this file with the process that has it.
+      const s = this.spawn(command, [...user, ...this.extensionArgs(), "--session", f], env);
+      s.claim = f;
+      s.state = { sessionFile: f, sessionName: d.name, isStreaming: true };
+      this.background.add(s);
+      s.pi.request({ type: "get_commands" }).then((r: any) => this.setActiveModules(s, r?.commands), () => {});
+      s.pi.request({ type: "get_state" }).then((state: any) => {
+        this.setSessionState(s, state);
+        this.onBusyChanged(s);
+      }, () => {});
+    }
+    this.updateStatus();
+  }
+
+  /** Show the session file in this chat (from the status bar list of the daemon's sessions). */
+  async open(file: string) {
+    this.host.reveal();
+    await this.openSession(file);
   }
 
   /** Keep a busy session running while the webview shows another one. */
@@ -2288,6 +2352,16 @@ export class PiController implements vscode.Disposable {
       return;
     }
     if (!this.pi?.running) return this.start(id);
+    // A process in the daemon works on this session without a window. A start of the file gets that
+    // process; a switch of this process to the file would make a second writer.
+    if (!this.isRunning && daemonOptions(this.context)) {
+      const gen = ++this.openGen;
+      this.pendingKey = id;
+      const detached = await detachedFiles(this.context);
+      if (gen !== this.openGen) return;
+      this.pendingKey = undefined;
+      if (detached.has(path.resolve(id))) return this.start(id, undefined, { keepRunning: true });
+    }
     // switch_session would end the extensions' work (session_shutdown), so a busy process gets replaced instead.
     if (this.isRunning) return this.start(id, undefined, { keepRunning: true });
     // A tab that has no process yet: switch this process to it. The tab left behind gets a process
@@ -2417,7 +2491,14 @@ export class PiController implements vscode.Disposable {
 
   private disposed = false;
 
-  dispose() {
+  /**
+   * Close the chat. `stop`: the user closed it and agreed to stop its work. Else (the window closes,
+   * VS Code shuts down) a session that works goes on in the session daemon, if the daemon is in use.
+   */
+  dispose(stop = false) {
+    // Before the chat leaves the list: `isBusy` asks the modules.
+    const leave = (s: Session) => (!stop && this.isBusy(s) ? s.pi.detach(true) : s.pi.stop());
+    if (PiController.restAdopter === this) PiController.restAdopter = undefined;
     this.disposed = true;
     clearTimeout(this.prewarmTimer);
     for (const s of this.warm) s.pi.stop();
@@ -2426,9 +2507,9 @@ export class PiController implements vscode.Disposable {
     this.spare = undefined;
     PiController.all.delete(this);
     this.terminal = undefined; // leave a user's terminal session running
-    this.pi?.stop();
+    if (this.active) leave(this.active);
     this.active = undefined;
-    for (const s of this.background) s.pi.stop();
+    for (const s of this.background) leave(s);
     this.background.clear();
     for (const d of this.disposables) d.dispose();
     PiController.updateSharedStatus();

@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { PiController, type ChatHost, type Handover, type Tab } from "./controller";
+import { initDaemonUi } from "./daemon/ui";
 import { createPiTerminal } from "./piTerminal";
 import { SessionViewer } from "./sessionViewer";
 import { getShellEnv } from "./shellEnv";
@@ -279,7 +280,8 @@ class SidebarTiles implements vscode.Disposable {
     this.evenSizes();
     const nb = this.tiles[Math.max(0, i - 1)];
     this.chats.delete(id);
-    e.c.dispose();
+    // The user closed the tile (and agreed to stop its work).
+    e.c.dispose(true);
     e.inbox.dispose();
     controllers.delete(e.c);
     const next = this.chats.get(nb.id)?.c;
@@ -480,6 +482,17 @@ export function activate(context: vscode.ExtensionContext) {
     const list = uris?.length ? uris : uri ? [uri] : vscode.window.activeTextEditor ? [vscode.window.activeTextEditor.document.uri] : [];
     if (!list.length) return;
     (await target())?.insertText(list.map(refFor).join(" ") + " ");
+  });
+
+  // The session daemon in the status bar (setting `pi.keepSessionsAlive`).
+  const daemonUi = initDaemonUi(context, {
+    cwd: workspaceCwd,
+    open: (file) => void target().then((c) => c?.open(file)).then(() => daemonUi.refresh(), (err) => vscode.window.showErrorMessage(`Pi: ${err.message ?? err}`)),
+    show: (file) => {
+      const owner = PiController.ownerOf(file);
+      void owner?.showSession(file);
+      return !!owner;
+    },
   });
 
   output.appendLine(`[pi] extension activated (${path.basename(context.extensionPath)})`);

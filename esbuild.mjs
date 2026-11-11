@@ -26,6 +26,15 @@ const configs = [
     loader: { ".css": "text" },
   },
   {
+    // Session daemon: runs the pi processes apart from VS Code (setting `pi.keepSessionsAlive`).
+    entryPoints: ["src/daemon/piDaemon.ts"],
+    bundle: true,
+    outfile: "dist/pi-daemon.js",
+    platform: "node",
+    format: "cjs",
+    target: "node18",
+  },
+  {
     // pi-side bridge loaded via `pi -e` (adds tree navigation to RPC mode)
     entryPoints: ["src/bridge/piBridge.ts"],
     bundle: true,
