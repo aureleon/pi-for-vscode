@@ -96,18 +96,33 @@ export interface DaemonAttached {
  * A stream handler that calls `onLine` for each JSONL record. It splits only on LF (never on
  * U+2028/U+2029 like readline). TextDecoder, not node:string_decoder: other extensions in the shared
  * extension host can break that module. `stream: true` keeps split UTF-8 sequences intact.
+ *
+ * A record can be many MB (`get_messages` of a session with screenshots) and comes in chunks of
+ * about 64 KB. Each chunk is searched once, and the parts of an open line wait in a list: a search
+ * of the whole buffer at each chunk makes a long record take a time that grows with its square.
  */
 export function lineSplitter(onLine: (line: string) => void): (chunk: Buffer) => void {
   const decoder = new TextDecoder("utf-8");
-  let buffer = "";
+  /** The parts of the line that has no LF yet. */
+  let parts: string[] = [];
+  const emit = (line: string) => {
+    if (line.endsWith("\r")) line = line.slice(0, -1);
+    if (line.trim()) onLine(line);
+  };
   return (chunk) => {
-    buffer += decoder.decode(chunk, { stream: true });
+    const text = decoder.decode(chunk, { stream: true });
+    let start = 0;
     let nl: number;
-    while ((nl = buffer.indexOf("\n")) >= 0) {
-      let line = buffer.slice(0, nl);
-      buffer = buffer.slice(nl + 1);
-      if (line.endsWith("\r")) line = line.slice(0, -1);
-      if (line.trim()) onLine(line);
+    while ((nl = text.indexOf("\n", start)) >= 0) {
+      const end = text.slice(start, nl);
+      if (parts.length) {
+        parts.push(end);
+        const line = parts.join("");
+        parts = [];
+        emit(line);
+      } else emit(end);
+      start = nl + 1;
     }
+    if (start < text.length) parts.push(text.slice(start));
   };
 }
