@@ -4,6 +4,7 @@ import { WEB_INTEGRATIONS, WEB_WORKAROUNDS, type PiCommand, type WebIntegration,
 import { TreeMenu } from "./treeMenu";
 import { SPINNER } from "./spinner";
 import { createFind } from "./find";
+import { createLazyImages } from "./images";
 import { highlightMarkdown } from "./mdHighlight";
 import { StreamingMarkdown } from "./streamMd";
 import { fmtDuration } from "./duration";
@@ -310,6 +311,9 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   function imagesOf(content: any): any[] {
     return Array.isArray(content) ? content.filter((c) => c?.type === "image") : [];
   }
+  /** Transcript images load when they come near the view (webview/images.ts). */
+  const lazyImages = createLazyImages(scrollEl);
+  life.signal.addEventListener("abort", () => lazyImages.dispose());
   function fmtTokens(n: number): string {
     return n >= 1_000_000 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`;
   }
@@ -520,7 +524,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       const row = el("div", "user-images");
       for (const im of imgs) {
         const img = el("img");
-        img.src = `data:${im.mimeType};base64,${im.data}`;
+        lazyImages.set(img, im);
         row.appendChild(img);
       }
       bubble.appendChild(row);
@@ -841,7 +845,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       if (text || !imgs.length) this.setRow("out", isError ? "ERR" : "OUT", escapeHtml(text || "(no output)"), isError ? "err" : "");
       for (const im of imgs) {
         const img = el("img", "tool-image");
-        img.src = `data:${im.mimeType};base64,${im.data}`;
+        lazyImages.set(img, im);
         this.body.appendChild(img);
         this.body.classList.remove("hidden");
       }
@@ -2092,7 +2096,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
 
   on(frame, "click", (e) => {
     const t = e.target as HTMLElement | null;
-    if (!(t instanceof HTMLImageElement) || !t.matches(PREVIEWABLE) || t.closest(".lightbox")) return;
+    if (!(t instanceof HTMLImageElement) || !t.src || !t.matches(PREVIEWABLE) || t.closest(".lightbox")) return;
     e.preventDefault();
     e.stopPropagation();
     openLightbox(t.src, t.alt || "");

@@ -152,7 +152,10 @@ kbd {
 .user-toggle svg { width: 12px; height: 12px; transform: rotate(-90deg); transition: transform .1s; }
 .user-msg.collapsed .user-toggle svg { transform: rotate(90deg); }
 .user-images { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-.user-images img { max-height: 80px; border-radius: 4px; border: 1px solid var(--border); }
+.user-images img { max-height: 80px; border-radius: 4px; border: 1px solid var(--border); width: auto; height: auto; }
+/* An image that has not loaded yet (webview/images.ts): a box of its size (from its width and height attributes). */
+.user-images img:not([src]) { height: 80px; background: var(--card-bg); }
+.user-images img:not([src]):not([width]) { width: 80px; }
 /* Queued messages: dimmed user messages at the end of the transcript, one line each. */
 .queue { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
 .queued-msg {
@@ -281,7 +284,9 @@ kbd {
 .dl.del { background: var(--vscode-diffEditor-removedLineBackground, rgba(248, 81, 73, .2)); }
 .dl.same { opacity: .75; }
 .diff-sep { color: var(--muted); text-align: center; }
-.tool-image { max-width: 100%; display: block; margin: 6px; border-radius: 4px; }
+.tool-image { max-width: 100%; height: auto; display: block; margin: 6px; border-radius: 4px; }
+img.tool-image:not([src]) { background: var(--card-bg); }
+img.tool-image:not([src]):not([height]) { width: calc(100% - 12px); height: 200px; }
 .tool-content pre.muted { color: var(--muted); font-style: italic; }
 .tool-row.data .tool-content pre { max-height: 3.9em; }
 /* Nested tool calls (ctx.executeTool, e.g. from codemode): a small timeline under the calling card. */
