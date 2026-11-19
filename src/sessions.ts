@@ -33,7 +33,7 @@ function textOf(content: unknown): string {
   return "";
 }
 
-export async function listSessions(dir: string, limit = 60): Promise<SessionSummary[]> {
+export async function listSessions(dir: string): Promise<SessionSummary[]> {
   let names: string[];
   try {
     names = (await fs.promises.readdir(dir)).filter((n) => n.endsWith(".jsonl"));
@@ -52,10 +52,15 @@ export async function listSessions(dir: string, limit = 60): Promise<SessionSumm
   );
   const recent = stats
     .filter((s): s is { file: string; mtime: number } => !!s)
-    .sort((a, b) => b.mtime - a.mtime)
-    .slice(0, limit);
+    .sort((a, b) => b.mtime - a.mtime);
 
-  return Promise.all(recent.map(({ file, mtime }) => summarizeSession(file, mtime)));
+  // Read in batches so a large session folder does not open every log at once.
+  const summaries: SessionSummary[] = [];
+  for (let i = 0; i < recent.length; i += 16) {
+    const batch = recent.slice(i, i + 16);
+    summaries.push(...await Promise.all(batch.map(({ file, mtime }) => summarizeSession(file, mtime))));
+  }
+  return summaries;
 }
 
 /** Read one session file. A file that is missing or unreadable gives an empty summary. */

@@ -2253,7 +2253,8 @@ export class PiController implements vscode.Disposable {
 
   async pickSession(refresh = false) {
     const dir = this.state.sessionFile ? path.dirname(this.state.sessionFile) : defaultSessionDir(this.cwd);
-    const listed = await listSessions(dir, 150);
+    const limit = vscode.workspace.getConfiguration("pi").get<number>("sessionPickerLimit", 300);
+    const listed = await listSessions(dir);
     const archived = this.archivedSessions;
     const bgByFile = new Map([...this.background].filter((b) => b.state.sessionFile).map((b) => [path.resolve(b.state.sessionFile!), b]));
     const inUse = this.filesInUse();
@@ -2287,7 +2288,7 @@ export class PiController implements vscode.Disposable {
       const b = bgByFile.get(path.resolve(f));
       return b ? this.sessionKey(b) : f;
     };
-    const treeItems = ordered.flatMap(({ t, r }) => t.map(({ s, depth, parent, latest }) => {
+    const treeItems = ordered.filter(({ r }, i) => r < 2 || i < limit).flatMap(({ t, r }) => t.map(({ s, depth, parent, latest }) => {
       const file = path.resolve(s.file);
       const b = bgByFile.get(file);
       const isCurrent = file === current;
