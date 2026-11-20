@@ -52,6 +52,10 @@
   padding: 6px 10px; margin: 10px 0 6px; white-space: pre-wrap; word-break: break-word;
 }
 .sp-q:first-child { margin-top: 0; }
+.sp-queue { flex: 0 1 auto; max-height: 35%; overflow-y: auto; padding: 0 12px; }
+.sp-queue .queued-msg { cursor: auto; }
+.sp-queue .queued-actions { visibility: visible; }
+.sp-queue .icon-btn:disabled { opacity: 0.4; }
 .sp-a { padding: 2px 2px 8px; }
 .sp-thinking summary { cursor: pointer; color: var(--muted); margin-bottom: 4px; }
 .sp-thinking .md { color: var(--muted); font-style: italic; border-left: 2px solid var(--border); padding-left: 8px; margin-bottom: 6px; }

@@ -102,6 +102,7 @@ export class SidePanel {
       </div>
       <div class="sp-body"></div>
       <div class="sp-status"></div>
+      <div class="queue sp-queue hidden"></div>
       <div class="sp-composer">
         <textarea rows="2"></textarea>
       </div>`;
@@ -251,9 +252,26 @@ export class SidePanel {
 
   // ------------------------------------------------------------ requests
 
-  private send(text: string, requestId: number) {
-    this.inflight.add(requestId);
-    this.api.post({ op: "prompt", text, requestId });
+  private send(text: string, requestId: number, turn?: Turn) {
+    this.queue.push({ text, requestId, turn });
+    this.dispatchNext();
+  }
+
+  private activeRequest?: number;
+  private queue: { text: string; requestId: number; turn?: Turn }[] = [];
+
+  private dispatchNext() {
+    if (this.activeRequest !== undefined) return;
+    const next = this.queue.shift();
+    if (!next) return;
+    this.activeRequest = next.requestId;
+    if (next.turn) {
+      next.turn.startedAt = Date.now();
+      this.turns.push(next.turn);
+    }
+    this.inflight.add(next.requestId);
+    this.api.post({ op: "prompt", text: next.text, requestId: next.requestId });
+    this.tick();
   }
 
   submit(text: string, cmd = this.nextCmd) {
@@ -262,8 +280,7 @@ export class SidePanel {
     const requestId = ++this.reqSeq;
     const esc = (f: string) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const shown = q.replace(new RegExp(`(?:^|\\s)(?:${STRIP_FLAGS.map(esc).join("|")})(?=\\s|$)`, "g"), " ").trim();
-    this.turns.push({ question: shown, notes: [], pending: true, requestId, startedAt: Date.now() });
-    this.send(`/${cmd} ${q}`, requestId);
+    this.send(`/${cmd} ${q}`, requestId, { question: shown, notes: [], pending: true, requestId, startedAt: Date.now() });
     this.nextCmd = this.followCmd;
     this.input.value = "";
     this.resize();
@@ -277,10 +294,14 @@ export class SidePanel {
     this.send(`/${a.command}${args ? " " + args : ""}`, ++this.reqSeq);
     if (a.useInput) this.input.value = "";
     this.setStatus(a.status ?? "");
+    this.resize();
+    this.render();
   }
 
   /** pi finished a panel command. */
   onDone(requestId: number, error?: string, disposition?: string) {
+    if (this.activeRequest !== requestId) return;
+    this.activeRequest = undefined;
     setTimeout(() => this.inflight.delete(requestId), 250);
     const t = this.turns.find((x) => x.requestId === requestId);
     if (error && !t) this.setStatus(error, "error");
@@ -291,6 +312,7 @@ export class SidePanel {
       else if (!t.answer && !t.notes.length && disposition !== "handled") t.notes.push("The command was sent to the main chat.");
       else if (!t.answer && !t.notes.length) t.notes.push("No side answer was produced.");
     }
+    this.dispatchNext();
     this.render();
     this.onChange();
   }
@@ -298,7 +320,7 @@ export class SidePanel {
   /** Notices while a panel command runs show in the panel. */
   onNotify(message: string, level: string) {
     if (!this.inflight.size || HIDDEN_NOTICES.test(message)) return;
-    const pending = [...this.turns].reverse().find((t) => t.pending);
+    const pending = this.turns.find((t) => t.pending && t.requestId === this.activeRequest);
     if (pending && level === "error") pending.error = message;
     else this.setStatus(message, level);
     this.render();
@@ -318,7 +340,7 @@ export class SidePanel {
       if (live) this.setStatus("");
     } else if (data.question) {
       const question = String(data.question);
-      const own = this.turns.filter((t) => t.pending);
+      const own = this.turns.filter((t) => live && t.pending && t.requestId === this.activeRequest);
       const pending = own.find((t) => t.question === question) ?? (live ? own[0] : undefined);
       const turn: Turn = pending ?? { question, notes: [], pending: false, startedAt: data.timestamp ?? Date.now() };
       turn.answer = data.answer;
@@ -351,6 +373,8 @@ export class SidePanel {
   reset() {
     this.turns = [];
     this.inflight.clear();
+    this.activeRequest = undefined;
+    this.queue = [];
     this.hide();
     this.render();
   }
@@ -372,7 +396,10 @@ export class SidePanel {
     this.timer = window.setInterval(() => {
       const els = this.body.querySelectorAll<HTMLElement>(".sp-pending-time");
       if (!els.length) return clearInterval(this.timer);
-      els.forEach((el) => (el.textContent = fmtDuration(Date.now() - Number(el.dataset.start))));
+      els.forEach((el) => {
+        const elapsed = Date.now() - Number(el.dataset.start);
+        el.textContent = `${elapsed >= 30_000 ? "No update yet · " : ""}${fmtDuration(elapsed)}`;
+      });
     }, 1000);
   }
 
@@ -386,6 +413,98 @@ export class SidePanel {
     b.title = title;
     b.addEventListener("click", fn);
     return b;
+  }
+
+  private renderQueue() {
+    const queue = this.root.querySelector<HTMLElement>(".sp-queue")!;
+    queue.replaceChildren();
+    queue.classList.toggle("hidden", !this.queue.length);
+    const restore = (items: typeof this.queue) => {
+      this.input.value = [...items.map((item) => item.turn?.question ?? item.text), this.input.value].filter(Boolean).join("\n\n");
+      this.resize();
+    };
+    let dragged: (typeof this.queue)[number] | undefined;
+    this.queue.forEach((item, index) => {
+      const row = document.createElement("div");
+      row.className = "user-msg queued-msg";
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = "Queued";
+      const text = document.createElement("span");
+      text.className = "queued-text";
+      text.title = item.turn?.question ?? item.text;
+      text.textContent = text.title.replace(/\s+/g, " ").trim();
+      const actions = document.createElement("span");
+      actions.className = "queued-actions";
+      const control = (label: string, title: string, fn: () => number | undefined, disabled = false) => {
+        const b = this.button(label, title, () => {
+          const next = fn();
+          this.renderQueue();
+          const row = next === undefined ? undefined : queue.children[next];
+          (row?.querySelector<HTMLButtonElement>(`button[title="${title}"]:not(:disabled)`) ??
+            row?.querySelector<HTMLButtonElement>("button:not(:disabled)") ?? this.input).focus();
+        });
+        b.className = "icon-btn";
+        b.setAttribute("aria-label", title);
+        b.disabled = disabled;
+        actions.appendChild(b);
+      };
+      control("↓", "Move to input box to edit", () => {
+        restore(this.queue.splice(index, 1));
+        return undefined;
+      });
+      control("×", "Remove", () => {
+        this.queue.splice(index, 1);
+        return this.queue.length ? Math.min(index, this.queue.length - 1) : undefined;
+      });
+      const grip = document.createElement("span");
+      grip.className = "queued-grip";
+      grip.textContent = "⠿";
+      grip.title = "Drag to reorder";
+      row.draggable = true;
+      row.addEventListener("dragstart", (e) => {
+        dragged = item;
+        e.dataTransfer?.setData("text/plain", String(item.requestId));
+        row.classList.add("dragging");
+      });
+      const clearDrop = () => row.classList.remove("drop-before", "drop-after");
+      row.addEventListener("dragend", () => {
+        dragged = undefined;
+        row.classList.remove("dragging");
+        queue.querySelectorAll(".drop-before, .drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
+      });
+      const after = (e: DragEvent) => e.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2;
+      row.addEventListener("dragover", (e) => {
+        if (!dragged || dragged === item) return;
+        e.preventDefault();
+        row.classList.toggle("drop-after", after(e));
+        row.classList.toggle("drop-before", !after(e));
+      });
+      row.addEventListener("dragleave", clearDrop);
+      row.addEventListener("drop", (e) => {
+        if (!dragged || dragged === item) return;
+        e.preventDefault();
+        const from = this.queue.indexOf(dragged);
+        const target = this.queue.indexOf(item);
+        if (from < 0 || target < 0) return;
+        const to = target + (after(e) ? 1 : 0);
+        this.queue.splice(from, 1);
+        this.queue.splice(to - (from < to ? 1 : 0), 0, dragged);
+        this.renderQueue();
+      });
+      row.append(grip, tag, text, actions);
+      queue.appendChild(row);
+    });
+    if (this.queue.length) {
+      const clear = this.button("Clear queue", "Move all queued messages back to the input box", () => {
+        restore(this.queue);
+        this.queue = [];
+        this.renderQueue();
+        this.input.focus();
+      });
+      clear.className = "link queue-clear";
+      queue.appendChild(clear);
+    }
   }
 
   render() {
@@ -414,6 +533,7 @@ export class SidePanel {
       empty.innerHTML = `${escapeHtml(EMPTY_TEXT)}${mode?.hint ? `<br><span class="dim">${escapeHtml(mode.hint)}</span>` : ""}`;
       this.body.appendChild(empty);
     }
+    this.renderQueue();
     for (const t of this.turns) {
       const q = document.createElement("div");
       q.className = "sp-q md";
@@ -426,7 +546,7 @@ export class SidePanel {
       if (t.answer) html += `<div class="md">${md(t.answer)}</div>`;
       for (const n of t.notes) html += `<div class="sp-note">${escapeHtml(n)}</div>`;
       if (t.error) html += `<div class="sp-error">${escapeHtml(t.error)}</div>`;
-      if (t.pending) html += `<div class="sp-pending">${SPINNER} Thinking on the side… <span class="sp-pending-time" data-start="${t.startedAt}">0s</span></div>`;
+      if (t.pending) html += `<div class="sp-pending">${SPINNER} Waiting for a side answer… <span class="sp-pending-time" data-start="${t.startedAt}">0s</span></div>`;
       if (t.model && !t.pending) {
         const tok = t.usage?.totalTokens ? ` · ${t.usage.totalTokens.toLocaleString()} tokens` : "";
         html += `<div class="sp-meta">${escapeHtml(t.model)}${tok}</div>`;
