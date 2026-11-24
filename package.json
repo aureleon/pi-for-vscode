@@ -58,6 +58,11 @@
         "icon": "$(link-external)"
       },
       {
+        "command": "pi.newAcpChat",
+        "title": "Pi: New ACP Chat",
+        "icon": "$(add)"
+      },
+      {
         "command": "pi.showRunning",
         "title": "Pi: Show Running Sessions"
       },
@@ -158,6 +163,11 @@
       ],
       "editor/title": [
         {
+          "command": "pi.newAcpChat",
+          "when": "activeWebviewPanelId == 'pi.acpChat'",
+          "group": "navigation@5"
+        },
+        {
           "command": "pi.openInTerminal",
           "when": "activeWebviewPanelId == 'pi.panel'",
           "group": "navigation@1"
@@ -179,12 +189,12 @@
         },
         {
           "command": "pi.renameSession",
-          "when": "activeWebviewPanelId == 'pi.panel'",
+          "when": "activeWebviewPanelId == 'pi.panel' || activeWebviewPanelId == 'pi.acpChat'",
           "group": "overflow@0"
         },
         {
           "command": "pi.generateTitle",
-          "when": "activeWebviewPanelId == 'pi.panel'",
+          "when": "activeWebviewPanelId == 'pi.panel' || activeWebviewPanelId == 'pi.acpChat'",
           "group": "overflow@0"
         },
         {
@@ -227,6 +237,25 @@
           },
           "default": [],
           "description": "Extra CLI arguments passed to `pi --mode rpc` (e.g. [\"--model\", \"sonnet\"])."
+        },
+        "pi.acp.command": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "description": "Executable for new ACP chats. Leave empty to run setup on first use."
+        },
+        "pi.acp.args": {
+          "type": "array",
+          "scope": "machine",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Arguments passed to the ACP executable."
+        },
+        "pi.acp.accentColor": {
+          "type": "string",
+          "default": "",
+          "pattern": "^(?:#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}))?$",
+          "description": "Highlight color for ACP chats, as #RGB or #RRGGBB. Leave empty to use the VS Code theme. High contrast themes always use theme colors."
         },
         "pi.resumeLastSession": {
           "type": "boolean",
@@ -285,7 +314,7 @@
             "Cancel the question and keep going",
             "Answer yes, or pick the recommended option (else the first). Free-text questions wait."
           ],
-          "description": "What happens when a session asks a question (a confirmation or a selection) while no VS Code window has it (see pi.keepSessionsAlive). Applies to sessions that start after the change."
+          "description": "How the daemon answers Pi questions while no VS Code window is attached. ACP permission requests always wait. Applies to Pi sessions that start after the change."
         },
         "pi.warmTabs": {
           "type": "number",

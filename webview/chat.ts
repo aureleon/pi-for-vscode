@@ -1,4 +1,5 @@
 import { marked } from "marked";
+import { ACP_IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_IMAGE_TOTAL, type AcpComposer, type AcpConfigChoice, type AcpImage } from "../src/acp/sessionProtocol";
 import { ansiToHtml, escapeHtml, stripAnsi } from "./ansi";
 import { WEB_INTEGRATIONS, WEB_WORKAROUNDS, type PiCommand, type WebIntegration, type WebIntegrationInstance } from "./integrations";
 import { TreeMenu } from "./treeMenu";
@@ -29,6 +30,8 @@ const mdUser = (s: string) => marked.parse(s ?? "", { async: false, breaks: true
 // ------------------------------------------------------------------ icons
 
 const I = {
+  pi: `<svg viewBox="165 165 470 470" aria-hidden="true"><path fill="currentColor" d="M165.29 165.29H517.36V400H400V282.65H165.29ZM165.29 282.65H282.65V400H400V517.36H282.65V634.72H165.29ZM517.36 400H634.72V634.72H517.36Z"/></svg>`,
+  group: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="6.1" r="2"/><circle cx="3.4" cy="4.3" r="1.5"/><circle cx="12.6" cy="4.3" r="1.5"/><path d="M4.5 13v-.7a3.5 3.5 0 0 1 7 0v.7a8 8 0 0 1-7 0ZM3.3 10.8a5.3 5.3 0 0 1-2-.6v-.7a2.4 2.4 0 0 1 3.4-2.2m8 3.5a5.3 5.3 0 0 0 2-.6v-.7a2.4 2.4 0 0 0-3.4-2.2"/></svg>`,
   history: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 1-6.1 8.7l1-.4A5.5 5.5 0 1 0 3.3 5H5.5v1h-4V2h1v2.1A6.5 6.5 0 0 1 8 1.5zM7.5 4h1v3.8l2.6 1.5-.5.9-3.1-1.8V4z"/></svg>`,
   plus: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M7.5 2h1v5.5H14v1H8.5V14h-1V8.5H2v-1h5.5z"/></svg>`,
   newChat: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6a1.5 1.5 0 0 1-1.5 1.5H6.2L3 13.8V11h.5-.0A1.5 1.5 0 0 1 2 9.5v-6zm1.5-.5a.5.5 0 0 0-.5.5v6c0 .28.22.5.5.5H4v1.6L5.8 10h6.7a.5.5 0 0 0 .5-.5v-6a.5.5 0 0 0-.5-.5h-9zM7.5 4.5h1v1.5H10v1H8.5v1.5h-1V7H6V6h1.5z"/></svg>`,
@@ -64,15 +67,37 @@ export interface MountOptions {
   header?: boolean;
   /** The session viewer: no composer. */
   readonly?: boolean;
+  /** An ACP session uses the transcript and composer without Pi actions. */
+  acp?: boolean;
+  /** Mixed sidebar tiles keep a separate mounted chat for each backend. */
+  backend?: { pick(kind: "pi" | "acp", replaceEmpty?: boolean): void; pickTab(key: string): void; closeTab(key: string): void };
+  autofocus?: boolean;
   logo?: string;
   /** The chat is a tile in the sidebar: the header can split it and close it. */
   tiles?: { split(): void; close(): void };
+}
+
+export interface SidebarTab {
+  key: string;
+  title: string;
+  shown?: boolean;
+  busy?: boolean;
+  unread?: boolean;
+  replacedPi?: string;
+}
+
+export interface ComposerDraft {
+  text: string;
+  attachments: ({ kind: "image"; image: AcpImage; name: string } | { kind: "file"; ref: string; name: string })[];
 }
 
 export interface ChatInstance {
   /** A message from the host for this chat. */
   receive(m: any): void;
   focus(): void;
+  takeDraft(): ComposerDraft;
+  restoreDraft(draft: ComposerDraft): void;
+  setPeerTabs(tabs: SidebarTab[], active?: string): void;
   /** Number of tiles in the sidebar: closing a tile needs two, splitting needs fewer than `MAX_TILES`. */
   setTileCount(n: number): void;
   dispose(): void;
@@ -99,7 +124,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   on(frame, "focusin", () => (focusedFrame = frame));
   on(frame, "mousedown", () => (focusedFrame = frame));
   /** Keys that reach the document go to the chat that has focus, or that had it last. */
-  const isFocusedChat = () => frame.contains(document.activeElement) || (focusedFrame ?? frame) === frame;
+  const isFocusedChat = () => !frame.hidden && (frame.contains(document.activeElement) || (focusedFrame ?? frame) === frame);
 
   /** Width classes: `narrow` and `tiny` for compact layouts, `wide` for side panels beside the chat. */
   function watchWidth() {
@@ -159,7 +184,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       <div id="queue" class="queue hidden"></div>
       <div id="empty" class="empty">
         <div class="empty-loading">${SPINNER}<span>Loading session…</span></div>
-        <img class="logo" id="empty-logo" alt="pi">
+        ${opts.acp ? `<div class="logo acp-logo" aria-hidden="true">${I.group}</div>` : '<img class="logo" id="empty-logo" alt="">'}
         <div class="empty-text">Ask Pi anything about your code.</div>
         <div class="hint">Type <kbd>/</kbd> for commands, <kbd>@</kbd> to mention files, <kbd>!</kbd> to run a shell command.</div>
       </div>
@@ -172,11 +197,19 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         <div id="popup" class="popup hidden"></div>
         <div id="model-picker" class="model-picker hidden"></div>
         <div id="attachments" class="attachments hidden"></div>
+        ${opts.acp ? '<div id="acp-attachment-status" class="acp-composer-status attachment-status" role="status"></div><div id="acp-operation" class="acp-composer-status" role="status"></div>' : ""}
         <div class="input-wrap">
           <div id="input-hl" class="input-hl" aria-hidden="true"></div>
           <textarea id="input" rows="1" spellcheck="true" placeholder="Ask Pi…  (/ commands, @ files, ! shell)"></textarea>
         </div>
         <div class="toolbar">
+          <div class="backend-picker-wrap hidden" id="backend-picker-wrap">
+            <button type="button" class="icon-btn backend-picker" id="btn-backend" aria-haspopup="menu" aria-expanded="false"></button>
+            <div class="tb-menu backend-menu hidden" id="backend-menu" role="menu" aria-label="New session backend">
+              <button type="button" role="menuitem" data-backend="pi">${I.pi}<span>New Pi Session</span></button>
+              <button type="button" role="menuitem" data-backend="acp">${I.group}<span>New ACP Session</span></button>
+            </div>
+          </div>
           <button class="icon-btn" id="btn-attach" title="Attach files">${I.attach}</button>
           <button class="icon-btn" id="btn-slash" title="Commands">${I.slash}</button>
           <button class="chip" id="btn-model" title="Select model and effort"><span id="model-name">…</span><span class="chip-level" id="thinking-level"></span></button>
@@ -201,8 +234,70 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     frame.classList.add("readonly");
     $("empty").querySelector(".empty-text")!.textContent = "This session has no messages yet.";
   }
+  const ACP = !!opts.acp;
+  const backendMenu = $("backend-menu");
+  const backendButton = $("btn-backend");
+  function closeBackendMenu(restoreFocus = false) {
+    if (backendMenu.classList.contains("hidden")) return false;
+    backendMenu.classList.add("hidden");
+    backendButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus) backendButton.focus();
+    return true;
+  }
+  if (opts.backend) {
+    const wrap = $("backend-picker-wrap");
+    const items = [...backendMenu.querySelectorAll<HTMLButtonElement>("button")];
+    const name = ACP ? "ACP" : "Pi";
+    backendButton.innerHTML = ACP ? I.group : I.pi;
+    backendButton.title = `Backend: ${name}. Choose a backend for a new session`;
+    backendButton.setAttribute("aria-label", backendButton.title);
+    wrap.classList.remove("hidden");
+    const open = (index: number) => {
+      closeOverlay();
+      backendMenu.classList.remove("hidden");
+      backendButton.setAttribute("aria-expanded", "true");
+      items[index].focus();
+    };
+    backendButton.addEventListener("click", () => { if (!closeBackendMenu(true)) open(ACP ? 1 : 0); });
+    backendButton.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      e.preventDefault();
+      open(e.key === "ArrowDown" ? 0 : items.length - 1);
+    });
+    items.forEach((item) => item.addEventListener("click", () => {
+      closeBackendMenu(true);
+      opts.backend?.pick(item.dataset.backend === "acp" ? "acp" : "pi", true);
+    }));
+    backendMenu.addEventListener("keydown", (e) => {
+      const i = items.indexOf(document.activeElement as HTMLButtonElement);
+      const next = e.key === "ArrowDown" ? (i + 1) % items.length
+        : e.key === "ArrowUp" ? (i + items.length - 1) % items.length
+          : e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : -1;
+      if (next < 0) return;
+      e.preventDefault();
+      items[next].focus();
+    });
+    wrap.addEventListener("focusout", (e) => { if (!wrap.contains(e.relatedTarget as Node | null)) closeBackendMenu(); });
+    on(document, "pointerdown", (e) => { if (!wrap.contains(e.target as Node)) closeBackendMenu(); });
+    on(window, "blur", () => closeBackendMenu());
+  }
+  let acpComposer: AcpComposer = { images: false, config: false, compact: false, commands: [], canTitle: false };
+  let acpCommands: Command[] = [];
+  let acpReady = false;
+  let acpSending = false;
+  let acpOperation = "";
+  if (ACP) {
+    frame.classList.add("acp");
+    $("empty").querySelector(".empty-text")!.textContent = "Ask the ACP agent about your code.";
+    $("empty").querySelector(".hint")!.classList.add("hidden");
+    for (const id of ["tb-terminal", "tb-tree", "tb-history"]) $(id).classList.add("hidden");
+    $("tb-new").title = "New ACP Session";
+    $("tb-new").setAttribute("aria-label", "New ACP Session");
+    const piActions = "[data-cmd], [data-msg=restart]";
+    $("tb-menu").querySelectorAll(piActions).forEach((b) => b.classList.add("hidden"));
+  }
   frame.classList.add("loading"); // until the first snapshot (see setLoading)
-  $<HTMLImageElement>("empty-logo").src = LOGO;
+  if (!ACP) $<HTMLImageElement>("empty-logo").src = LOGO;
   const scrollEl = $("scroll");
   const messagesEl = $("messages");
   const input = $<HTMLTextAreaElement>("input");
@@ -246,13 +341,13 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   /** Output tokens of assistant messages that finished in this run. `usage` on events is per message, so the run total is summed here. */
   let runOutputDone = 0;
   /**
-   * Composer attachments. Images go to pi as image content. Other files go as an
-   * "@path" reference in the prompt text, so the model reads them with its tools.
+   * Images go as image content. Only Pi accepts other files as "@path" references.
    */
-  type Attachment = { kind: "image"; image: any; name: string } | { kind: "file"; ref: string; name: string };
+  type Attachment = ComposerDraft["attachments"][number];
   let attachments: Attachment[] = [];
-  /** Image types that pi sends to models as image content. Other types are attached as file paths. */
+  /** Image types that Pi sends inline. Other files go as paths. */
   const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+  let acpImageBytesPending = 0;
   const statuses = new Map<string, string>();
   const widgets = new Map<string, { lines: string[]; placement: string }>();
   /** Widgets the user minimized to their first line. They stay minimized while their lines change. */
@@ -1010,6 +1105,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         setRunning(true);
         break;
       case "agent_settled":
+        acpSending = false;
         setRunning(false);
         break;
       case "message_start":
@@ -1336,6 +1432,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     return l === "xhigh" ? "X-High" : l[0].toUpperCase() + l.slice(1);
   }
   function updateModel() {
+    if (ACP) return;
     const m = state.model;
     $("model-name").textContent = m ? (m.name ?? m.id) : "Select model";
     $("btn-model").title = m ? `${m.provider}/${m.id} — click to change model or effort` : "Select model";
@@ -1346,16 +1443,53 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   let lastStats: any;
   let compacting = false;
 
+  const acpIdle = () => acpReady && !running && !acpSending && !acpOperation;
+  const acpUsage = () => Number.isFinite(acpComposer.usage) ? acpComposer.usage : undefined;
+  const canAcpCompact = () => acpIdle() && acpComposer.compact;
+  const acpWaitReason = () => !acpReady ? "ACP agent is not ready" : acpOperation || "Wait for the ACP agent to finish";
+
+  function setAcpOperation(message: string) {
+    acpOperation = message;
+    $("acp-operation").textContent = message;
+  }
+
+  /** Keep disabled ACP controls focusable and hoverable so their tooltips still work. */
+  function setAcpControl(button: HTMLElement, enabled: boolean, title: string, label = title) {
+    button.setAttribute("aria-disabled", String(!enabled));
+    button.setAttribute("aria-label", label);
+    button.title = title;
+  }
+
+  function updateAcpControls() {
+    const { images, model, effort, config, canTitle } = acpComposer;
+    const idle = acpIdle();
+    const wait = acpWaitReason();
+    setAcpControl($("btn-attach"), acpReady && images,
+      !acpReady ? wait : images ? "Attach images" : "This ACP agent does not accept images", "Attach images");
+    setAcpControl($("btn-slash"), acpReady && !!acpCommands.length,
+      !acpReady ? wait : acpCommands.length ? "Commands" : "This ACP agent has no commands", "Commands");
+    $("model-name").textContent = model || (config ? "Configure agent" : "Model");
+    $("thinking-level").textContent = effort ?? "";
+    const selected = [model, effort].filter(Boolean).join(" · ");
+    const action = !idle ? wait : config ? "Configure ACP agent" : "This ACP agent does not support configuration";
+    setAcpControl($("btn-model"), idle && config, selected ? `${selected}\n${action}` : action,
+      selected ? `Configure ACP agent: ${selected}` : "Configure ACP agent");
+    const title = $("tb-menu").querySelector<HTMLElement>("[data-action=title]")!;
+    setAcpControl(title, idle && canTitle,
+      !idle ? wait : canTitle ? "Generate Session Title" : "Session title generation is unavailable", "Generate Session Title");
+  }
+
   /** Context-usage button in the toolbar: shows %, click compacts (like /compact). */
   function updateStats(s: any = lastStats) {
     lastStats = s;
     const ctx = $<HTMLButtonElement>("ctx");
     const cu = s?.contextUsage;
-    const pct = cu?.percent != null ? `${Math.round(cu.percent)}%` : "";
+    const percent = ACP ? acpUsage() : cu?.percent;
+    const pct = percent != null ? `${Math.round(percent)}%` : ACP ? "–" : "";
     ctx.classList.toggle("hidden", !pct && !compacting);
     ctx.classList.toggle("compacting", compacting);
-    ctx.disabled = compacting || running;
-    const frac = Math.max(0, Math.min(1, (cu?.percent ?? 0) / 100));
+    if (!ACP) ctx.disabled = compacting || running;
+    const frac = Math.max(0, Math.min(1, (percent ?? 0) / 100));
     const level = frac >= 0.9 ? "high" : frac >= 0.7 ? "warn" : "ok";
     ctx.dataset.level = compacting ? "busy" : level;
     // Ring gauge (r=6 → circumference ≈ 37.7) + percentage + hover-revealed action label.
@@ -1363,6 +1497,13 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     ctx.innerHTML = compacting
       ? `${SPINNER}<span class="ctx-pct">Compacting…</span>`
       : `<svg class="ctx-ring" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" class="ctx-track"/><circle cx="8" cy="8" r="6" class="ctx-fill" stroke-dasharray="${(frac * C).toFixed(2)} ${C}" transform="rotate(-90 8 8)"/></svg><span class="ctx-pct">${pct}</span><span class="ctx-action">Compact</span>`;
+    if (ACP) {
+      const usage = percent === undefined ? "Context usage unavailable" : `Context usage: ${pct}`;
+      const action = !acpIdle() ? acpWaitReason()
+        : !acpComposer.compact ? "This ACP agent does not support compaction" : "Click to compact context";
+      setAcpControl(ctx, canAcpCompact(), `${usage}\n${action}`);
+      return;
+    }
     const usage = cu
       ? `Context: ${cu.tokens != null ? fmtTokens(cu.tokens) : "?"} / ${fmtTokens(cu.contextWindow)} tokens (${pct || "?"})`
       : "Context usage";
@@ -1373,6 +1514,10 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         : `${usage}\nClick to compact now: older messages are summarized to free up context (/compact)`;
   }
   $("ctx").addEventListener("click", () => {
+    if (ACP) {
+      if (canAcpCompact()) post({ type: "acpCompact" });
+      return;
+    }
     if (compacting || running) return;
     post({ type: "builtin", name: "compact", arg: "" });
   });
@@ -1399,6 +1544,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       clearInterval(workingTimer);
     }
     updateSendButton();
+    if (ACP) updateAcpControls();
     updateStats();
   }
   /** Narrow chats (tiles side by side) get short placeholders without the key hints. */
@@ -1406,6 +1552,10 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   const isNarrow = () => frame.classList.contains("narrow");
   /** While pi compacts, messages wait in the queue and go to pi when compaction ends. */
   function updatePlaceholder() {
+    if (ACP) {
+      input.placeholder = running ? "Wait for the ACP agent…" : "Ask the ACP agent…";
+      return;
+    }
     if (isNarrow()) {
       input.placeholder = compacting ? "Queue for after compaction…" : running ? "Steer or queue…" : "Ask Pi…";
       return;
@@ -1531,6 +1681,10 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     $("tb-tree").addEventListener("click", () => post({ type: "builtin", name: "tree", arg: "" }));
     $("tb-history").addEventListener("click", () => post({ type: "builtin", name: "resume", arg: "" }));
     $("tb-new").addEventListener("click", () => {
+    if (ACP) {
+      opts.backend?.pick("acp");
+      return;
+    }
     // Show the new session now; the host sends it when it is ready (at once if a spare process waits).
     if (!running) {
       // Draw the new tab now, after all the tabs. The shown tab keeps its title as a plain tab.
@@ -1548,12 +1702,12 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     });
     menu.addEventListener("click", (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>("button");
-      if (!b) return;
+      if (!b || b.getAttribute("aria-disabled") === "true") return;
       closeMenu();
       if (b.dataset.action === "rename") renameInline();
-      else if (b.dataset.action === "title") post({ type: "builtin", name: "title", arg: "" });
+      else if (b.dataset.action === "title") post(ACP ? { type: "acpTitleRequest" } : { type: "builtin", name: "title", arg: "" });
       else if (b.dataset.action === "find") openFind();
-    else if (b.dataset.action === "closeTile") opts.tiles?.close();
+      else if (b.dataset.action === "closeTile") opts.tiles?.close();
       else if (b.dataset.cmd) post({ type: "runCommand", command: b.dataset.cmd });
       else if (b.dataset.msg) post({ type: b.dataset.msg });
     });
@@ -1582,12 +1736,49 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   }
 
   /** A session tab in the sidebar header (see `syncTabs` in controller.ts). */
-  interface TabInfo {
-    key: string;
-    title: string;
-    shown: boolean;
-    busy: boolean;
-    unread: boolean;
+  type TabInfo = SidebarTab;
+  let peerTabs: SidebarTab[] = [];
+  let peerActive: string | undefined;
+
+  function peerTab(t: SidebarTab, backend: "Pi" | "ACP", active = false) {
+    const tab = el("div", `tab${active ? " active" : ""}${t.busy ? " busy" : ""}${t.unread ? " unread" : ""}`);
+    tab.classList.add("backend-peer");
+    tab.dataset.backend = backend.toLowerCase();
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(active));
+    tab.title = `${t.title} (${backend})`;
+    if (backend === "ACP") tab.append(el("span", "acp-tab-dot"));
+    if (active) {
+      titleEl.textContent = t.title;
+      titleEl.classList.remove("placeholder");
+      tab.append(titleEl);
+    } else tab.append(el("span", "tab-label", escapeHtml(t.title)));
+    const close = el("button", "tab-close", I.close);
+    close.setAttribute("aria-label", `Close ${backend} tab`);
+    close.title = `Close ${backend} tab`;
+    close.addEventListener("click", (e) => {
+      e.stopPropagation();
+      opts.backend?.closeTab(t.key);
+    });
+    tab.append(el("span", "tab-mark", t.busy ? SPINNER : t.unread ? "●" : ""), close);
+    tab.addEventListener("click", () => { if (!active) opts.backend?.pickTab(t.key); });
+    tab.addEventListener("auxclick", (e) => { if (e.button === 1) opts.backend?.closeTab(t.key); });
+    return tab;
+  }
+
+  function setPeerTabs(tabs: SidebarTab[], active?: string) {
+    if (JSON.stringify(tabs) === JSON.stringify(peerTabs) && active === peerActive) return;
+    peerTabs = tabs;
+    peerActive = active;
+    if (ACP) renderPeerTabs();
+    else setTabsNow(lastTabs ?? [NEW_TAB]);
+  }
+
+  function renderPeerTabs() {
+    const strip = $("tb-tabs");
+    if (!opts.backend || strip.querySelector(".topbar-rename")) return;
+    strip.replaceChildren(...peerTabs.map((t) => peerTab(t, t.key.startsWith("acp-") ? "ACP" : "Pi", t.key === peerActive)));
+    strip.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
   /**
@@ -1697,6 +1888,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       tab.addEventListener("auxclick", (e) => e.button === 1 && post({ type: "tabClose", key: t.key }));
       strip.append(tab);
     }
+    for (const t of peerTabs) strip.append(peerTab(t, "ACP"));
     strip.querySelector(".tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
@@ -1712,7 +1904,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
    */
   function renameInline() {
     if (titleEl.classList.contains("hidden")) return;
-    const old = state.sessionName || lastTitle || "";
+    const old = state.sessionName || (ACP ? peerTabs.find((t) => t.key === peerActive)?.title : lastTitle) || "";
     // The session that the box is for: a click on another tab ends the rename after the webview shows that tab.
     const file = state.sessionFile;
     const box = el("input", "topbar-rename");
@@ -1730,7 +1922,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       const name = box.value.trim();
       box.remove();
       titleEl.classList.remove("hidden");
-      if (pendingTabs) renderTabs(pendingTabs);
+      if (ACP && opts.backend) renderPeerTabs();
+      else if (pendingTabs) renderTabs(pendingTabs);
       // Only a name that you changed: a box that closes as it was (a click elsewhere) does not name the session.
       if (save && name && name !== old) post({ type: "rename", file, name });
     };
@@ -1768,16 +1961,17 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   let sendBtnState = "";
   function updateSendButton() {
     const hasText = !!input.value.trim() || attachments.length > 0;
-    const stop = running && !hasText;
-    const retry = !running && !hasText && lastRole === "assistant" && !READONLY;
-    const key = `${stop}|${running}|${hasText}|${retry}`;
+    const stop = running && (ACP || !hasText);
+    const retry = !running && !hasText && lastRole === "assistant" && !READONLY && !ACP;
+    const disabled = !stop && !retry && (!hasText || (ACP && (!acpIdle() || acpImageBytesPending > 0)));
+    const key = `${stop}|${running}|${hasText}|${retry}|${disabled}`;
     if (key === sendBtnState) return;
     sendBtnState = key;
     sendBtn.innerHTML = stop ? I.stop : retry ? I.retry : I.send;
     sendBtn.classList.toggle("stop", stop);
     sendBtn.classList.toggle("retry", retry);
     sendBtn.title = stop ? "Stop (Esc)" : retry ? "Continue" : running ? "Queue message (Enter)" : "Send (Enter)";
-    sendBtn.toggleAttribute("disabled", !stop && !retry && !hasText);
+    sendBtn.toggleAttribute("disabled", disabled);
   }
 
   function renderAttachments() {
@@ -1786,11 +1980,17 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     a.innerHTML = "";
     attachments.forEach((at, i) => {
       const chip = el("div", "attachment");
-      chip.innerHTML =
-        at.kind === "image"
-          ? `<img src="data:${at.image.mimeType};base64,${at.image.data}"><span>${escapeHtml(at.name)}</span>`
-          : `<span class="attachment-icon">${FILE_ICON}</span><span>${escapeHtml(at.name)}</span>`;
-      if (at.kind === "file") chip.title = at.ref;
+      if (at.kind === "image") {
+        const img = el("img");
+        img.src = `data:${at.image.mimeType};base64,${at.image.data}`;
+        chip.appendChild(img);
+      } else {
+        chip.innerHTML = `<span class="attachment-icon">${FILE_ICON}</span>`;
+        chip.title = at.ref;
+      }
+      const name = el("span");
+      name.textContent = at.name;
+      chip.appendChild(name);
       const x = el("button", "icon-btn", I.close);
       x.addEventListener("click", () => {
         attachments.splice(i, 1);
@@ -1805,6 +2005,20 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   function submit(mode?: "steer" | "followUp") {
     const text = input.value;
     const trimmed = text.trim();
+    if (ACP) {
+      if (!acpIdle() || acpImageBytesPending) return;
+      const images = acpComposer.images ? attachments.flatMap((a) => a.kind === "image" ? [a.image] : []) : [];
+      if (!trimmed && !images.length) return;
+      // The host generates a title outside the prompt run, so it does not settle the run.
+      acpSending = trimmed !== "/title" || images.length > 0;
+      hidePopup();
+      post({ type: "prompt", text, images });
+      clearInput();
+      updateAcpControls();
+      updateStats();
+      stick = true;
+      return;
+    }
     if (!trimmed && !attachments.length) {
       if (running) post({ type: "abort" });
       return;
@@ -1846,6 +2060,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   function clearInput() {
     input.value = "";
     attachments = [];
+    if (ACP) $("acp-attachment-status").textContent = "";
     renderAttachments();
     resizeInput();
   }
@@ -1892,35 +2107,41 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     fileToken = undefined;
   }
 
+  function showCommandCompletions(query: string) {
+    const q = query.toLowerCase();
+    const all = ACP ? (acpReady ? acpCommands : [])
+      : [...commands.filter((c) => !BUILTINS.some((b) => b.name === c.name)), ...BUILTINS, ...commands.filter((c) => BUILTINS.some((b) => b.name === c.name))];
+    const seen = new Set<string>();
+    const list = all
+      .filter((c) => (seen.has(c.name) ? false : (seen.add(c.name), true)))
+      .filter((c) => c.name.toLowerCase().includes(q))
+      .sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)))
+      .slice(0, 50);
+    showPopup(
+      list.map((c) => ({
+        label: `/${c.name}`,
+        detail: c.description,
+        tag: c.source === "builtin" ? "" : c.source,
+        apply: () => {
+          input.value = `/${c.name} `;
+          hidePopup();
+          resizeInput();
+          input.focus();
+        },
+      })),
+    );
+  }
+
   function updateAutocomplete() {
     const v = input.value;
     const pos = input.selectionStart ?? v.length;
     // Slash commands: only at start, before the first space.
     const slash = v.match(/^\/(\S*)$/);
     if (slash && pos <= v.length) {
-      const q = slash[1].toLowerCase();
-      const all = [...commands.filter((c) => !BUILTINS.some((b) => b.name === c.name)), ...BUILTINS, ...commands.filter((c) => BUILTINS.some((b) => b.name === c.name))];
-      const seen = new Set<string>();
-      const list = all
-        .filter((c) => (seen.has(c.name) ? false : (seen.add(c.name), true)))
-        .filter((c) => c.name.toLowerCase().includes(q))
-        .sort((a, b) => Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)))
-        .slice(0, 50);
-      showPopup(
-        list.map((c) => ({
-          label: `/${c.name}`,
-          detail: c.description,
-          tag: c.source === "builtin" ? "" : c.source,
-          apply: () => {
-            input.value = `/${c.name} `;
-            hidePopup();
-            resizeInput();
-            input.focus();
-          },
-        })),
-      );
+      showCommandCompletions(slash[1]);
       return;
     }
+    if (ACP) return hidePopup();
     // @file mentions
     const before = v.slice(0, pos);
     const at = before.match(/(?:^|\s)@([^\s@]*)$/);
@@ -1975,8 +2196,9 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       if (e.key === "ArrowUp") { popupSel = (popupSel - 1 + popupItems.length) % popupItems.length; renderPopup(); e.preventDefault(); return; }
       if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
         const it = popupItems[popupSel];
-        // Enter on an exact slash command with no args submits directly.
-        if (e.key === "Enter" && it.label === input.value.trim()) { hidePopup(); }
+        // Send a typed /title even if the host did not advertise it.
+        const text = input.value.trim();
+        if (e.key === "Enter" && (it.label === text || (ACP && text === "/title"))) { hidePopup(); }
         else { e.preventDefault(); it.apply(); return; }
       }
       if (e.key === "Escape") { hidePopup(); e.preventDefault(); return; }
@@ -1996,9 +2218,11 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   });
   input.addEventListener("focus", cancelBlurHide);
   input.addEventListener("paste", (e) => {
-    const items = e.clipboardData?.items ?? ([] as any);
-    for (const it of items as DataTransferItemList) {
-      if (it.kind === "file") {
+    if (ACP && (!acpReady || !acpComposer.images)) return;
+    const items = e.clipboardData?.items ?? [];
+    if (ACP) $("acp-attachment-status").textContent = "";
+    for (const it of items) {
+      if (it.kind === "file" && (!ACP || it.type.startsWith("image/"))) {
         e.preventDefault();
         const f = it.getAsFile();
         if (f) readAttachment(f);
@@ -2006,11 +2230,31 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     }
   });
   const composer = $("composer");
-  composer.addEventListener("dragover", (e) => { e.preventDefault(); composer.classList.add("drag"); });
+  composer.addEventListener("dragover", (e) => {
+    if (ACP) {
+      const transfer = e.dataTransfer;
+      if (!transfer || !transfer.types.some((type) => type === "Files" || type === "text/uri-list")) return;
+      e.preventDefault();
+      const acceptsImage = acpReady && acpComposer.images
+        && [...transfer.items].some((it) => it.kind === "file" && (!it.type || ACP_IMAGE_TYPES.has(it.type)));
+      if (!acceptsImage) transfer.dropEffect = "none";
+      composer.classList.toggle("drag", acceptsImage);
+      return;
+    }
+    e.preventDefault();
+    composer.classList.add("drag");
+  });
   composer.addEventListener("dragleave", () => composer.classList.remove("drag"));
   composer.addEventListener("drop", (e) => {
     composer.classList.remove("drag");
     const files = e.dataTransfer?.files;
+    if (ACP) {
+      if (files?.length || e.dataTransfer?.types.includes("text/uri-list")) e.preventDefault();
+      if (!files?.length || !acpReady || !acpComposer.images) return;
+      $("acp-attachment-status").textContent = "";
+      for (const f of files) readAttachment(f);
+      return;
+    }
     if (files?.length) {
       e.preventDefault();
       for (const f of files) readAttachment(f);
@@ -2023,12 +2267,50 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       insertText(refs.join(" ") + " ");
     }
   });
-  /**
-   * Attach a pasted or dropped file. The webview does not get the file's path,
-   * so a file that is not an image goes to the host, which saves a copy that pi can read.
-   */
+  /** Count decoded bytes without decoding the data a second time. */
+  function imageBytes(data: string) {
+    return data.length * 3 / 4 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0);
+  }
+
+  function acpImageFits(mimeType: string, bytes: number) {
+    if (!acpReady || !acpComposer.images) return false;
+    const total = attachments.reduce((sum, a) => sum + (a.kind === "image" ? imageBytes(a.image.data) : 0), acpImageBytesPending);
+    const mib = 1024 * 1024;
+    const error = !ACP_IMAGE_TYPES.has(mimeType) ? "Attach a PNG, JPEG, GIF, or WebP image."
+      : bytes <= 0 ? "Cannot attach an empty image."
+        : bytes > MAX_IMAGE_BYTES ? `An image cannot exceed ${MAX_IMAGE_BYTES / mib} MiB.`
+          : total + bytes > MAX_IMAGE_TOTAL ? `Images cannot exceed ${MAX_IMAGE_TOTAL / mib} MiB per prompt.` : "";
+    if (error) $("acp-attachment-status").textContent = error;
+    return !error;
+  }
+
+  function addAcpImage(image: AcpImage, name: string) {
+    if (image?.type !== "image" || typeof image.data !== "string" || !acpImageFits(image.mimeType, imageBytes(image.data))) return;
+    attachments.push({ kind: "image", image, name });
+    renderAttachments();
+  }
+
+  /** Only Pi saves non-image files to the host so it can read them as paths. */
   function readAttachment(f: File) {
     const r = new FileReader();
+    if (ACP) {
+      if (!acpImageFits(f.type, f.size)) return;
+      // Reserve space before reading so a batch cannot exceed the prompt limit.
+      acpImageBytesPending += f.size;
+      updateSendButton();
+      const draft = attachments;
+      r.onloadend = () => {
+        acpImageBytesPending -= f.size;
+        if (draft === attachments && acpReady && acpComposer.images) {
+          const data = String(r.result ?? "").split(",")[1];
+          if (data) addAcpImage({ type: "image", data, mimeType: f.type }, f.name || "pasted image");
+          else $("acp-attachment-status").textContent = "Could not read the image.";
+        }
+        updateSendButton();
+      };
+      r.readAsDataURL(f);
+      return;
+    }
     r.onload = () => {
       const data = String(r.result).split(",")[1] ?? "";
       if (IMAGE_TYPES.includes(f.type)) {
@@ -2059,9 +2341,19 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   });
   $("btn-model").addEventListener("click", (e) => {
     e.stopPropagation();
+    if (ACP) {
+      if (picker.open || (acpIdle() && acpComposer.config)) picker.toggle();
+      return;
+    }
     picker.toggle();
   });
-  $("btn-attach").addEventListener("click", () => post({ type: "pickAttachments" }));
+  $("btn-attach").addEventListener("click", () => {
+    if (ACP) {
+      if (!acpReady || !acpComposer.images) return;
+      $("acp-attachment-status").textContent = "";
+    }
+    post({ type: "pickAttachments" });
+  });
 
   // ------------------------------------------------------------------ image preview
 
@@ -2104,9 +2396,15 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   // Composer toolbar buttons must not steal focus from the input: a blur would schedule
   // hiding the "/" popup right after the click opened it (it then flashed and vanished).
   for (const b of frame.querySelectorAll<HTMLElement>(".composer .toolbar button")) {
-    b.addEventListener("mousedown", (e) => e.preventDefault());
+    if (!b.closest(".backend-menu")) b.addEventListener("mousedown", (e) => e.preventDefault());
   }
   $("btn-slash").addEventListener("click", () => {
+    if (ACP) {
+      if (!acpReady || !acpCommands.length) return;
+      input.focus();
+      showCommandCompletions("");
+      return;
+    }
     // Always opens (or keeps open) the command list; Esc or clicking elsewhere closes it.
     if (!input.value.startsWith("/")) input.value = "/" + input.value;
     input.focus();
@@ -2119,6 +2417,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
    */
   function closeOverlay(): boolean {
     if (closeLightbox()) return true;
+    if (closeBackendMenu(true)) return true;
     if (find.open) { find.hide(); return true; }
     if (treeMenu.open) { treeMenu.escape(); return true; }
     if (listMenu.open) { listMenu.hide(); return true; }
@@ -2137,7 +2436,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
 
   // ------------------------------------------------------------------ model picker
 
-  interface ModelInfo { provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number; images?: boolean }
+  interface ModelInfo { provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number; images?: boolean; detail?: string }
 
   // ------------------------------------------------------------------ effort slider
 
@@ -2154,6 +2453,8 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     private track: HTMLElement;
     private dots: HTMLElement;
     private levels: string[] = [];
+    private labels?: Map<string, string>;
+    private current = "off";
     private idx = 0;
     private dragging = false;
 
@@ -2196,8 +2497,10 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     }
 
     /** Sync with the current model's levels and state (ignored mid-drag). */
-    update(levels: string[], current: string, visible: boolean) {
+    update(levels: string[], current: string, visible: boolean, labels?: Map<string, string>) {
       this.root.classList.toggle("hidden", !visible);
+      this.current = current;
+      this.labels = labels;
       if (this.dragging) return;
       if (levels.join() !== this.levels.join()) {
         this.levels = [...levels];
@@ -2225,14 +2528,17 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       this.track.style.setProperty("--p", String(p));
       this.dots.querySelectorAll("i").forEach((d, j) => d.classList.toggle("on", j <= i));
       const level = this.levels[i] ?? "off";
-      this.label.textContent = `(${levelLabel(level)})`;
+      const label = this.labels?.get(level) ?? levelLabel(level);
+      this.label.textContent = `(${label})`;
+      this.hit.setAttribute("aria-valuemin", "0");
+      this.hit.setAttribute("aria-valuemax", String(Math.max(0, this.levels.length - 1)));
       this.hit.setAttribute("aria-valuenow", String(i));
-      this.hit.setAttribute("aria-valuetext", levelLabel(level));
+      this.hit.setAttribute("aria-valuetext", label);
     }
 
     private commit() {
       const level = this.levels[this.idx];
-      if (level && level !== state.thinkingLevel) this.onCommit(level);
+      if (level && level !== this.current) this.onCommit(level);
     }
   }
 
@@ -2252,9 +2558,13 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     private list!: HTMLElement;
     private loaded = false;
     private effort!: EffortSlider;
+    private acpChoices: AcpConfigChoice[] = [];
+    private acpChoice?: AcpConfigChoice;
+    private acpTabSignature = "";
 
     constructor() {
       this.root.innerHTML = `
+        <div class="mp-config-tabs hidden" role="group" aria-label="Agent settings"></div>
         <input class="mp-search" placeholder="Select a model" spellcheck="false" aria-label="Search models">
         <div class="mp-list" tabindex="-1"></div>
         <div class="mp-scope"></div>
@@ -2262,6 +2572,12 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       this.search = this.root.querySelector(".mp-search")!;
       this.list = this.root.querySelector(".mp-list")!;
       this.effort = new EffortSlider(this.root.querySelector(".mp-effort")!, (level) => {
+        if (ACP) {
+          const effort = this.acpEffort;
+          if (effort && acpIdle() && acpComposer.config) post({ type: "acpSetConfig", id: effort.id, value: level });
+          else this.renderEffort();
+          return;
+        }
         state.thinkingLevel = level; // optimistic; host confirms via state
         updateModel();
         post({ type: "setThinking", level });
@@ -2274,7 +2590,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       this.search.addEventListener("keydown", (e) => this.onKey(e));
       this.root.addEventListener("mousedown", (e) => e.stopPropagation());
       on(document, "mousedown", (e) => {
-        if (this.open && !(e.target as HTMLElement).closest("#btn-model")) this.hide();
+        if (this.open && !$("btn-model").contains(e.target as Node)) this.hide(false);
       });
     }
 
@@ -2289,12 +2605,46 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       if (this.open) this.render();
     }
 
+    private get acpEffort() {
+      return this.acpChoices.find((c) => c.category === "thought_level" || /^(effort|effortLevel|thought_level)$/i.test(c.id));
+    }
+
+    private get acpTabs() {
+      const rank = (c: AcpConfigChoice) => c.category === "model" || c.id === "model" ? 0 : c.category === "mode" || c.id === "mode" ? 1 : 2;
+      return this.acpChoices.filter((c) => c !== this.acpEffort && c.options.length > 1).sort((a, b) => rank(a) - rank(b));
+    }
+
+    setAcpData(choices: AcpConfigChoice[]) {
+      const selectedId = this.acpChoice?.id;
+      this.acpChoices = choices;
+      const tabs = this.acpTabs;
+      this.selectAcpChoice(tabs.find((c) => c.id === selectedId) ?? tabs[0], false);
+      this.loaded = true;
+      if (this.open && acpComposer.config) this.render();
+    }
+
+    private selectAcpChoice(choice?: AcpConfigChoice, resetSearch = true) {
+      this.acpChoice = choice;
+      const name = choice?.name ?? "model";
+      this.search.placeholder = `Select ${name.toLowerCase()}`;
+      this.search.setAttribute("aria-label", `Search ${name.toLowerCase()} options`);
+      this.models = choice?.options.map((o) => ({ provider: name, id: o.value, name: o.label, reasoning: false, detail: o.description })) ?? [];
+      if (!resetSearch) return;
+      this.search.value = this.query = "";
+      this.sel = -1;
+      this.render();
+      this.search.focus();
+    }
+
     toggle() {
       this.open ? this.hide() : this.show("");
     }
 
     show(query: string, focusEffort = false) {
+      if (ACP && (!acpIdle() || !acpComposer.config)) return;
       hidePopup();
+      closeBackendMenu();
+      if (ACP) this.selectAcpChoice(this.acpTabs[0], false);
       this.open = true;
       this.query = query;
       this.search.value = query;
@@ -2303,9 +2653,9 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       this.root.classList.remove("hidden");
       $("btn-model").classList.add("active");
       if (!this.loaded) this.list.innerHTML = `<div class="mp-empty">Loading models…</div>`;
-      post({ type: "getModels" });
+      if (!ACP) post({ type: "getModels" });
       this.render();
-      if (focusEffort) this.focusEffort();
+      if (focusEffort && (!ACP || (this.acpEffort?.options.length ?? 0) > 1)) this.focusEffort();
       else this.search.focus();
     }
 
@@ -2318,11 +2668,13 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     }
 
     render() {
+      if (ACP) this.renderAcpTabs();
       this.renderList();
       this.renderEffort();
     }
 
     private isCurrent(m: ModelInfo) {
+      if (ACP) return this.acpChoice?.value === m.id;
       return state.model && state.model.id === m.id && state.model.provider === m.provider;
     }
 
@@ -2333,6 +2685,12 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     }
 
     private renderEffort() {
+      if (ACP) {
+        const effort = this.acpEffort;
+        this.effort.update(effort?.options.map((o) => o.value) ?? [], effort?.value ?? "", (effort?.options.length ?? 0) > 1,
+          new Map(effort?.options.map((o) => [o.value, o.label])));
+        return;
+      }
       const visible = !!state.model?.reasoning && thinkingLevels.length > 1;
       this.effort.update(thinkingLevels, state.thinkingLevel ?? "off", visible);
     }
@@ -2344,11 +2702,13 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
 
     /** One muted line: context · price · capabilities. Full id/provider is in the tooltip. */
     private detail(m: ModelInfo) {
+      if (ACP) return m.detail ?? "";
       return [this.ctx(m), m.reasoning ? "reasoning" : "", m.images ? "images" : ""].filter(Boolean).join(" · ");
     }
 
     /** Everything else goes into the tooltip. */
     private tooltip(m: ModelInfo) {
+      if (ACP) return m.name === m.id ? m.name : `${m.name} (${m.id})`;
       const lines = [`${m.provider}/${m.id}`];
       if (m.contextWindow) lines.push(this.ctx(m));
       if (m.reasoning) lines.push("Supports reasoning");
@@ -2387,7 +2747,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
           if (others.length) sections.push({ title: "Other models", items: others });
         }
       } else {
-        if (!q) {
+        if (!q && !ACP) {
           const recent = [cur, ...this.recent.map((k) => byKey.get(k))]
             .filter((m): m is ModelInfo => !!m)
             .filter((m, i, a) => a.findIndex((x) => key(x) === key(m)) === i);
@@ -2404,7 +2764,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
 
       this.list.innerHTML = "";
       if (!this.flat.length) {
-        this.list.innerHTML = `<div class="mp-empty">No models match “${escapeHtml(q)}”</div>`;
+        this.list.innerHTML = `<div class="mp-empty">${ACP ? (q ? `No options match “${escapeHtml(q)}”` : "No options to select") : `No models match “${escapeHtml(q)}”`}</div>`;
         return;
       }
       let idx = 0;
@@ -2430,8 +2790,38 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       this.scrollToSel();
     }
 
+    private renderAcpTabs() {
+      const row = this.root.querySelector<HTMLElement>(".mp-config-tabs")!;
+      const tabs = this.acpTabs;
+      const visible = tabs.length > 1;
+      row.classList.toggle("hidden", !visible);
+      this.root.classList.toggle("has-config-tabs", visible);
+      const signature = JSON.stringify(tabs.map(({ id, name }) => [id, name]));
+      if (signature !== this.acpTabSignature) {
+        this.acpTabSignature = signature;
+        row.replaceChildren(...tabs.map(({ id, name }) => {
+          const button = el("button");
+          button.type = "button";
+          button.dataset.configId = id;
+          button.textContent = name;
+          button.addEventListener("click", () => {
+            const choice = this.acpTabs.find((c) => c.id === id);
+            if (choice && choice.id !== this.acpChoice?.id) this.selectAcpChoice(choice);
+          });
+          return button;
+        }));
+      }
+      row.querySelectorAll("button").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.configId === this.acpChoice?.id));
+      });
+    }
+
     private renderScope(enabled?: ModelInfo[]) {
       const box = this.root.querySelector(".mp-scope") as HTMLElement;
+      if (ACP) {
+        box.classList.add("hidden");
+        return;
+      }
       const src = this.scopeSource ? shortPath(this.scopeSource).replace(/^\/Users\/[^/]+/, "~") : "settings.json";
       const text = enabled?.length && !this.showAll ? `${enabled.length} enabled` : `${this.models.length} models`;
       const tip = enabled?.length ? `enabledModels from ${src}` : `No enabledModels set in ${src}`;
@@ -2461,6 +2851,13 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     }
 
     private choose(m: ModelInfo) {
+      if (ACP) {
+        if (this.acpChoice && acpIdle() && acpComposer.config && !this.isCurrent(m)) {
+          post({ type: "acpSetConfig", id: this.acpChoice.id, value: m.id });
+        }
+        this.hide();
+        return;
+      }
       if (!this.isCurrent(m)) {
         state.model = { ...state.model, ...m }; // optimistic; host sends full state
         post({ type: "setModel", provider: m.provider, id: m.id });
@@ -2470,14 +2867,14 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
 
     private onKey(e: KeyboardEvent) {
       const n = this.flat.length;
-      if (e.key === "ArrowDown") { this.sel = (this.sel + 1) % n; this.renderList(); e.preventDefault(); }
-      else if (e.key === "ArrowUp") { this.sel = (this.sel - 1 + n) % n; this.renderList(); e.preventDefault(); }
+      if (e.key === "ArrowDown") { if (n) this.sel = (this.sel + 1) % n; this.renderList(); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { if (n) this.sel = (this.sel - 1 + n) % n; this.renderList(); e.preventDefault(); }
       else if (e.key === "Enter") { const m = this.flat[this.sel]; if (m) this.choose(m); e.preventDefault(); }
       else if (e.key === "Escape") { this.hide(); e.preventDefault(); e.stopPropagation(); }
       else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && (!this.search.value || e.altKey)) {
         this.effort.step(e.key === "ArrowLeft" ? -1 : 1);
         e.preventDefault();
-      } else if (e.key === "Tab") { this.effort.step(e.shiftKey ? -1 : 1); e.preventDefault(); }
+      } else if (!ACP && e.key === "Tab") { this.effort.step(e.shiftKey ? -1 : 1); e.preventDefault(); }
     }
 
     focusEffort() {
@@ -3119,6 +3516,70 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         if (m.fresh) showNewSession();
         else setLoading(true);
         break;
+      case "acpAccent": {
+        if (!ACP) break;
+        const color = typeof m.color === "string" ? m.color.trim() : "";
+        const style = (frame.closest<HTMLElement>(".tile") ?? frame).style;
+        if (/^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(color)) style.setProperty("--acp-custom-accent", color);
+        else style.removeProperty("--acp-custom-accent");
+        break;
+      }
+      case "acpComposer": {
+        if (!ACP) break;
+        const capabilities: AcpComposer = m.capabilities;
+        acpComposer = capabilities;
+        picker.setAcpData(m.choices ?? []);
+        acpCommands = capabilities.commands.flatMap(({ name, description }) => {
+          const command = name.replace(/^\//, "");
+          return /^[^/\s]+$/.test(command) && command !== "title" ? [{ name: command, description, source: "ACP" }] : [];
+        });
+        if (capabilities.canTitle) acpCommands.unshift({ name: "title", description: "Generate a title for this session", source: "builtin" });
+        if (acpReady && !capabilities.images) {
+          composer.classList.remove("drag");
+          if (attachments.length) {
+            attachments = [];
+            $("acp-attachment-status").textContent = "This ACP agent no longer accepts images.";
+            renderAttachments();
+          }
+        }
+        if (!popup.classList.contains("hidden")) updateAutocomplete();
+        updateAcpControls();
+        updateStats();
+        break;
+      }
+      case "acpOperation":
+        if (!ACP) break;
+        setAcpOperation(m.message);
+        acpSending = false;
+        updateAcpControls();
+        updateSendButton();
+        updateStats();
+        break;
+      case "acpStatus":
+        if (!ACP) break;
+        acpReady = !!m.ready;
+        acpSending = false;
+        if (!acpReady) {
+          setAcpOperation("");
+          hidePopup();
+          composer.classList.remove("drag");
+        }
+        if (acpReady && !acpComposer.images && attachments.length) {
+          attachments = [];
+          $("acp-attachment-status").textContent = "This ACP agent does not accept the transferred images.";
+          renderAttachments();
+        }
+        updateAcpControls();
+        updateSendButton();
+        updateStats();
+        if (m.error) {
+          setRunning(false);
+          setLoading(false);
+          showBanner(`<b>ACP agent stopped</b><pre>${escapeHtml(m.error)}</pre>`, [
+            { label: "Restart", fn: () => post({ type: "restart" }) },
+          ]);
+        }
+        break;
       case "exited":
         setRunning(false);
         setLoading(false);
@@ -3129,6 +3590,12 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         break;
       case "error":
         frame.classList.remove("switching");
+        if (ACP && acpSending) {
+          acpSending = false;
+          updateAcpControls();
+          updateSendButton();
+          updateStats();
+        }
         setLoading(false);
         renderNote(`**Error:** ${m.message}`, "error");
         break;
@@ -3136,6 +3603,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         insertText(m.text, m.replace);
         break;
       case "restoreQueue":
+        if (ACP) break;
         if (m.text) insertText(m.text, !input.value.trim());
         for (const image of m.images ?? []) attachments.push({ kind: "image", image, name: "image" });
         if (m.images?.length) renderAttachments();
@@ -3144,7 +3612,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         picker.setData(m.models, m.levels, m.recent, m.enabled, m.scopeSource, m.unmatched);
         break;
       case "openModelPicker":
-        picker.show(m.query ?? "");
+        picker.show(m.query ?? "", !!m.focusEffort);
         break;
       case "openTree":
         if (treeMenu.open && !m.refresh && !m.selectId) treeMenu.hide();
@@ -3171,10 +3639,14 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         onFileResults(m.requestId, m.items ?? []);
         break;
       case "addImage":
-        attachments.push({ kind: "image", image: m.image, name: m.name });
-        renderAttachments();
+        if (ACP) addAcpImage(m.image, m.name || "image");
+        else {
+          attachments.push({ kind: "image", image: m.image, name: m.name });
+          renderAttachments();
+        }
         break;
       case "addFile":
+        if (ACP) break;
         attachments.push({ kind: "file", ref: m.ref, name: m.name });
         renderAttachments();
         break;
@@ -3212,7 +3684,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     }
   }
 
-  for (const def of [...WEB_INTEGRATIONS, ...WEB_WORKAROUNDS]) {
+  for (const def of ACP ? [] : [...WEB_INTEGRATIONS, ...WEB_WORKAROUNDS]) {
     const key = `ext:${def.id}`;
     const hooks = def.create({
       post: (payload) => post({ type: "ext", id: def.id, payload }),
@@ -3254,8 +3726,13 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
   }
 
   updateEmpty();
+  updatePlaceholder();
+  if (ACP) {
+    updateAcpControls();
+    updateStats();
+  }
   resizeInput();
-  input.focus();
+  if (opts.autofocus !== false) input.focus();
   watchWidth();
   watchWidgetColumns(); // before "ready", so a module can tell the host the width before the first pi process starts
   post({ type: "ready" });
@@ -3263,7 +3740,20 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
 
   return {
     receive,
-    focus: () => input.focus(),
+    focus: () => { if (!frame.hidden) input.focus(); },
+    takeDraft: () => {
+      const draft = { text: input.value, attachments };
+      clearInput();
+      return draft;
+    },
+    restoreDraft: (draft) => {
+      const files = ACP ? draft.attachments.flatMap((a) => a.kind === "file" ? [a.ref] : []) : [];
+      input.value = [draft.text, ...files].filter(Boolean).join("\n");
+      attachments = ACP ? draft.attachments.filter((a) => a.kind === "image") : draft.attachments;
+      renderAttachments();
+      resizeInput();
+    },
+    setPeerTabs,
     setTileCount: (n) => setTileCount(n),
     dispose: () => {
       life.abort();

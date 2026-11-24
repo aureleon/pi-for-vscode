@@ -11,6 +11,6 @@ if (data.tiles) {
 } else {
   const frame = document.createElement("div");
   document.body.appendChild(frame);
-  const chat = mountChat(frame, vscode, { header: !!data.header, readonly: !!data.readonly, logo: data.logo });
+  const chat = mountChat(frame, vscode, { header: !!data.header, readonly: !!data.readonly, acp: !!data.acp, logo: data.logo });
   window.addEventListener("message", (ev) => chat.receive(ev.data));
 }

@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { DaemonFinished, DaemonList, DaemonSession, DialogPolicy } from "./protocol";
-import { daemonCall, daemonList, isStale, replaceStale, workingIn, type DaemonOptions } from "./client";
+import { daemonCall, daemonList, isStale, replaceStale, retainedIn, type DaemonOptions } from "./client";
 
 /**
  * The one Pi item in the status bar. It shows the sessions that work in this window and the
@@ -47,6 +47,8 @@ export interface DaemonUiHost {
   log(line: string): void;
   /** Open the session file in a chat. */
   open(file: string): void;
+  /** Reattach to a live ACP process without opening a Pi session file. */
+  openAcp(session: DaemonSession): void;
   /** Show the chat that has the session file, if one has. */
   show(file: string): boolean;
 }
@@ -78,19 +80,19 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
 
   /** Draw the item from the sessions of this window and the last list of the daemon. */
   const render = () => {
-    const working = host.running().length;
+    const working = host.running().length + known.filter((s) => s.backend === "acp" && s.attached && s.busy).length;
     const detached = known.filter((s) => !s.attached);
     const waiting = detached.filter((s) => s.waiting).length;
     const on = !!daemonOptions(context);
     // The logo alone; a spinner beside it while a session works.
     const parts = [working ? "$(loading~spin)" + (working > 1 ? ` ${working}` : "") : "", detached.length ? `${detached.length} detached` : ""].filter(Boolean);
-    item.text = ["$(pi-logo-small)", parts.join(" · ")].filter(Boolean).join(" ");
-    item.name = "Pi";
-    item.accessibilityInformation = { label: `Pi${working ? `, ${working} working` : ""}${detached.length ? `, ${detached.length} detached` : ""}` };
+    item.text = ["$(server-process)", parts.join(" · ")].filter(Boolean).join(" ");
+    item.name = "Agent Sessions";
+    item.accessibilityInformation = { label: `Agent sessions${working ? `, ${working} working` : ""}${detached.length ? `, ${detached.length} detached` : ""}` };
     item.backgroundColor = waiting ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
     item.tooltip = [
-      working ? `Pi is working… (${working} session${working === 1 ? "" : "s"})` : "",
-      detached.length ? `${detached.length} session${detached.length === 1 ? " runs" : "s run"} without a VS Code window${waiting ? ` (${waiting} wait for your answer)` : ""}.` : "",
+      working ? `Agents are working… (${working} session${working === 1 ? "" : "s"})` : "",
+      detached.length ? `${detached.length} detached session${detached.length === 1 ? "" : "s"}${waiting ? ` (${waiting} wait for your answer)` : ""}.` : "",
       on ? "Sessions keep working when VS Code closes or disconnects." : "Sessions stop when VS Code closes or disconnects.",
       "Click to show the sessions and the settings.",
     ].filter(Boolean).join("\n");
@@ -104,8 +106,8 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
    */
   const replace = async (stale: DaemonList) => {
     // The daemon does not see all work (child sessions, a compaction); this window sees its own.
-    const working = Math.max(workingIn(stale), host.running().length);
-    if (!working) {
+    const retained = Math.max(retainedIn(stale), host.running().length);
+    if (!retained) {
       output(`[pi] replacing the session daemon of an older build (pid ${stale.pid})`);
       await replaceStale();
       return;
@@ -114,7 +116,7 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
     warned = true;
     const now = "Stop and Replace Now";
     const pick = await vscode.window.showInformationMessage(
-      `Pi: a session daemon from before the update still runs ${working} working session${working === 1 ? "" : "s"}. The new daemon starts when ${working === 1 ? "it finishes" : "they finish"}.`,
+      `The session daemon from before the update still holds ${retained} session${retained === 1 ? "" : "s"}. Replacing it stops those sessions. ACP chat history in the daemon will be lost.`,
       now,
     );
     if (pick !== now) return;
@@ -143,7 +145,8 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
   };
 
   const describe = (s: DaemonSession) => [
-    s.waiting ? "waits for your answer" : s.busy ? "working" : "idle",
+    s.backend === "acp" ? "ACP" : "Pi",
+    s.waiting ? "waits for your answer" : s.busy ? "working" : s.failed ? "agent stopped" : "idle",
     s.attached ? "in another VS Code window" : `detached for ${duration(Date.now() - (s.detachedAt ?? Date.now()))}`,
     here(s.cwd) ? "" : s.cwd,
   ].filter(Boolean).join(" · ");
@@ -159,7 +162,7 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
       ],
     },
     {
-      key: "detachedDialogs", label: "Questions without a window", fallback: "wait",
+      key: "detachedDialogs", label: "Pi questions without a window", fallback: "wait",
       values: [
         { value: "wait", label: "Wait", detail: "Hold the question until you reconnect" },
         { value: "deny", label: "Deny", detail: "Cancel the question and keep going" },
@@ -190,7 +193,8 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
     // From the daemon: the sessions without a window, and the ones of other clients (another window, or an
     // extension host that stayed after a reload), also idle ones: they block the session here until they stop.
     // This window's own sessions are in `running`, or idle (warm tabs) and not listed.
-    const sessions = known.filter((s) => (s.file ? !(s.attached && mine.has(path.resolve(s.file))) : !s.attached && (s.busy || !!s.waiting)));
+    const sessions = known.filter((s) => s.backend === "acp" ? !s.attached
+      : s.file ? !(s.attached && mine.has(path.resolve(s.file))) : !s.attached && (s.busy || !!s.waiting));
     type Item = vscode.QuickPickItem & { s?: DaemonSession; setting?: Setting; show?: () => void };
     const qp = vscode.window.createQuickPick<Item>();
     const stopButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon("debug-stop"), tooltip: "Stop this session" };
@@ -206,7 +210,7 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
       ...running.map((r): Item => ({ label: `$(loading~spin) ${r.title}`, description: `working · ${r.where}`, show: r.show })),
       // Detached sessions before the ones of other windows: they are the ones that need a look.
       ...[...sessions].sort((a, b) => Number(a.attached) - Number(b.attached)).map(toItem),
-      ...(running.length || sessions.length ? [] : [{ label: "$(blank) No session works" }]),
+      ...(running.length || sessions.length ? [] : [{ label: "$(blank) No sessions to show" }]),
       separator("Settings"),
       ...SETTINGS.map((st): Item => ({
         label: `$(gear) ${st.label}`,
@@ -228,6 +232,11 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
       qp.hide();
       if (show) return show();
       if (setting) return void change(setting);
+      if (s?.backend === "acp") {
+        if (here(s.cwd) || vscode.workspace.workspaceFolders?.some((folder) => path.resolve(folder.uri.fsPath) === path.resolve(s.cwd))) host.openAcp(s);
+        else void vscode.window.showInformationMessage(`Pi: this session belongs to ${s.cwd}. Open that folder to reconnect.`);
+        return;
+      }
       if (!s?.file) return;
       // A session of this window is shown. Another one comes to this window (the daemon takes it from the client that has it).
       if (host.show(s.file)) return;

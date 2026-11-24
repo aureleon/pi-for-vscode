@@ -329,6 +329,14 @@ export class PiController implements vscode.Disposable {
     return [this.active, ...this.background].some((s) => !!s && this.isBusy(s));
   }
 
+  /** An unwritten Pi session can stay parked while its tab shows an ACP session. */
+  get emptySessionKey(): string | undefined {
+    const s = this.active;
+    const file = s?.state.sessionFile;
+    if (!s || this.terminal || this.switching || this.isBusy(s) || s.state.sessionName || !file || fs.existsSync(file)) return undefined;
+    return this.sessionKey(s);
+  }
+
   get isRunning(): boolean {
     return !!this.active && this.isBusy(this.active);
   }

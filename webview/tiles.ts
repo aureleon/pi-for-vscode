@@ -1,4 +1,4 @@
-import { MAX_TILES, mountChat, type ChatApi, type ChatInstance } from "./chat";
+import { MAX_TILES, mountChat, type ChatApi, type ChatInstance, type SidebarTab } from "./chat";
 
 /**
  * Sidebar tiles: several chats in one webview. The host owns the list of tiles and sends it
@@ -16,6 +16,11 @@ interface Tile {
   id: string;
   el: HTMLElement;
   chat: ChatInstance;
+  frame: HTMLElement;
+  lanes: Map<string, { frame: HTMLElement; chat: ChatInstance }>;
+  piTabs: SidebarTab[];
+  acpTabs: SidebarTab[];
+  active?: string;
   size: number;
 }
 
@@ -32,10 +37,11 @@ export function mountTiles(vscode: ChatApi, logo: string) {
   let focused: string | undefined;
 
   /** A tile's share of the webview API: tagged messages and its own slot of the page state. */
-  const apiFor = (id: string): ChatApi => ({
-    postMessage: (msg) => vscode.postMessage({ tile: id, msg }),
-    getState: () => vscode.getState()?.tiles?.[id],
+  const apiFor = (id: string, lane?: string): ChatApi => ({
+    postMessage: (msg) => vscode.postMessage({ tile: id, lane, msg }),
+    getState: () => vscode.getState()?.tiles?.[lane ?? id],
     setState: (s) => {
+      if (lane) return;
       const st = vscode.getState() ?? {};
       vscode.setState({ ...st, tiles: { ...(st.tiles ?? {}), [id]: s } });
     },
@@ -44,6 +50,32 @@ export function mountTiles(vscode: ChatApi, logo: string) {
   const isRow = () => root.classList.contains("row");
   const updateDirection = () => root.classList.toggle("row", root.clientWidth >= ROW_MIN * Math.max(1, tiles.size));
   new ResizeObserver(updateDirection).observe(root);
+
+  function backend(tile: string) {
+    const send = (type: string, lane?: string) => vscode.postMessage({ type, tile, lane });
+    return {
+      pick: (backend: "pi" | "acp", replaceEmpty = false) => vscode.postMessage({ type: "tiles:pickBackend", tile, backend, replaceEmpty }),
+      pickTab: (key: string) => {
+        const t = tiles.get(tile);
+        if (t?.lanes.has(key)) send("tiles:pickLane", key);
+        else {
+          if (key) apiFor(tile).postMessage({ type: "tabPick", key });
+          send("tiles:pickLane");
+        }
+      },
+      closeTab: (key: string) => {
+        if (tiles.get(tile)?.lanes.has(key)) send("tiles:closeLane", key);
+        else apiFor(tile).postMessage({ type: "tabClose", key });
+      },
+    };
+  }
+
+  function tileActions(id: string) {
+    return {
+      split: () => vscode.postMessage({ type: "tiles:split", tile: id }),
+      close: () => vscode.postMessage({ type: "tiles:close", tile: id }),
+    };
+  }
 
   function create(t: TileLayout): Tile {
     const el = document.createElement("div");
@@ -54,24 +86,60 @@ export function mountTiles(vscode: ChatApi, logo: string) {
     const chat = mountChat(frame, apiFor(t.id), {
       header: true,
       logo,
-      tiles: {
-        split: () => vscode.postMessage({ type: "tiles:split", tile: t.id }),
-        close: () => vscode.postMessage({ type: "tiles:close", tile: t.id }),
-      },
+      backend: backend(t.id),
+      tiles: tileActions(t.id),
     });
     const sash = document.createElement("div");
     sash.className = "tile-sash";
     el.appendChild(sash);
     initSash(sash, t.id);
-    el.addEventListener("focusin", () => setFocused(t.id, true));
-    return { id: t.id, el, chat, size: t.size };
+    el.addEventListener("focusin", () => {
+      setFocused(t.id);
+      vscode.postMessage({ type: "tiles:focus", tile: t.id });
+    });
+    return { id: t.id, el, chat, frame, lanes: new Map(), piTabs: [], acpTabs: [], size: t.size };
   }
 
-  function setFocused(id: string, tell: boolean) {
+  function applyLanes(t: Tile, tabs: SidebarTab[], active?: string, transferDraft = false) {
+    const from = t.active ? t.lanes.get(t.active)?.chat : t.chat;
+    const draft = transferDraft ? from?.takeDraft() : undefined;
+    for (const [key, lane] of t.lanes) {
+      if (tabs.some((tab) => tab.key === key)) continue;
+      lane.chat.dispose();
+      t.lanes.delete(key);
+    }
+    for (const tab of tabs) {
+      if (t.lanes.has(tab.key)) continue;
+      const frame = document.createElement("div");
+      frame.hidden = true;
+      t.el.insertBefore(frame, t.el.lastElementChild);
+      const chat = mountChat(frame, apiFor(t.id, tab.key), {
+        header: true, acp: true, autofocus: false, logo, backend: backend(t.id), tiles: tileActions(t.id),
+      });
+      chat.setTileCount(tiles.size);
+      t.lanes.set(tab.key, { frame, chat });
+    }
+    t.active = active && t.lanes.has(active) ? active : undefined;
+    t.acpTabs = tabs;
+    t.frame.hidden = !!t.active;
+    for (const [key, lane] of t.lanes) lane.frame.hidden = key !== t.active;
+    if (draft) (t.active ? t.lanes.get(t.active)?.chat : t.chat)?.restoreDraft(draft);
+    refreshTabs(t);
+  }
+
+  function refreshTabs(t: Tile) {
+    t.chat.setPeerTabs(t.acpTabs);
+    const pi = t.piTabs.length ? t.piTabs : [{ key: "", title: "New session" }];
+    const replaced = new Map(t.acpTabs.filter((tab) => tab.replacedPi).map((tab) => [tab.replacedPi, tab]));
+    const merged = pi.map((tab) => replaced.get(tab.key) ?? tab);
+    merged.push(...t.acpTabs.filter((tab) => !merged.includes(tab)));
+    for (const [key, lane] of t.lanes) lane.chat.setPeerTabs(merged, key);
+  }
+
+  function setFocused(id: string) {
     if (focused === id) return;
     focused = id;
     for (const t of tiles.values()) t.el.classList.toggle("focused", t.id === id);
-    if (tell) vscode.postMessage({ type: "tiles:focus", tile: id });
   }
 
   /** Apply the host's list: keep the tiles that stay (so their scroll and input stay), add and remove the others. */
@@ -80,6 +148,7 @@ export function mountTiles(vscode: ChatApi, logo: string) {
     for (const [id, t] of tiles) {
       if (ids.has(id)) continue;
       t.chat.dispose();
+      for (const lane of t.lanes.values()) lane.chat.dispose();
       t.el.remove();
       tiles.delete(id);
     }
@@ -97,9 +166,12 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       if (want !== t.el) root.insertBefore(t.el, want);
       prev = t.el;
     }
-    for (const t of tiles.values()) t.chat.setTileCount(tiles.size);
+    for (const t of tiles.values()) {
+      t.chat.setTileCount(tiles.size);
+      for (const lane of t.lanes.values()) lane.chat.setTileCount(tiles.size);
+    }
     updateDirection();
-    if (!focused || !tiles.has(focused)) setFocused(list[0]?.id ?? "", false);
+    if (!focused || !tiles.has(focused)) setFocused(list[0]?.id ?? "");
   }
 
   /** Drag the sash on the leading edge of a tile: the tile and the one before it share their space. */
@@ -181,7 +253,7 @@ export function mountTiles(vscode: ChatApi, logo: string) {
     let at: { x: number; y: number } | undefined;
     let frameReq = 0;
 
-    const tabCount = (tile: string) => tiles.get(tile)?.el.querySelectorAll('.tab[data-key]:not([data-key=""])').length ?? 0;
+    const tabCount = (tile: string) => tiles.get(tile)?.frame.querySelectorAll('.tab[data-key]:not([data-key=""])').length ?? 0;
 
     root.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
@@ -194,7 +266,7 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       e.preventDefault();
       press = {
         x: e.clientX, y: e.clientY, id: e.pointerId, tile: tileEl.dataset.id ?? "", key: tab?.dataset.key,
-        label: (tab ?? tileEl.querySelector(".tab.active"))?.querySelector(".tab-label, .topbar-title")?.textContent ?? "Pi",
+        label: (tab ?? t.closest(".topbar")?.querySelector(".tab.active"))?.querySelector(".tab-label, .topbar-title")?.textContent ?? "Pi",
       };
     });
     root.addEventListener("pointermove", (e) => {
@@ -294,13 +366,13 @@ export function mountTiles(vscode: ChatApi, logo: string) {
 
     function measure() {
       geo = [...tiles.values()].map((t) => {
-        const bar = t.el.querySelector<HTMLElement>(".topbar")!;
+        const bar = (t.active ? t.lanes.get(t.active)?.frame : t.frame)?.querySelector<HTMLElement>(".topbar")!;
         return {
           id: t.id,
           rect: t.el.getBoundingClientRect(),
           bar: bar.getBoundingClientRect(),
           strip: (bar.querySelector(".tb-tabs") ?? bar).getBoundingClientRect(),
-          tabs: [...t.el.querySelectorAll<HTMLElement>('.tab[data-key]:not([data-key=""])')].map((el) => {
+          tabs: [...bar.querySelectorAll<HTMLElement>('.tab[data-key]:not([data-key=""])')].map((el) => {
             const r = el.getBoundingClientRect();
             return { left: r.left, right: r.right };
           }),
@@ -324,7 +396,10 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       if (!g) return undefined;
       const tile = g.id;
       const canSplit = tiles.size < MAX_TILES && !(tile === p.tile && tabCount(p.tile) < 2);
-      if (inside(g.bar, x, y)) {
+      const target = tiles.get(tile);
+      const source = tiles.get(p.tile);
+      const canMerge = p.key ? !target?.active : !target?.lanes.size && !source?.lanes.size;
+      if (canMerge && inside(g.bar, x, y)) {
         if (!p.key) return tile === p.tile ? undefined : { kind: "into", tile };
         return { kind: "tabs", tile, index: g.tabs.filter((t) => (t.left + t.right) / 2 < x).length };
       }
@@ -335,13 +410,13 @@ export function mountTiles(vscode: ChatApi, logo: string) {
         if (tile === p.tile) return undefined;
         if (f < 1 / 3) return { kind: "edge", tile, side: "before" };
         if (f > 2 / 3) return { kind: "edge", tile, side: "after" };
-        return { kind: "into", tile };
+        return canMerge ? { kind: "into", tile } : undefined;
       }
       // A tab over its own chat makes a new tile of it: the half under the pointer.
       if (tile === p.tile) return canSplit ? { kind: "edge", tile, side: f < 0.5 ? "before" : "after" } : undefined;
       if (canSplit && f < 1 / 3) return { kind: "edge", tile, side: "before" };
       if (canSplit && f > 2 / 3) return { kind: "edge", tile, side: "after" };
-      return { kind: "into", tile };
+      return canMerge ? { kind: "into", tile } : undefined;
     }
 
     /** Draw the drop marker. It is a fixed layer on the body, so the tiles do not lay out again. */
@@ -386,13 +461,27 @@ export function mountTiles(vscode: ChatApi, logo: string) {
   window.addEventListener("message", (ev) => {
     const m = ev.data;
     if (m?.type === "tiles:layout") layout(m.tiles ?? []);
-    else if (m?.type === "tiles:focus") {
+    else if (m?.type === "tiles:lanes") {
+      const t = tiles.get(m.tile);
+      if (t) applyLanes(t, m.tabs ?? [], m.active, m.transferDraft === true);
+    } else if (m?.type === "tiles:focus") {
       const t = tiles.get(m.tile);
       if (t) {
-        setFocused(t.id, false);
-        t.chat.focus();
+        setFocused(t.id);
+        (t.active ? t.lanes.get(t.active)?.chat : t.chat)?.focus();
       }
-    } else if (m?.tile) tiles.get(m.tile)?.chat.receive(m.msg);
+    } else if (m?.tile) {
+      const t = tiles.get(m.tile);
+      if (!t) return;
+      if (m.lane) t.lanes.get(m.lane)?.chat.receive(m.msg);
+      else {
+        t.chat.receive(m.msg);
+        if (m.msg?.type === "tabs") {
+          t.piTabs = (m.msg.tabs ?? []).map((tab: SidebarTab) => ({ ...tab, title: tab.title || "New session" }));
+          refreshTabs(t);
+        }
+      }
+    }
   });
   vscode.postMessage({ type: "tiles:ready" });
 }

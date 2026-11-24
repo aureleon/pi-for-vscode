@@ -3,8 +3,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
+import { AcpChat } from "./acp/chat";
+import { configureAcp } from "./acp/config";
 import { PiController, type ChatHost, type Handover, type Tab } from "./controller";
-import { initDaemonUi } from "./daemon/ui";
+import { daemonOptions, initDaemonUi } from "./daemon/ui";
+import type { DaemonSession } from "./daemon/protocol";
 import { createPiTerminal } from "./piTerminal";
 import { SessionViewer } from "./sessionViewer";
 import { getShellEnv, setShellEnvLog } from "./shellEnv";
@@ -12,14 +15,16 @@ import { defaultSessionDir } from "./sessions";
 
 let output: vscode.OutputChannel;
 const controllers = new Set<PiController>();
+const acpPanels = new Set<AcpChat>();
 let sidebar: PiController | undefined;
 let lastActive: PiController | undefined;
+let activeAcp: AcpChat | undefined;
 
 /**
  * `tiles`: the sidebar, which holds one or more chats in tiles, each with its header row.
  * `readonly`: the session viewer, with no composer. Editor tabs use their own title bar.
  */
-function html(webview: vscode.Webview, extUri: vscode.Uri, opts: { tiles?: boolean; readonly?: boolean } = {}): string {
+function html(webview: vscode.Webview, extUri: vscode.Uri, opts: { tiles?: boolean; readonly?: boolean; acp?: boolean } = {}): string {
   const nonce = crypto.randomBytes(16).toString("base64");
   const script = webview.asWebviewUri(vscode.Uri.joinPath(extUri, "dist", "webview.js"));
   const style = webview.asWebviewUri(vscode.Uri.joinPath(extUri, "webview", "styles.css"));
@@ -40,7 +45,7 @@ function html(webview: vscode.Webview, extUri: vscode.Uri, opts: { tiles?: boole
 <link rel="stylesheet" href="${style}">
 <title>Pi</title>
 </head>
-<body data-logo="${logo}"${opts.tiles ? ' data-tiles="1"' : ""}${opts.readonly ? ' data-readonly="1"' : ""}>
+<body data-logo="${logo}"${opts.tiles ? ' data-tiles="1"' : ""}${opts.readonly ? ' data-readonly="1"' : ""}${opts.acp ? ' data-acp="1"' : ""}>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
 </html>`;
@@ -66,13 +71,18 @@ interface TileState {
 }
 
 /**
- * The chats in the sidebar view, one per tile. Each tile has its own PiController. The tiles share the
- * view's webview: messages carry the tile id (`{ tile, msg }`), and `tiles:*` messages change the layout.
- * The first tile is the primary chat (it resumes the workspace's last session); each tile keeps its own tabs.
+ * Sidebar tiles share the webview. Each tile has a Pi chat and optional ACP session tabs.
+ * Messages carry the tile ID and, for ACP tabs, the lane ID.
  */
 class SidebarTiles implements vscode.Disposable {
   private tiles: TileState[];
   private chats = new Map<string, { c: PiController; inbox: vscode.EventEmitter<any>; badge: number; tooltip?: string }>();
+  private acpChats = new Map<string, { c: AcpChat; inbox: vscode.EventEmitter<any>; tile: string; title: string; replacedPi?: string }>();
+  private activeLanes = new Map<string, string>();
+  private openingLanes = new Set<string>();
+  private disposed = false;
+  private activeTile?: string;
+  private acpTabId = 0;
   private subs: vscode.Disposable[] = [];
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly view: vscode.WebviewView) {
@@ -85,7 +95,7 @@ class SidebarTiles implements vscode.Disposable {
 
   /** The chat of the first tile, for commands when no tile had focus yet. */
   get first(): PiController | undefined {
-    return this.chats.get(this.tiles[0]?.id)?.c;
+    return this.tiles.map((t) => this.chats.get(t.id)?.c).find((c) => !!c);
   }
 
   /** `start`: tabs for a new tile (a tab dragged out of another tile) and the session to show. */
@@ -105,12 +115,12 @@ class SidebarTiles implements vscode.Disposable {
       },
       reveal: () => {
         this.view.show(true);
-        this.view.webview.postMessage({ type: "tiles:focus", tile: id });
+        this.selectLane(id);
       },
       openBeside: (file) => openPanel(this.context, file, { column: vscode.ViewColumn.Beside }),
       kind: "sidebar",
       closeChat: () => {
-        if (this.tiles.length < 2) return false;
+        if (this.tiles.length < 2 || this.hasAcpTabs(id)) return false;
         // After the controller's own call returns.
         setTimeout(() => this.removeTile(id), 0);
         return true;
@@ -133,9 +143,125 @@ class SidebarTiles implements vscode.Disposable {
   /** One badge on the view: the sum of the tiles' badges. */
   private updateBadge() {
     const all = [...this.chats.values()];
-    const count = all.reduce((n, e) => n + e.badge, 0);
-    const tooltip = all.filter((e) => e.badge).map((e) => e.tooltip).filter(Boolean).join("\n");
-    this.view.badge = count > 0 ? { value: count, tooltip: tooltip || String(count) } : undefined;
+    const acpBusy = [...this.acpChats.values()].filter(({ c }) => c.hasWork).length;
+    const count = all.reduce((n, e) => n + e.badge, acpBusy);
+    const tooltip = all.filter((e) => e.badge).map((e) => e.tooltip);
+    if (acpBusy) tooltip.push(`ACP chats working: ${acpBusy}`);
+    this.view.badge = count > 0 ? { value: count, tooltip: tooltip.filter(Boolean).join("\n") || String(count) } : undefined;
+  }
+
+  private async addAcpTab(tile: string, replaceEmpty = false) {
+    const pi = this.chats.get(tile);
+    if (!pi || this.openingLanes.has(tile)) return;
+    this.openingLanes.add(tile);
+    const previousLane = this.activeLanes.get(tile);
+    const emptyPi = replaceEmpty && !previousLane ? pi.c.emptySessionKey : undefined;
+    try {
+      if (!await configureAcp() || this.disposed || this.chats.get(tile) !== pi || this.activeLanes.get(tile) !== previousLane) return;
+      const key = `acp-${++this.acpTabId}`;
+      const inbox = new vscode.EventEmitter<any>();
+      const c = new AcpChat({
+        postMessage: (msg) => this.view.webview.postMessage({ tile, lane: key, msg }),
+        onDidReceiveMessage: inbox.event,
+      }, acpCwd(), output, (title) => {
+        const entry = this.acpChats.get(key);
+        if (entry) entry.title = title;
+        this.sendLanes(tile);
+        this.updateBadge();
+      }, daemonOptions(this.context));
+      const replacedPi = emptyPi && !this.activeLanes.has(tile) && pi.c.emptySessionKey === emptyPi ? emptyPi : undefined;
+      this.acpChats.set(key, { c, inbox, tile, title: "New session", replacedPi });
+      this.selectLane(tile, key, !!replacedPi);
+    } catch (e) {
+      void vscode.window.showErrorMessage(`Pi: ${String((e as Error)?.message ?? e)}`);
+    } finally {
+      this.openingLanes.delete(tile);
+    }
+  }
+
+  private async pickBackend(tile: string, backend: unknown, replaceEmpty: boolean) {
+    const entry = this.chats.get(tile);
+    if (!entry) return;
+    const lane = this.activeLanes.get(tile);
+    if (backend === "acp") {
+      if (replaceEmpty && lane && this.acpChats.get(lane)?.c.isEmptySession) return this.focusTile(tile);
+      await this.addAcpTab(tile, replaceEmpty);
+    } else if (backend === "pi") {
+      if (replaceEmpty && !lane && entry.c.emptySessionKey) return this.focusTile(tile);
+      if (replaceEmpty && lane && this.acpChats.get(lane)?.c.isEmptySession) {
+        const reusePi = !!entry.c.emptySessionKey;
+        this.removeAcp(lane);
+        this.selectLane(tile, undefined, true);
+        if (!reusePi) entry.inbox.fire({ type: "builtin", name: "new", arg: "" });
+        return;
+      }
+      const emptyPi = entry.c.emptySessionKey;
+      const parked = !!emptyPi && [...this.acpChats.values()].some((chat) => chat.tile === tile && chat.replacedPi === emptyPi);
+      this.selectLane(tile);
+      if (!parked) entry.inbox.fire({ type: "builtin", name: "new", arg: "" });
+    }
+  }
+
+  private hasAcpTabs(tile: string) {
+    return [...this.acpChats.values()].some((entry) => entry.tile === tile);
+  }
+
+  private sendLanes(tile: string, transferDraft = false) {
+    const tabs = [...this.acpChats].filter(([, entry]) => entry.tile === tile)
+      .map(([key, entry]) => ({ key, title: entry.title, busy: entry.c.hasWork, replacedPi: entry.replacedPi }));
+    void this.view.webview.postMessage({ type: "tiles:lanes", tile, tabs, active: this.activeLanes.get(tile), transferDraft });
+  }
+
+  private selectLane(tile: string, lane?: string, transferDraft = false) {
+    if (!this.chats.has(tile)) return;
+    if (lane) {
+      if (this.acpChats.get(lane)?.tile !== tile) return;
+      this.activeLanes.set(tile, lane);
+    } else {
+      const key = this.chats.get(tile)?.c.emptySessionKey;
+      if (key) for (const entry of this.acpChats.values()) {
+        if (entry.tile === tile && entry.replacedPi === key) entry.replacedPi = undefined;
+      }
+      this.activeLanes.delete(tile);
+    }
+    this.sendLanes(tile, transferDraft);
+    this.focusTile(tile);
+  }
+
+  private async closeLane(tile: string, lane: string) {
+    const entry = this.acpChats.get(lane);
+    if (!entry || entry.tile !== tile) return;
+    if (entry.c.hasWork) {
+      const yes = await vscode.window.showWarningMessage("Pi: stop this ACP session and close its tab?", { modal: true }, "Stop and Close");
+      if (yes !== "Stop and Close" || this.acpChats.get(lane) !== entry) return;
+    }
+    this.removeAcp(lane);
+    if (this.activeLanes.get(tile) === lane) this.selectLane(tile);
+    else this.sendLanes(tile);
+    this.updateBadge();
+  }
+
+  private removeAcp(key: string, stop = true) {
+    const entry = this.acpChats.get(key);
+    if (!entry) return;
+    this.acpChats.delete(key);
+    if (activeAcp === entry.c) activeAcp = undefined;
+    if (stop) entry.c.close();
+    else entry.c.dispose();
+    entry.inbox.dispose();
+  }
+
+  private noteFocus(id: string) {
+    this.activeTile = id;
+    const lane = this.activeLanes.get(id);
+    activeAcp = lane ? this.acpChats.get(lane)?.c : undefined;
+    const c = this.chats.get(id)?.c;
+    if (c && !activeAcp) sidebar = lastActive = c;
+  }
+
+  private focusTile(id: string) {
+    this.noteFocus(id);
+    this.view.webview.postMessage({ type: "tiles:focus", tile: id });
   }
 
   /** A split or a close gives all tiles the same size. A drag on a sash can change it after that. */
@@ -153,15 +279,29 @@ class SidebarTiles implements vscode.Disposable {
 
   private onMessage(m: any) {
     if (m?.tile && !m.type) {
-      this.chats.get(m.tile)?.inbox.fire(m.msg);
+      if (m.lane) {
+        const acp = this.acpChats.get(m.lane);
+        if (acp?.tile === m.tile) acp?.inbox.fire(m.msg);
+      } else this.chats.get(m.tile)?.inbox.fire(m.msg);
       return;
     }
     switch (m?.type) {
       case "tiles:ready":
         this.sendLayout();
+        for (const tile of this.tiles) if (this.hasAcpTabs(tile.id)) this.sendLanes(tile.id);
+        if (this.activeTile) this.focusTile(this.activeTile);
         break;
       case "tiles:split":
         this.split(String(m.tile));
+        break;
+      case "tiles:pickBackend":
+        void this.pickBackend(String(m.tile), m.backend, m.replaceEmpty === true);
+        break;
+      case "tiles:pickLane":
+        this.selectLane(String(m.tile), typeof m.lane === "string" ? m.lane : undefined);
+        break;
+      case "tiles:closeLane":
+        void this.closeLane(String(m.tile), String(m.lane));
         break;
       case "tiles:close":
         void this.closeTile(String(m.tile));
@@ -181,8 +321,7 @@ class SidebarTiles implements vscode.Disposable {
         this.moveTile(String(m.from), String(m.to), m.side === "before" ? "before" : "after");
         break;
       case "tiles:focus": {
-        const c = this.chats.get(m.tile)?.c;
-        if (c) sidebar = lastActive = c;
+        if (this.tiles.some((t) => t.id === m.tile)) this.noteFocus(m.tile);
         break;
       }
     }
@@ -213,7 +352,7 @@ class SidebarTiles implements vscode.Disposable {
     this.createChat(tile.id, start);
     this.save();
     this.sendLayout();
-    this.view.webview.postMessage({ type: "tiles:focus", tile: tile.id });
+    this.focusTile(tile.id);
   }
 
   /**
@@ -233,20 +372,20 @@ class SidebarTiles implements vscode.Disposable {
     // The process moves with the tab, so the session shows at once in the other tile.
     if (side) this.addTile(to, side, { tabs: [out.tab], shown: out.tab.key, handover: out.handover });
     else await dst.adoptTabs([out.tab], index, out.tab.key, out.handover ? [out.handover] : []);
-    if (out.empty && this.tiles.length > 1) this.removeTile(from);
-    if (!side) this.view.webview.postMessage({ type: "tiles:focus", tile: to });
+    if (out.empty && this.tiles.length > 1 && !this.hasAcpTabs(from)) this.removeTile(from);
+    if (!side) this.selectLane(to);
   }
 
   /** A tile was dropped on another one: its tabs join that tile, and it closes. */
   private async merge(from: string, to: string) {
     const src = this.chats.get(from)?.c;
     const dst = this.chats.get(to)?.c;
-    if (!src || !dst || from === to) return;
+    if (!src || !dst || from === to || this.hasAcpTabs(from) || this.hasAcpTabs(to)) return;
     const { tabs, shown } = src.tabList();
     // The processes move to the other tile; closing this tile stops only what is left.
     const handovers = src.detachAll();
     this.removeTile(from);
-    this.view.webview.postMessage({ type: "tiles:focus", tile: to });
+    this.focusTile(to);
     await dst.adoptTabs(tabs, undefined, shown && tabs.some((t) => t.key === shown) ? shown : undefined, handovers);
   }
 
@@ -265,7 +404,7 @@ class SidebarTiles implements vscode.Disposable {
   private async closeTile(id: string) {
     const e = this.chats.get(id);
     if (!e || this.tiles.length < 2) return;
-    if (e.c.hasWork) {
+    if (e.c.hasWork || [...this.acpChats.values()].some((a) => a.tile === id && a.c.hasWork)) {
       const pick = await vscode.window.showWarningMessage("Pi: a session in this tile is still working. Stop it and close the tile?", { modal: true }, "Stop and Close");
       if (pick !== "Stop and Close") return;
     }
@@ -274,28 +413,31 @@ class SidebarTiles implements vscode.Disposable {
 
   private removeTile(id: string) {
     const i = this.tiles.findIndex((t) => t.id === id);
-    const e = this.chats.get(id);
-    if (i < 0 || !e || this.tiles.length < 2) return;
+    const pi = this.chats.get(id);
+    if (i < 0 || !pi || this.tiles.length < 2) return;
     this.tiles.splice(i, 1);
     this.evenSizes();
     const nb = this.tiles[Math.max(0, i - 1)];
-    this.chats.delete(id);
     // The user closed the tile (and agreed to stop its work).
-    e.c.dispose(true);
-    e.inbox.dispose();
-    controllers.delete(e.c);
-    const next = this.chats.get(nb.id)?.c;
-    if (sidebar === e.c) sidebar = next;
-    if (lastActive === e.c) lastActive = next;
+    this.chats.delete(id);
+    pi.c.dispose(true);
+    pi.inbox.dispose();
+    controllers.delete(pi.c);
+    const next = this.chats.get(nb.id)?.c ?? this.first;
+    if (sidebar === pi.c) sidebar = next;
+    if (lastActive === pi.c) lastActive = next;
     this.context.workspaceState.update(`pi.sidebarTabs:${id}`, undefined);
     this.context.workspaceState.update(`pi.sidebarTabs:${id}:shown`, undefined);
+    for (const [key, entry] of this.acpChats) if (entry.tile === id) this.removeAcp(key);
+    this.activeLanes.delete(id);
     this.updateBadge();
     this.save();
     this.sendLayout();
-    this.view.webview.postMessage({ type: "tiles:focus", tile: nb.id });
+    this.focusTile(nb.id);
   }
 
   dispose() {
+    this.disposed = true;
     for (const e of this.chats.values()) {
       e.c.dispose();
       e.inbox.dispose();
@@ -304,14 +446,20 @@ class SidebarTiles implements vscode.Disposable {
       if (lastActive === e.c) lastActive = undefined;
     }
     this.chats.clear();
-    for (const d of this.subs) d.dispose();
+    for (const key of this.acpChats.keys()) this.removeAcp(key, false);
+    for (const d of this.subs.splice(0)) d.dispose();
   }
 }
 
-class SidebarProvider implements vscode.WebviewViewProvider {
+class SidebarProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   private tiles?: SidebarTiles;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
+
+  dispose() {
+    this.tiles?.dispose();
+    this.tiles = undefined;
+  }
 
   resolveWebviewView(view: vscode.WebviewView): void {
     view.webview.options = webviewOptions(this.context.extensionUri);
@@ -365,8 +513,12 @@ function openPanel(context: vscode.ExtensionContext, sessionFile?: string, opts:
   };
   const c = new PiController(context, host, output, { primary: false, sessionFile });
   controllers.add(c);
-  if (!opts.preserveFocus) lastActive = c;
-  panel.onDidChangeViewState(() => panel.active && (lastActive = c));
+  const noteFocus = () => {
+    lastActive = c;
+    activeAcp = undefined;
+  };
+  if (!opts.preserveFocus) noteFocus();
+  panel.onDidChangeViewState(() => { if (panel.active) noteFocus(); });
   panel.onDidDispose(() => {
     c.dispose();
     controllers.delete(c);
@@ -376,6 +528,43 @@ function openPanel(context: vscode.ExtensionContext, sessionFile?: string, opts:
 }
 
 const workspaceCwd = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+
+function acpCwd() {
+  const uri = vscode.window.activeTextEditor?.document.uri;
+  return (uri && vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath) ?? workspaceCwd();
+}
+
+async function openAcpPanel(context: vscode.ExtensionContext, detached?: DaemonSession) {
+  try {
+    if (detached && !vscode.workspace.isTrusted) {
+      void vscode.window.showWarningMessage("Pi: trust this workspace before reconnecting to an ACP agent.");
+      return;
+    }
+    if (!detached && !await configureAcp()) return;
+  } catch (e) {
+    void vscode.window.showErrorMessage(`Pi: ${String((e as Error)?.message ?? e)}`);
+    return;
+  }
+  const cwd = detached?.cwd ?? acpCwd();
+  const panel = vscode.window.createWebviewPanel("pi.acpChat", detached?.name || "New session", vscode.ViewColumn.Beside, {
+    ...webviewOptions(context.extensionUri),
+    retainContextWhenHidden: true,
+  });
+  panel.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "acp-logo.svg");
+  const chat = new AcpChat(panel.webview, cwd, output, (title, busy) => {
+    panel.title = `${busy ? "● " : ""}${title}`;
+  }, detached ? { script: path.join(context.extensionPath, "dist", "pi-daemon.js"), key: detached.key } : daemonOptions(context));
+  acpPanels.add(chat);
+  activeAcp = chat;
+  panel.onDidChangeViewState(() => { if (panel.active) activeAcp = chat; });
+  panel.onDidDispose(() => {
+    if (activeAcp === chat) activeAcp = undefined;
+    acpPanels.delete(chat);
+    // VS Code also disposes panels when its window closes. Stop daemon sessions from the session list.
+    chat.dispose();
+  });
+  panel.webview.html = html(panel.webview, context.extensionUri, { acp: true });
+}
 
 /** Open a session file read-only in a new tab. The tab shows new entries as pi writes them. */
 function openSessionViewer(context: vscode.ExtensionContext, file: string) {
@@ -402,6 +591,7 @@ function openSessionViewer(context: vscode.ExtensionContext, file: string) {
 }
 
 async function target(): Promise<PiController | undefined> {
+  if (activeAcp) return undefined;
   if (lastActive && controllers.has(lastActive)) return lastActive;
   await vscode.commands.executeCommand("pi.chat.focus");
   return sidebar;
@@ -419,8 +609,10 @@ export function activate(context: vscode.ExtensionContext) {
   // Read the login shell's environment now (about a second); the first pi start needs it.
   void getShellEnv(vscode.workspace.getConfiguration("pi").get<boolean>("useLoginShellEnv", true));
 
+  const provider = new SidebarProvider(context);
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider("pi.chat", new SidebarProvider(context), {
+    provider,
+    vscode.window.registerWebviewViewProvider("pi.chat", provider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
   );
@@ -429,6 +621,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   cmd("pi.focus", () => vscode.commands.executeCommand("pi.chat.focus"));
   cmd("pi.openInTab", () => openPanel(context));
+  cmd("pi.newAcpChat", () => openAcpPanel(context));
   cmd("pi.showRunning", () => vscode.commands.executeCommand("pi.daemonSessions"));
   // Editor tabs come back after a reload. The webview keeps its session file in its state (see `persistSession` in webview/main.ts).
   context.subscriptions.push(
@@ -441,17 +634,17 @@ export function activate(context: vscode.ExtensionContext) {
   );
   cmd("pi.newSession", async () => (await target())?.runBuiltin("new", ""));
   cmd("pi.history", async () => (await target())?.runBuiltin("resume", ""));
-  cmd("pi.renameSession", async () => (await target())?.runBuiltin("name", ""));
-  cmd("pi.generateTitle", async () => (await target())?.runBuiltin("title", ""));
+  cmd("pi.renameSession", async () => activeAcp ? activeAcp.promptRename() : (await target())?.runBuiltin("name", ""));
+  cmd("pi.generateTitle", async () => activeAcp ? activeAcp.generateTitle() : (await target())?.runBuiltin("title", ""));
   cmd("pi.find", async () => (await target())?.find());
   cmd("pi.tree", async () => (await target())?.runBuiltin("tree", ""));
   cmd("pi.openInTerminal", async () => (await target())?.openInTerminal());
   // "Pi: Open in Terminal": a fresh pi TUI session in a terminal, no chat attached.
   cmd("pi.newTerminal", () => createPiTerminal([]));
   cmd("pi.restart", async () => (await target())?.restart());
-  cmd("pi.selectModel", async () => (await target())?.runBuiltin("model", ""));
-  cmd("pi.selectThinking", async () => (await target())?.runBuiltin("thinking", ""));
-  cmd("pi.abort", async () => (await target())?.abort());
+  cmd("pi.selectModel", async () => activeAcp ? activeAcp.openModelPicker() : (await target())?.runBuiltin("model", ""));
+  cmd("pi.selectThinking", async () => activeAcp ? activeAcp.openModelPicker(true) : (await target())?.runBuiltin("thinking", ""));
+  cmd("pi.abort", async () => activeAcp ? activeAcp.abort() : (await target())?.abort());
   // Webview context menu on a link (see the "contextmenu" listener in webview/main.ts).
   cmd("pi.copyLinkAddress", (ctx?: { href?: string }) => ctx?.href && vscode.env.clipboard.writeText(ctx.href));
   cmd("pi.viewSession", async (arg?: vscode.Uri | string) => {
@@ -491,6 +684,7 @@ export function activate(context: vscode.ExtensionContext) {
     cwd: workspaceCwd,
     running: () => PiController.running(),
     files: () => PiController.openFiles(),
+    openAcp: (session) => void openAcpPanel(context, session),
     log: (line) => output.appendLine(line),
     open: (file) => void target().then((c) => c?.open(file)).then(() => daemonUi.refresh(), (err) => vscode.window.showErrorMessage(`Pi: ${err.message ?? err}`)),
     show: (file) => {
@@ -507,6 +701,8 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
+  for (const chat of acpPanels) chat.dispose();
+  acpPanels.clear();
   for (const c of controllers) c.dispose();
   controllers.clear();
 }

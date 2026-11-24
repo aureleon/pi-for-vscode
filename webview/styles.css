@@ -19,6 +19,15 @@
 }
 
 body.vscode-light { --pi-violet: #7459b4; --pi-violet-strong: #7459b4; }
+body {
+  --acp-accent: var(--vscode-focusBorder, var(--vscode-button-background, currentColor));
+}
+body:not(.vscode-high-contrast, .vscode-high-contrast-light) .chat-frame.acp {
+  --accent: var(--acp-custom-accent, var(--acp-accent));
+  --accent-btn: var(--vscode-button-background, var(--acp-accent));
+  --composer-accent: var(--acp-custom-accent, var(--accent-btn));
+  --accent-btn-fg: var(--vscode-button-foreground, var(--vscode-foreground));
+}
 body.vscode-high-contrast, body.vscode-high-contrast-light {
   --accent: var(--vscode-focusBorder); --accent-btn: var(--vscode-button-background); --accent-btn-fg: var(--vscode-button-foreground);
 }
@@ -35,6 +44,7 @@ body {
 body { display: flex; flex-direction: column; height: 100vh; }
 /* One chat: the chat (#app) and its side panels. The sidebar can hold several (see "tiles"). */
 .chat-frame { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; position: relative; }
+.chat-frame[hidden] { display: none; }
 #app { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; position: relative; }
 .hidden { display: none !important; }
 button { font: inherit; color: inherit; }
@@ -101,6 +111,10 @@ kbd {
 .chat-frame.switching .scroll { cursor: progress; }
 .tab.active::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: 0; height: 1px; background: var(--accent); }
 .tab-label { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acp-tab-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--acp-accent); }
+body:not(.vscode-high-contrast, .vscode-high-contrast-light) .acp-tab-dot {
+  background: var(--acp-custom-accent, var(--acp-accent));
+}
 .tab .topbar-title { flex: 0 1 auto; }
 .tab .topbar-rename { margin-left: 0; width: 140px; flex: none; }
 .tab-mark, .tab-close { flex: none; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; }
@@ -128,6 +142,8 @@ kbd {
 .messages > * { content-visibility: auto; contain-intrinsic-size: auto 80px; overflow-clip-margin: 20px; }
 .empty { text-align: center; color: var(--muted); margin-top: 18vh; line-height: 1.7; }
 .empty .logo { width: 64px; height: 64px; display: block; margin: 0 auto 10px; }
+.empty .acp-logo { color: var(--accent); }
+.acp-logo svg { width: 100%; height: 100%; }
 .empty .hint { font-size: 0.9em; margin-top: 6px; }
 .empty-loading { display: none; align-items: center; justify-content: center; gap: 8px; }
 .empty-loading .spinner { width: 12px; height: 12px; }
@@ -379,6 +395,14 @@ img.tool-image:not([src]):not([height]) { width: calc(100% - 12px); height: 200p
 /* While Pi works: pi violet border with a soft glow (not an error-like red). */
 .running .composer { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent); }
 .composer.drag { border-style: dashed; border-color: var(--accent); }
+.backend-picker-wrap { position: relative; flex: none; display: flex; }
+.icon-btn.backend-picker {
+  flex: none; width: 24px; height: 24px; padding: 4px; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.chat-frame:not(.acp) .backend-picker svg { width: 14px; height: 14px; }
+.icon-btn.backend-picker:hover { background: var(--vscode-toolbar-hoverBackground, var(--input-bg)); }
+.backend-picker:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 /* Input = transparent-text <textarea> over a backdrop with the same metrics that renders
    the markdown styling (see webview/mdHighlight.ts). Only width-neutral styles are used. */
 .input-wrap { position: relative; }
@@ -465,14 +489,33 @@ img.tool-image:not([src]):not([height]) { width: calc(100% - 12px); height: 200p
 .ctx[disabled] { cursor: default; opacity: .6; }
 .ctx[data-level="busy"] { opacity: 1; }
 .ctx .spinner { width: 12px; height: 12px; }
+
+.chat-frame.acp .toolbar button[aria-disabled="true"] {
+  --ctx-color: var(--vscode-disabledForeground, var(--muted));
+  color: var(--vscode-disabledForeground, var(--muted)); cursor: default; filter: none;
+}
+.chat-frame.acp .toolbar :is(.icon-btn, .chip)[aria-disabled="true"] { background: transparent; }
+.chat-frame.acp .ctx[aria-disabled="true"] {
+  background: color-mix(in srgb, var(--ctx-color) 10%, transparent);
+  border-color: color-mix(in srgb, var(--ctx-color) 35%, transparent);
+}
+.chat-frame.acp .ctx[aria-disabled="true"] .ctx-action { display: none; }
+.chat-frame.acp #model-name, .chat-frame.acp #thinking-level { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chat-frame.acp #thinking-level { flex: 0 1 auto; max-width: 50%; }
+.chat-frame.acp #thinking-level:empty { display: none; }
+.chat-frame.acp .input-hl :is(.md-cmd:has(+ .md-shell), .md-shell, .md-mention) { color: inherit; background: none; text-shadow: none; }
+
 .send {
   width: 28px; height: 28px; border-radius: 7px; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
   background: var(--accent-btn); color: var(--accent-btn-fg);
 }
+.send:not(.stop) { background: var(--composer-accent, var(--accent-btn)); }
 .send[disabled] { opacity: .4; cursor: default; }
 .send.stop { background: #e5534b; color: #fff; }
 
 .attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 8px 0; }
+.attachment-status { padding: 6px 8px 0; color: var(--vscode-inputValidation-errorForeground, var(--vscode-foreground)); font-size: .85em; }
+.attachment-status:empty { display: none; }
 .attachment {
   display: flex; align-items: center; gap: 4px; padding: 2px 2px 2px 4px; border: 1px solid var(--border); border-radius: 6px;
   font-size: 0.85em; max-width: 180px;
@@ -539,6 +582,21 @@ img.tool-image:not([src]):not([height]) { width: calc(100% - 12px); height: 200p
   position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 6px; z-index: 20;
   display: flex; flex-direction: column; max-height: min(440px, 65vh); overflow: hidden;
 }
+.model-picker.has-config-tabs { height: min(440px, 65vh); }
+.mp-config-tabs {
+  display: flex; flex: none; gap: 4px; padding: 5px 8px;
+  overflow-x: auto; border-bottom: 1px solid var(--border);
+}
+.mp-config-tabs button {
+  flex: none; padding: 3px 8px; border: 1px solid transparent; border-radius: 5px;
+  color: var(--muted, var(--vscode-foreground)); background: transparent; font: inherit; cursor: pointer;
+}
+.mp-config-tabs button:hover { background: var(--vscode-toolbar-hoverBackground); }
+.mp-config-tabs button[aria-pressed="true"] {
+  border-color: var(--accent); color: var(--vscode-foreground);
+  background: var(--vscode-list-inactiveSelectionBackground, transparent);
+}
+.mp-config-tabs button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 .mp-search {
   margin: 0; padding: 8px 12px 4px; border: none; outline: none; background: transparent; font: inherit;
   color: var(--vscode-foreground);
@@ -571,7 +629,7 @@ img.tool-image:not([src]):not([height]) { width: calc(100% - 12px); height: 200p
   --p: 0; position: relative; width: 112px; height: 16px; border-radius: 8px;
   background: var(--vscode-input-background); border: 1px solid var(--border); pointer-events: none;
 }
-.slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 8px; width: calc(16px + (100% - 16px) * var(--p)); background: var(--accent-btn); transition: width .1s ease; }
+.slider-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 8px; width: calc(16px + (100% - 16px) * var(--p)); background: var(--composer-accent, var(--accent-btn)); transition: width .1s ease; }
 .slider-dots i {
   position: absolute; top: 50%; left: calc(8px + (100% - 16px) * var(--p)); width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px;
   border-radius: 50%; background: var(--muted); opacity: .7;
@@ -734,6 +792,13 @@ button.lm-twisty:hover { background: var(--vscode-toolbar-hoverBackground); colo
   outline: none; background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
   color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
 }
+.tb-menu.backend-menu { top: auto; right: auto; left: 0; bottom: calc(100% + 4px); min-width: max-content; }
+.backend-menu button { display: flex; align-items: center; gap: 8px; }
+.backend-menu svg { width: 16px; height: 16px; flex: none; }
+.chat-frame.acp .tb-menu button[aria-disabled="true"] {
+  color: var(--vscode-disabledForeground, var(--muted)); cursor: default;
+}
+.chat-frame.acp .tb-menu button[aria-disabled="true"]:hover:not(:focus) { background: transparent; }
 
 /* ---------------------------------------------------------------- image preview */
 .user-images img, img.tool-image, .attachment img, .queued-images img, .md img { cursor: zoom-in; }
