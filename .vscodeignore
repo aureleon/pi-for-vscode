@@ -3,6 +3,7 @@
 !dist/webview.js
 !dist/pi-bridge.mjs
 !dist/pi-daemon.js
+!dist/pimuxd
 !dist/integrations/*.mjs
 !dist/workarounds/*.mjs
 !webview/styles.css

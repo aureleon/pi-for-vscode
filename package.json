@@ -381,7 +381,9 @@
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
+    "build:pimuxd": "node tools/build-pimuxd.mjs",
     "package": "npm run build && vsce package --no-dependencies",
+    "package:native": "npm run build && node tools/package-pimuxd.mjs",
     "build:icons": "node tools/build-icon-font.mjs"
   },
   "devDependencies": {
