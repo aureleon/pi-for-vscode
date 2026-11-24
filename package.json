@@ -1,8 +1,8 @@
 {
   "name": "pi-for-vscode",
-  "displayName": "Pi Coding Agent",
-  "description": "Use the Pi coding agent (with all your Pi extensions, skills and prompts) from the VS Code sidebar.",
-  "version": "0.4.0",
+  "displayName": "PiMux for VS Code",
+  "description": "Use Pi and ACP agents in VS Code. Keep sessions running and reconnect with PiMux.",
+  "version": "0.5.0",
   "publisher": "dhguz",
   "license": "MIT",
   "engines": {
