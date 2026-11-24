@@ -49,7 +49,6 @@ export function daemonList(): Promise<DaemonList | undefined> {
 }
 
 let starting: Promise<void> | undefined;
-let usable: Promise<void> | undefined;
 
 /**
  * Start the daemon as a process of its own: `detached` puts it in a new session, so it stays when
@@ -75,14 +74,14 @@ async function startDaemon(script: string) {
   throw new Error("the pi session daemon did not start");
 }
 
-/** The daemon is of an older build than this extension (or speaks another protocol). */
+/** Only a newer extension build may replace the daemon. A protocol mismatch alone can also mean a downgrade. */
 export function isStale(list: DaemonList): boolean {
-  return list.protocol !== PROTOCOL || (list.build ?? 0) < BUILD;
+  return (list.build ?? 0) < BUILD;
 }
 
-/** Sessions of the daemon with a run or an open question: they would lose their work if the daemon stopped. */
-export function workingIn(list: DaemonList): number {
-  return list.sessions.filter((s) => s.busy || s.waiting).length;
+/** ACP history lives in the daemon even when its agent is idle. */
+export function retainedIn(list: DaemonList): number {
+  return list.sessions.filter((s) => s.busy || s.waiting || s.backend === "acp").length;
 }
 
 const connectable = () => tryConnect().then((s) => (s.destroy(), true), () => false);
@@ -108,41 +107,50 @@ let replacing: Promise<DaemonList | undefined> | undefined;
 
 /**
  * End a daemon of an older build, so that the next start gets a daemon of this build. A stale daemon
- * with working sessions stays (its list is returned) unless `force` is set: ending it stops them.
- * Idle sessions are on disk; their chats start them again (see PI_DAEMON_LOST in controller.ts).
+ * with work or ACP sessions stays unless `force` is set. Idle Pi sessions are on disk and
+ * their chats can restart them after the daemon exits.
  */
 export function replaceStale(force = false): Promise<DaemonList | undefined> {
   replacing ??= (async () => {
     const list = await daemonList();
     if (!list || !isStale(list)) return undefined;
-    if (!force && workingIn(list)) return list;
+    if (!force && retainedIn(list)) return list;
     await endDaemon(list);
     return undefined;
   })().finally(() => (replacing = undefined));
   return replacing;
 }
 
-/** Replace a stale daemon if no session works in it. One that stays is used if it speaks this protocol. */
-async function checkVersion() {
-  const stale = await replaceStale();
-  if (stale && stale.protocol !== PROTOCOL) throw new Error("a session daemon of another Pi for VS Code version still runs sessions; it is replaced when they end");
+/** Check the protocol even when this extension cannot replace the daemon. */
+function checkProtocol(list: DaemonList) {
+  if (list.protocol === PROTOCOL) return;
+  if (isStale(list)) {
+    throw new Error("An older Pi session daemon still holds sessions. Use Stop and Replace Now, or wait for those sessions to end.");
+  }
+  throw new Error("The Pi session daemon uses a newer protocol. Update Pi for VS Code and reload this window, or turn off Keep Sessions Alive.");
 }
 
 /** A connection to the daemon. Starts the daemon if it does not run. */
 export async function connectDaemon(script: string): Promise<net.Socket> {
-  // Checked once: after that the status bar item looks for a stale daemon (src/daemon/ui.ts).
-  usable ??= checkVersion();
+  await replaceStale();
+  let sock: net.Socket;
   try {
-    await usable;
+    sock = await tryConnect();
+  } catch {
+    starting ??= startDaemon(script).finally(() => (starting = undefined));
+    await starting;
+    sock = await tryConnect();
+  }
+  // Another window can replace the daemon between opens or win the race to start it.
+  // Hold the connection while checking so we do not reconnect after the version check.
+  sock.on("error", () => {});
+  try {
+    const list = await daemonList();
+    if (!list || sock.destroyed) throw new Error("Could not verify the Pi session daemon while opening the session. Try again.");
+    checkProtocol(list);
+    return sock;
   } catch (err) {
-    // Look again at the next start: the old daemon may be gone then.
-    usable = undefined;
+    sock.destroy();
     throw err;
   }
-  try {
-    return await tryConnect();
-  } catch {}
-  starting ??= startDaemon(script).finally(() => (starting = undefined));
-  await starting;
-  return tryConnect();
 }

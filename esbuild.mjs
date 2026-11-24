@@ -30,9 +30,10 @@ const configs = [
     loader: { ".css": "text" },
   },
   {
-    // Session daemon: runs the pi processes apart from VS Code (setting `pi.keepSessionsAlive`).
+    // The daemon runs apart from VS Code. Bundle the shared ACP client SDK for plain Node.
     entryPoints: ["src/daemon/piDaemon.ts"],
     bundle: true,
+    packages: "bundle",
     outfile: "dist/pi-daemon.js",
     define,
     platform: "node",

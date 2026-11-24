@@ -1,19 +1,23 @@
 /**
- * The session daemon: a process apart from VS Code that runs the `pi --mode rpc` processes, so that
- * sessions keep working when the VS Code window closes or a Remote-SSH connection drops.
+ * The session daemon runs Pi and ACP sessions apart from VS Code, so they can keep working
+ * when the window closes or a Remote-SSH connection drops. The bundle runs with plain Node.
  *
- * A client (PiProcess) connects to the socket and sends `open`. From then on the connection is the
- * RPC stream of one pi process: lines go to pi's stdin and pi's stdout lines come back. When the
- * connection closes, a session that works goes on without a client ("detached"). A later `open`
- * of the same session file gets that process again, with its open dialogs and unfinished output.
- *
- * Keep this file free of dependencies: it runs with plain node.
+ * `open` connects a client to one pi process. A later `open` of the same session file can
+ * recover a detached process, with its open dialogs and unfinished output.
+ * `acp_open` creates an ACP session. `acp_attach` recovers it by key, with its transcript
+ * and pending permissions.
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as path from "node:path";
-import { BUILD, daemonDir, lineSplitter, PROTOCOL, socketPath, type AutoAnswer, type DaemonAttached, type DaemonFinished, type DaemonList, type DaemonOp, type DialogPolicy } from "./protocol";
+import { AcpSession } from "../acp/session";
+import type { AcpInput, AcpOutput } from "../acp/sessionProtocol";
+import {
+  BUILD, daemonDir, lineSplitter, PROTOCOL, socketPath, type AutoAnswer, type DaemonAcpAttached,
+  type DaemonAcpAttachError, type DaemonAcpClose, type DaemonAttached, type DaemonFinished, type DaemonList,
+  type DaemonOp, type DialogPolicy,
+} from "./protocol";
 
 /** A detached session that has no work and no pi output for this long stops. Its session is on disk. */
 const QUIET_MS = Number(process.env.PI_VSCODE_DAEMON_QUIET_MS) || 60_000;
@@ -61,7 +65,18 @@ interface Session {
   exited?: boolean;
 }
 
+interface AcpEntry {
+  key: string;
+  cwd: string;
+  session: AcpSession;
+  client?: net.Socket;
+  startedAt: number;
+  detachedAt?: number;
+}
+
 const sessions = new Map<string, Session>();
+const acpSessions = new Map<string, AcpEntry>();
+const hasSessions = () => sessions.size > 0 || acpSessions.size > 0;
 const conns = new Set<net.Socket>();
 let finished: DaemonFinished[] = [];
 let seq = 0;
@@ -124,8 +139,10 @@ function openSession(op: Extract<DaemonOp, { op: "open" }>, sock: net.Socket): S
     return held;
   }
   const proc = spawn(op.command, ["--mode", "rpc", ...op.args], { cwd: op.cwd, env: op.env as NodeJS.ProcessEnv, shell: process.platform === "win32", windowsHide: true });
+  let key = `s${++seq}`;
+  while (acpSessions.has(key)) key = `s${++seq}`;
   const s: Session = {
-    key: `s${++seq}`, proc, cwd: op.cwd, policy: op.policy, client: sock, busy: false,
+    key, proc, cwd: op.cwd, policy: op.policy, client: sock, busy: false,
     tail: [], dialogs: new Map(), ui: new Map(), file: target.file, id: target.id, startedAt: Date.now(), auto: [],
   };
   sessions.set(s.key, s);
@@ -194,10 +211,7 @@ function onExit(s: Session, code: number | null, signal: string | null, err?: Er
   clearTimeout(s.quiet);
   for (const d of s.dialogs.values()) clearTimeout(d.timer);
   log(`exit ${s.key} code=${code} signal=${signal} ${err?.message ?? ""}`);
-  if (retiring) {
-    if (!sessions.size) shutdown();
-    return;
-  }
+  if (retiring) return;
   if (s.client) {
     s.client.end(JSON.stringify({ type: "daemon_exit", code, signal, error: err?.message, errorCode: (err as any)?.code }) + "\n");
     s.client = undefined;
@@ -318,6 +332,81 @@ function fromClient(s: Session, line: string) {
   if (!s.exited && s.proc.stdin.writable) s.proc.stdin.write(line + "\n");
 }
 
+// ------------------------------------------------------------------ ACP sessions
+
+function acpAttachError(sock: net.Socket, message: string) {
+  const rec: DaemonAcpAttachError = { type: "acp_attachError", message };
+  sock.end(JSON.stringify(rec) + "\n");
+}
+
+function attachAcp(s: AcpEntry, sock: net.Socket): AcpEntry | undefined {
+  if (s.client) {
+    acpAttachError(sock, "This ACP session is open in another VS Code window.");
+    return undefined;
+  }
+  s.client = sock;
+  s.detachedAt = undefined;
+  log(`acp attach ${s.key}`);
+  const rec: DaemonAcpAttached = { type: "acp_attached", key: s.key };
+  sock.write(JSON.stringify(rec) + "\n");
+  s.session.snapshot();
+  return s;
+}
+
+function openAcp(op: Extract<DaemonOp, { op: "acp_open" }>, sock: net.Socket): AcpEntry | undefined {
+  const { key, cwd } = op;
+  if (typeof key !== "string" || !key || sessions.has(key) || acpSessions.has(key)) {
+    acpAttachError(sock, "The ACP session key is invalid or already in use.");
+    return undefined;
+  }
+  let s: AcpEntry | undefined;
+  const sessionLog = (text: string) => log(`acp ${key}: ${text}`);
+  try {
+    const post = (msg: AcpOutput) => { s?.client?.write(JSON.stringify(msg) + "\n"); };
+    const session = new AcpSession({ cwd, post, log: sessionLog });
+    s = { key, cwd, session, startedAt: Date.now() };
+  } catch (err) {
+    acpAttachError(sock, err instanceof Error ? err.message : String(err));
+    return undefined;
+  }
+  acpSessions.set(key, s);
+  attachAcp(s, sock);
+  void s.session.start(op.command, op.args, op.env).catch((err) => sessionLog(String(err)));
+  return s;
+}
+
+/** Keep the transcript and permissions in memory until the client reattaches or stops the session. */
+function detachAcp(s: AcpEntry) {
+  s.client = undefined;
+  s.detachedAt = Date.now();
+  log(`acp detach ${s.key} busy=${s.session.hasWork} waiting=${s.session.waiting}`);
+}
+
+function stopAcp(s: AcpEntry) {
+  const sock = s.client;
+  s.client = undefined;
+  acpSessions.delete(s.key);
+  log(`acp stop ${s.key}`);
+  try {
+    s.session.dispose();
+  } catch (err) {
+    log(`acp ${s.key}: ${String(err)}`);
+  }
+  sock?.end();
+}
+
+function fromAcpClient(s: AcpEntry, line: string) {
+  let rec: AcpInput | DaemonAcpClose;
+  try {
+    rec = JSON.parse(line);
+  } catch {
+    return;
+  }
+  if (!rec || typeof rec.type !== "string") return;
+  if (rec.type === "acp_close") stopAcp(s);
+  else s.session.receive(rec);
+}
+
 // ------------------------------------------------------------------ server
 
 function listing(): DaemonList {
@@ -326,10 +415,16 @@ function listing(): DaemonList {
     protocol: PROTOCOL,
     build: BUILD,
     pid: process.pid,
-    sessions: [...sessions.values()].map((s) => ({
-      key: s.key, pid: s.proc.pid, cwd: s.cwd, file: s.file, id: s.id, name: s.name, busy: s.busy,
-      waiting: s.dialogs.size, attached: !!s.client, detachedAt: s.detachedAt, startedAt: s.startedAt,
-    })),
+    sessions: [
+      ...[...sessions.values()].map((s) => ({
+        key: s.key, pid: s.proc.pid, cwd: s.cwd, file: s.file, id: s.id, name: s.name, busy: s.busy,
+        waiting: s.dialogs.size, attached: !!s.client, detachedAt: s.detachedAt, startedAt: s.startedAt,
+      })),
+      ...[...acpSessions.values()].map((s) => ({
+        key: s.key, backend: "acp" as const, cwd: s.cwd, name: s.session.title, busy: s.session.hasWork,
+        waiting: s.session.waiting, failed: s.session.failed, attached: !!s.client, detachedAt: s.detachedAt, startedAt: s.startedAt,
+      })),
+    ],
     finished,
   };
 }
@@ -342,37 +437,34 @@ let retiring = false;
  */
 function retire() {
   if (retiring) return;
-  retiring = true;
   log("retire");
-  // Closing the server removes the socket file, so the new daemon can listen at once.
-  server.close();
   for (const s of sessions.values()) {
     s.silent = true;
     s.client = undefined;
     stop(s);
   }
-  for (const c of conns) c.destroy();
-  if (!sessions.size) return shutdown();
-  setTimeout(shutdown, 4000);
+  for (const s of acpSessions.values()) stopAcp(s);
+  shutdown();
 }
 
 function shutdown() {
-  log("exit");
-  // After `retire` the path can belong to the new daemon already.
-  if (process.platform !== "win32" && !retiring) {
-    try {
-      fs.unlinkSync(socketPath());
-    } catch {}
-  }
-  process.exit(0);
+  if (retiring) return;
+  retiring = true;
+  clearTimeout(idleTimer);
+  // Closing the server removes the socket file, so the new daemon can listen at once.
+  server.close();
+  for (const c of conns) c.destroy();
+  process.once("exit", () => log("exit"));
+  // Let child exit handlers and kill timers run before the daemon exits.
+  setTimeout(() => process.exit(0), 4000).unref();
 }
 
-/** Exit when there is no session, no client and no report to give. */
+/** Exit when there is no session, no client, and no report to give. */
 function idleCheck() {
   clearTimeout(idleTimer);
-  if (sessions.size || conns.size) return;
+  if (retiring || hasSessions() || conns.size) return;
   idleTimer = setTimeout(() => {
-    if (sessions.size || conns.size) return;
+    if (hasSessions() || conns.size) return;
     if (listing().finished.length) return idleCheck();
     shutdown();
   }, IDLE_EXIT_MS);
@@ -380,13 +472,16 @@ function idleCheck() {
 
 const server = net.createServer((sock) => {
   let s: Session | undefined;
+  let acp: AcpEntry | undefined;
   let first = true;
   conns.add(sock);
   clearTimeout(idleTimer);
   sock.on("error", () => {});
   sock.on("data", lineSplitter((line) => {
+    if (retiring || sock.destroyed) return;
     if (!first) {
       if (s && s.client === sock) fromClient(s, line);
+      else if (acp && acp.client === sock) fromAcpClient(acp, line);
       return;
     }
     first = false;
@@ -397,10 +492,19 @@ const server = net.createServer((sock) => {
       sock.destroy();
       return;
     }
-    switch (op.op) {
+    switch (op?.op) {
       case "open":
         s = openSession(op, sock);
         break;
+      case "acp_open":
+        acp = openAcp(op, sock);
+        break;
+      case "acp_attach": {
+        const entry = acpSessions.get(op.key);
+        if (entry) acp = attachAcp(entry, sock);
+        else acpAttachError(sock, "This ACP session is no longer in the daemon.");
+        break;
+      }
       case "list":
         sock.end(JSON.stringify(listing()) + "\n");
         break;
@@ -410,6 +514,8 @@ const server = net.createServer((sock) => {
           k.silent = true;
           stop(k);
         }
+        const entry = acpSessions.get(op.key);
+        if (entry) stopAcp(entry);
         sock.end("{}\n");
         break;
       }
@@ -424,7 +530,7 @@ const server = net.createServer((sock) => {
         break;
       case "shutdown":
         // Only a daemon without sessions stops on request (a newer extension starts its own).
-        sock.end(JSON.stringify({ ok: !sessions.size }) + "\n", () => !sessions.size && shutdown());
+        sock.end(JSON.stringify({ ok: !hasSessions() }) + "\n", () => !hasSessions() && shutdown());
         break;
       default:
         sock.destroy();
@@ -434,6 +540,7 @@ const server = net.createServer((sock) => {
     conns.delete(sock);
     // A connection that closes without a word (the extension host died, the SSH connection dropped): the session goes on.
     if (s && s.client === sock) detach(s, false);
+    if (acp && acp.client === sock) detachAcp(acp);
     idleCheck();
   });
 });

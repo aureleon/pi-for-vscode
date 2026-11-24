@@ -2,7 +2,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 /** Version of the records between the extension and the daemon. A daemon with another version is not used. */
-export const PROTOCOL = 1;
+export const PROTOCOL = 3;
 
 declare const __PI_BUILD__: number | undefined;
 /**
@@ -24,13 +24,15 @@ export function socketPath(): string {
   return path.join(daemonDir(), "daemon.sock");
 }
 
-/** First record of a connection. `open` turns the connection into the RPC stream of one pi process. */
+/** First record of a connection. An open or attach op gives the connection to one session. */
 export type DaemonOp =
   | {
     op: "open"; command: string; args: string[]; cwd: string; env: Record<string, string | undefined>; policy: DialogPolicy;
     /** Take the session from the client that has it (the user opened it here). Without it, such an open is refused. */
     takeover?: boolean;
   }
+  | { op: "acp_open"; key: string; command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv }
+  | { op: "acp_attach"; key: string }
   | { op: "list" }
   | { op: "kill"; key: string }
   | { op: "ack"; files: string[] }
@@ -44,9 +46,11 @@ export interface AutoAnswer {
   answer: string;
 }
 
-/** A pi process that the daemon runs. */
+/** A session that the daemon runs. */
 export interface DaemonSession {
   key: string;
+  /** Pi sessions omit this field. */
+  backend?: "acp";
   pid?: number;
   cwd: string;
   file?: string;
@@ -54,8 +58,10 @@ export interface DaemonSession {
   name?: string;
   /** The agent runs. */
   busy: boolean;
-  /** Dialogs that wait for an answer. */
+  /** Dialogs or permissions that wait for an answer. */
   waiting: number;
+  /** The ACP agent failed, but its transcript is still in the daemon. */
+  failed?: boolean;
   /** A VS Code window has the session. */
   attached: boolean;
   detachedAt?: number;
@@ -90,6 +96,22 @@ export interface DaemonAttached {
   detachedMs: number;
   runStartedAt?: number;
   auto: AutoAnswer[];
+}
+
+/** The transcript snapshot and pending permissions follow this record. */
+export interface DaemonAcpAttached {
+  type: "acp_attached";
+  key: string;
+}
+
+export interface DaemonAcpAttachError {
+  type: "acp_attachError";
+  message: string;
+}
+
+/** Stop the ACP session. Closing the connection alone only detaches it. */
+export interface DaemonAcpClose {
+  type: "acp_close";
 }
 
 /**
