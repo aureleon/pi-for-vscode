@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { LEGACY_PROTOCOL, lineSplitter, PREVIOUS_PROTOCOL, PROTOCOL, socketPath, type DaemonList, type DaemonOp, type DialogPolicy } from "./protocol";
+import { LEGACY_PROTOCOL, lineSplitter, PROTOCOL, socketPath, type DaemonList, type DaemonOp, type DialogPolicy } from "./protocol";
 
 export interface DaemonOptions {
   script: string;
@@ -42,12 +42,12 @@ export async function daemonCall<T = any>(op: DaemonOp): Promise<T | undefined> 
   });
 }
 
-export function daemonList(): Promise<DaemonList | undefined> {
-  return daemonCall<DaemonList>({ op: "list" });
+export function daemonList(reconnectCwds?: string[]): Promise<DaemonList | undefined> {
+  return daemonCall<DaemonList>({ op: "list", reconnectCwds });
 }
 
 export function isCompatible(list: DaemonList): boolean {
-  return [LEGACY_PROTOCOL, PREVIOUS_PROTOCOL, PROTOCOL].includes(list.protocol);
+  return Number.isInteger(list.protocol) && list.protocol >= LEGACY_PROTOCOL && list.protocol <= PROTOCOL;
 }
 
 let starting: Promise<void> | undefined;

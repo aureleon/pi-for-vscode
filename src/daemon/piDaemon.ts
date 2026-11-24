@@ -25,6 +25,7 @@ const QUIET_MS = Number(process.env.PI_VSCODE_DAEMON_QUIET_MS) || 60_000;
 const IDLE_EXIT_MS = 60_000;
 /** How long the daemon keeps the record of a session that finished without a window. */
 const FINISHED_TTL_MS = 3 * 86_400_000;
+const RECONNECT_TTL_MS = 60_000;
 
 /** Event types that make up in-progress output (the same set as TAIL_EVENTS in controller.ts). */
 const TAIL_EVENTS = new Set(["message_start", "message_update", "tool_execution_start", "tool_execution_update", "tool_execution_end"]);
@@ -36,7 +37,12 @@ interface Dialog {
   timer?: ReturnType<typeof setTimeout>;
 }
 
-interface Session {
+interface Navigation {
+  canReveal?: boolean;
+  reconnectUntil?: number;
+}
+
+interface Session extends Navigation {
   key: string;
   proc: ChildProcessWithoutNullStreams;
   cwd: string;
@@ -65,7 +71,7 @@ interface Session {
   exited?: boolean;
 }
 
-interface AcpEntry {
+interface AcpEntry extends Navigation {
   key: string;
   cwd: string;
   session: AcpSession;
@@ -136,14 +142,14 @@ function openSession(op: Extract<DaemonOp, { op: "open" }>, sock: net.Socket): S
       held.client.end(JSON.stringify({ type: "daemon_exit", code: null, signal: null, error: "This session moved to another VS Code window." }) + "\n");
       held.client = undefined;
     }
-    attach(held, sock, op.policy);
+    attach(held, sock, op.policy, op.canReveal === true);
     return held;
   }
   const proc = spawn(op.command, ["--mode", "rpc", ...op.args], { cwd: op.cwd, env: op.env as NodeJS.ProcessEnv, shell: process.platform === "win32", windowsHide: true });
   let key = `s${++seq}`;
   while (acpSessions.has(key)) key = `s${++seq}`;
   const s: Session = {
-    key, proc, cwd: op.cwd, policy: op.policy, client: sock, busy: false,
+    key, proc, cwd: op.cwd, policy: op.policy, client: sock, busy: false, canReveal: op.canReveal === true,
     tail: [], dialogs: new Map(), ui: new Map(), file: target.file, id: target.id, startedAt: Date.now(), auto: [],
   };
   sessions.set(s.key, s);
@@ -156,17 +162,21 @@ function openSession(op: Extract<DaemonOp, { op: "open" }>, sock: net.Socket): S
 }
 
 /** Give a detached session to a client: what it has to know first, then the records that a snapshot of the session lacks. */
-function attach(s: Session, sock: net.Socket, policy: DialogPolicy) {
+function attach(s: Session, sock: net.Socket, policy: DialogPolicy, canReveal: boolean) {
   clearTimeout(s.quiet);
   log(`attach ${s.key}`);
   const info: DaemonAttached = { type: "daemon_attached", name: s.name, detachedMs: Date.now() - (s.detachedAt ?? Date.now()), runStartedAt: s.runStartedAt, auto: s.auto };
+  const reveal = canReveal && (s.reconnectUntil ?? 0) > Date.now();
   s.client = sock;
+  s.canReveal = canReveal;
+  s.reconnectUntil = undefined;
   s.policy = policy;
   s.detachedAt = undefined;
   s.worked = false;
   s.auto = [];
   send(s, info);
   for (const line of [...s.ui.values(), ...s.tail, ...[...s.dialogs.values()].map((d) => d.line)]) sock.write(line + "\n");
+  if (reveal) send(s, { type: "daemon_reveal" });
 }
 
 /** The client of `s` left. `keep`: the client says that the session has work that the daemon cannot see (for example child sessions). */
@@ -340,17 +350,21 @@ function acpAttachError(sock: net.Socket, message: string) {
   sock.end(JSON.stringify(rec) + "\n");
 }
 
-function attachAcp(s: AcpEntry, sock: net.Socket): AcpEntry | undefined {
+function attachAcp(s: AcpEntry, sock: net.Socket, canReveal: boolean): AcpEntry | undefined {
   if (s.client) {
     acpAttachError(sock, "This ACP session is open in another VS Code window.");
     return undefined;
   }
+  const reveal = canReveal && (s.reconnectUntil ?? 0) > Date.now();
   s.client = sock;
+  s.canReveal = canReveal;
+  s.reconnectUntil = undefined;
   s.detachedAt = undefined;
   log(`acp attach ${s.key}`);
   const rec: DaemonAcpAttached = { type: "acp_attached", key: s.key, acpBackend: s.acpBackend };
   sock.write(JSON.stringify(rec) + "\n");
   s.session.snapshot();
+  if (reveal) sock.write('{"type":"daemon_reveal"}\n');
   return s;
 }
 
@@ -372,7 +386,7 @@ function openAcp(op: Extract<DaemonOp, { op: "acp_open" }>, sock: net.Socket): A
     return undefined;
   }
   acpSessions.set(key, s);
-  attachAcp(s, sock);
+  attachAcp(s, sock, op.canReveal === true);
   void s.session.start(op.command, op.args, op.env).catch((err) => sessionLog(String(err)));
   return s;
 }
@@ -411,24 +425,28 @@ function fromAcpClient(s: AcpEntry, line: string) {
 
 // ------------------------------------------------------------------ server
 
-function listing(): DaemonList {
+function listing(reconnectCwds?: string[]): DaemonList {
   finished = finished.filter((f) => Date.now() - f.finishedAt < FINISHED_TTL_MS);
-  return {
-    protocol: PROTOCOL,
-    build: BUILD,
-    pid: process.pid,
-    sessions: [
-      ...[...sessions.values()].map((s) => ({
-        key: s.key, pid: s.proc.pid, cwd: s.cwd, file: s.file, id: s.id, name: s.name, busy: s.busy,
-        waiting: s.dialogs.size, attached: !!s.client, detachedAt: s.detachedAt, startedAt: s.startedAt,
-      })),
-      ...[...acpSessions.values()].map((s) => ({
-        key: s.key, backend: "acp" as const, acpBackend: s.acpBackend, cwd: s.cwd, name: s.session.title, busy: s.session.hasWork,
-        waiting: s.session.waiting, failed: s.session.failed, attached: !!s.client, detachedAt: s.detachedAt, startedAt: s.startedAt,
-      })),
-    ],
-    finished,
-  };
+  const rows = [
+    ...[...sessions.values()].map((s) => ({
+      key: s.key, pid: s.proc.pid, cwd: s.cwd, file: s.file, id: s.id, name: s.name, busy: s.busy,
+      waiting: s.dialogs.size, attached: !!s.client, canReveal: !!s.client && s.canReveal, detachedAt: s.detachedAt, startedAt: s.startedAt,
+    })),
+    ...[...acpSessions.values()].map((s) => ({
+      key: s.key, backend: "acp" as const, acpBackend: s.acpBackend, cwd: s.cwd, name: s.session.title, busy: s.session.hasWork,
+      waiting: s.session.waiting, failed: s.session.failed, attached: !!s.client, canReveal: !!s.client && s.canReveal,
+      detachedAt: s.detachedAt, startedAt: s.startedAt,
+    })),
+  ];
+  const folders = new Set(Array.isArray(reconnectCwds) ? reconnectCwds.filter((cwd) => typeof cwd === "string" && path.isAbsolute(cwd)).map((cwd) => path.resolve(cwd)) : []);
+  const reconnect = rows.filter((row) => {
+    if (row.attached || !folders.has(path.resolve(row.cwd))) return false;
+    const s = sessions.get(row.key) ?? acpSessions.get(row.key);
+    if (!s || (s.reconnectUntil ?? 0) <= Date.now()) return false;
+    s.reconnectUntil = undefined;
+    return !("proc" in s && (s.exited || s.stopped));
+  });
+  return { protocol: PROTOCOL, build: BUILD, pid: process.pid, canNavigate: true, sessions: rows, finished, reconnect };
 }
 
 let retiring = false;
@@ -498,18 +516,45 @@ const server = net.createServer((sock) => {
       case "open":
         s = openSession(op, sock);
         break;
+      case "pi_attach": {
+        const entry = sessions.get(op.key);
+        if (!entry || entry.client || entry.exited || entry.stopped) {
+          sock.end(JSON.stringify({ type: "daemon_exit", error: "This Pi session is no longer detached." }) + "\n");
+        } else {
+          attach(entry, sock, op.policy, op.canReveal === true);
+          s = entry;
+        }
+        break;
+      }
       case "acp_open":
         acp = openAcp(op, sock);
         break;
       case "acp_attach": {
         const entry = acpSessions.get(op.key);
-        if (entry) acp = attachAcp(entry, sock);
+        if (entry) acp = attachAcp(entry, sock, op.canReveal === true);
         else acpAttachError(sock, "This ACP session is no longer in the daemon.");
         break;
       }
       case "list":
-        sock.end(JSON.stringify(listing()) + "\n");
+        sock.end(JSON.stringify(listing(op.reconnectCwds)) + "\n");
         break;
+      case "reveal": {
+        const entry = sessions.get(op.key) ?? acpSessions.get(op.key);
+        let status = "unavailable";
+        if (entry && !("proc" in entry && (entry.exited || entry.stopped))) {
+          if (entry.client) {
+            if (entry.canReveal && entry.client.writable) {
+              entry.client.write('{"type":"daemon_reveal"}\n');
+              status = "revealed";
+            }
+          } else if (op.reconnect === true) {
+            entry.reconnectUntil = Date.now() + RECONNECT_TTL_MS;
+            status = "queued";
+          }
+        }
+        sock.end(JSON.stringify({ status }) + "\n");
+        break;
+      }
       case "kill": {
         const k = sessions.get(op.key);
         if (k) {

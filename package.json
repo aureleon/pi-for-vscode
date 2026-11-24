@@ -2,7 +2,7 @@
   "name": "pi-for-vscode",
   "displayName": "PiMux for VS Code",
   "description": "Use Pi and ACP agents in VS Code. Keep sessions running and reconnect with PiMux.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "dhguz",
   "license": "MIT",
   "engines": {

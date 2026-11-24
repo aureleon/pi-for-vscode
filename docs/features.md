@@ -31,7 +31,7 @@ The full feature list. The [README](../README.md) has the short version.
 - Forks and sessions that extensions start (for example subagents) are nested under the session they came from. They are collapsed until you expand them.
 - Sessions run in parallel. If you start a new session or open another one while Pi works, the busy session continues in the background. It shows below the current session in the session list, and a notification tells you when it finishes or needs an answer.
 - The session daemon can keep Pi and ACP sessions running on the host when VS Code closes or Remote-SSH disconnects (`pi.keepSessionsAlive`). Pi tabs restore as before. Reconnect to ACP sessions from **Agent Sessions** in the status bar.
-- **Agent Sessions** lists detached sessions. Select one to reconnect, or use its Stop button to end it.
+- **Agent Sessions** groups chats by workspace. Each row shows its backend. Select an attached chat to show its tab, including in another window. For a detached session, select it to reconnect or use **Open Workspace** if it belongs to another folder.
 - `pi.detachedDialogs` sets what happens when a detached session asks a question: it waits for you (default), the question is cancelled, or the recommended option is accepted.
 - The session list shows the current session first, then the sessions that run in the background, then the other sessions by date. Nested sessions stay under their parent session in each group.
 - *View* (the eye button in the session list, or *Pi: View Session File*) opens a session read-only in a new tab. It starts no pi process and shows new messages as pi writes them. Use it to follow a session that an extension runs, for example a subagent.
@@ -59,7 +59,7 @@ The full feature list. The [README](../README.md) has the short version.
 ## Chat tabs
 - *Open in New Tab* opens a chat in the editor area. In the session list, the split button, <kbd>⌥</kbd>-click or <kbd>⌥↵</kbd> opens a session in a new chat tab to the side.
 - Chat tabs and their sessions come back after a window reload.
-- A chat tab whose session works shows ● before its title. The Pi item in the status bar counts the working sessions in all chats. Click it to go to one.
+- A chat tab whose session works shows ● before its title. The **Agent Sessions** item in the status bar counts working sessions. Click it to go to one.
 - Narrow chats use a compact layout.
 
 ## Pi extensions

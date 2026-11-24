@@ -14,7 +14,7 @@ use tokio::{
     process::Command,
 };
 
-pub const PROTOCOL: u64 = 5;
+pub const PROTOCOL: u64 = 6;
 
 fn directory() -> Result<PathBuf> {
     if let Some(path) = env::var_os("PIMUXD_DIR") {
@@ -149,7 +149,7 @@ async fn main() -> Result<()> {
         ["shutdown"] | ["shutdown", "--force"] => {
             let list = request(&dir, json!({"op":"list"})).await?;
             match list["protocol"].as_u64() {
-                Some(4 | PROTOCOL) => { request(&dir, json!({"op":"shutdown","force":args.len()==2})).await?; }
+                Some(4 | 5 | PROTOCOL) => { request(&dir, json!({"op":"shutdown","force":args.len()==2})).await?; }
                 Some(3) if args.len() == 2 => {
                     eprintln!("Stopping the legacy daemon discards its in-memory ACP history.");
                     request(&dir, json!({"op":"retire"})).await?;

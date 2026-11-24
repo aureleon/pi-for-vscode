@@ -3,7 +3,7 @@ import * as path from "node:path";
 import type { AcpBackend } from "../acp/config";
 
 /** Version of the records between the extension and the daemon. A daemon with another version is not used. */
-export const PROTOCOL = 5;
+export const PROTOCOL = 6;
 export const PREVIOUS_PROTOCOL = 4;
 export const LEGACY_PROTOCOL = 3;
 
@@ -31,11 +31,13 @@ export type DaemonOp =
   | {
     op: "open"; command: string; args: string[]; cwd: string; env: Record<string, string | undefined>; policy: DialogPolicy;
     /** Take the session from the client that has it (the user opened it here). Without it, such an open is refused. */
-    takeover?: boolean;
+    takeover?: boolean; canReveal?: boolean;
   }
-  | { op: "acp_open"; key: string; command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; acpBackend?: AcpBackend }
-  | { op: "acp_attach"; key: string }
-  | { op: "list" }
+  | { op: "pi_attach"; key: string; policy: DialogPolicy; canReveal?: boolean }
+  | { op: "acp_open"; key: string; command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; acpBackend?: AcpBackend; canReveal?: boolean }
+  | { op: "acp_attach"; key: string; canReveal?: boolean }
+  | { op: "list"; reconnectCwds?: string[] }
+  | { op: "reveal"; key: string; reconnect?: boolean }
   | { op: "kill" | "stop"; key: string }
   | { op: "ack"; files: string[] }
   | { op: "shutdown" }
@@ -69,6 +71,8 @@ export interface DaemonSession {
   failed?: boolean;
   /** A VS Code window has the session. */
   attached: boolean;
+  /** The current owner can reveal this tab without giving up the session. */
+  canReveal?: boolean;
   detachedAt?: number;
   startedAt: number;
 }
@@ -92,6 +96,13 @@ export interface DaemonList {
   pid: number;
   sessions: DaemonSession[];
   finished: DaemonFinished[];
+  canNavigate?: boolean;
+  /** Detached sessions requested for this window. The daemon returns each request once. */
+  reconnect?: DaemonSession[];
+}
+
+export interface DaemonRevealResult {
+  status: "revealed" | "queued" | "unavailable";
 }
 
 /** Sent to a client that opened a session which ran without a window. The open dialogs and the unfinished output follow as normal records. */

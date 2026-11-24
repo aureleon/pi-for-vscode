@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import type * as net from "node:net";
-import { lineSplitter } from "./daemon/protocol";
+import { lineSplitter, type DaemonOp } from "./daemon/protocol";
 import { connectDaemon, type DaemonOptions } from "./daemon/client";
 
 export type RpcRecord = { type: string; [k: string]: any };
@@ -34,9 +34,10 @@ export class PiProcess extends EventEmitter {
   constructor(
     private readonly command: string,
     private readonly args: string[],
-    private readonly cwd: string,
+    readonly cwd: string,
     private readonly env: NodeJS.ProcessEnv,
     private daemon?: DaemonOptions,
+    private readonly attachKey?: string,
   ) {
     super();
   }
@@ -60,16 +61,23 @@ export class PiProcess extends EventEmitter {
         // Stopped while the connection came up: nothing is open in the daemon yet.
         if (!this.alive) return sock.destroy();
         this.sock = sock;
-        sock.write(JSON.stringify({ op: "open", command: this.command, args: this.args, cwd: this.cwd, env: this.env, policy: daemon.policy, takeover: daemon.takeover }) + "\n");
+        const op: DaemonOp = this.attachKey
+          ? { op: "pi_attach", key: this.attachKey, policy: daemon.policy, canReveal: true }
+          : { op: "open", command: this.command, args: this.args, cwd: this.cwd, env: this.env, policy: daemon.policy, takeover: daemon.takeover, canReveal: true };
+        sock.write(JSON.stringify(op) + "\n");
         for (const line of this.outbox ?? []) sock.write(line);
         this.outbox = undefined;
         sock.on("data", lineSplitter((line) => this.handleLine(line)));
         sock.on("error", () => {});
-        sock.on("close", () => this.onDaemonExit(null, null, Object.assign(new Error("lost the connection to the pi session daemon"), { code: "PI_DAEMON_LOST" })));
+        sock.on("close", () => {
+          const error = new Error("lost the connection to the pi session daemon");
+          this.onDaemonExit(null, null, this.attachKey ? error : Object.assign(error, { code: "PI_DAEMON_LOST" }));
+        });
       },
       (err) => {
         if (!this.alive) return;
-        if (err.code === "PI_DAEMON_IN_USE") {
+        // An explicit reconnect must never start a second process on the session file.
+        if (this.attachKey || err.code === "PI_DAEMON_IN_USE") {
           this.outbox = undefined;
           this.onDaemonExit(null, null, err);
           return;
@@ -144,6 +152,9 @@ export class PiProcess extends EventEmitter {
         break;
       case "daemon_attached":
         this.emit("attached", rec);
+        break;
+      case "daemon_reveal":
+        this.emit("reveal");
         break;
       case "daemon_exit": {
         const err = rec.error ? Object.assign(new Error(rec.error), { code: rec.errorCode }) : undefined;

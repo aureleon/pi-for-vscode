@@ -35,16 +35,21 @@ export class AcpChat implements vscode.Disposable {
   private operation = false;
 
   get isEmptySession(): boolean { return !this.used && !this.hasWork && !this.operation; }
+  get sessionTitle(): string { return this.title; }
+  get backendName(): string | undefined { return this.backend?.name ?? this.profile?.name; }
+  /** Match the local tab to its daemon record without using a Pi session file. */
+  get attachedDaemonKey(): string | undefined { return this.attached ? this.daemonKey : undefined; }
 
   constructor(
     private readonly webview: Pick<vscode.Webview, "postMessage" | "onDidReceiveMessage">,
-    private readonly cwd: string,
+    readonly cwd: string,
     private readonly output: vscode.OutputChannel,
     private readonly setTitle: (title: string, busy: boolean, key?: string) => void,
     private readonly daemon?: { script: string; key?: string },
     private profile?: AcpProfile,
     private backend?: AcpBackend,
     private readonly newChat?: (backend: "pi" | "acp", name?: string) => void,
+    private readonly reveal?: () => void,
   ) {
     this.listeners = [
       webview.onDidReceiveMessage((m) => {
@@ -207,7 +212,7 @@ export class AcpChat implements vscode.Disposable {
   }
 
   private sendAccent() {
-    const name = this.backend?.name ?? this.profile?.name;
+    const name = this.backendName;
     const profile = name ? acpProfiles().find((p) => p.name === name) : undefined;
     const color = profile?.accentColor ?? vscode.workspace.getConfiguration("pi").get<string>("acp.accentColor", "");
     this.post({ type: "acpAccent", color });
@@ -218,7 +223,7 @@ export class AcpChat implements vscode.Disposable {
   }
 
   private sendProfile() {
-    this.post({ type: "acpProfile", name: this.backend?.name ?? this.profile?.name ?? "ACP" });
+    this.post({ type: "acpProfile", name: this.backendName ?? "ACP" });
     this.sendAccent();
   }
 
@@ -239,13 +244,13 @@ export class AcpChat implements vscode.Disposable {
       if (!vscode.workspace.isTrusted) throw new Error("Trust this workspace before starting an ACP agent.");
       const existingKey = this.daemonKey ?? this.daemon?.key;
       if (existingKey && this.daemon) {
-        await this.connect(this.daemon.script, { op: "acp_attach", key: existingKey });
+        await this.connect(this.daemon.script, { op: "acp_attach", key: existingKey, canReveal: !!this.reveal });
         return;
       }
       const launch = await this.agentConfig();
       if (this.disposed) return;
       if (this.daemon) {
-        await this.connect(this.daemon.script, { op: "acp_open", key: this.newKey, ...launch, cwd: this.cwd });
+        await this.connect(this.daemon.script, { op: "acp_open", key: this.newKey, ...launch, cwd: this.cwd, canReveal: !!this.reveal });
       } else {
         this.local = new AcpSession({ cwd: this.cwd, post: (msg) => this.receive(msg), log: (text) => this.output.appendLine(text) });
         await this.local.start(launch.command, launch.args, launch.env);
@@ -274,7 +279,7 @@ export class AcpChat implements vscode.Disposable {
       if (!this.connectionError) this.fail("Disconnected from the ACP session daemon. Use Restart to reconnect.");
     });
     sock.on("data", lineSplitter((line) => {
-      let m: AcpOutput | DaemonAcpAttached | { type: "acp_attachError"; message: string };
+      let m: AcpOutput | DaemonAcpAttached | { type: "acp_attachError"; message: string } | { type: "daemon_reveal" };
       try { m = JSON.parse(line); } catch { return; }
       if (this.disposed) return;
       if (m.type === "acp_attached") {
@@ -286,6 +291,8 @@ export class AcpChat implements vscode.Disposable {
       } else if (m.type === "acp_attachError") {
         this.fail(m.message);
         sock.destroy();
+      } else if (m.type === "daemon_reveal") {
+        if (this.attached) this.reveal?.();
       } else if (this.attached) this.receive(m);
     }));
     sock.write(JSON.stringify(op) + "\n");

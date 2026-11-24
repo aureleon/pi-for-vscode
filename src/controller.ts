@@ -11,7 +11,7 @@ import { slimTree } from "./treeData";
 import { createPiTerminal, piTerminalName } from "./piTerminal";
 import { completePath } from "./pathComplete";
 import { openDirectory, openPath } from "./openPath";
-import { daemonOptions, daemonFiles, duration } from "./daemon/ui";
+import { daemonOptions, daemonFiles, duration, revealSessionWindow } from "./daemon/ui";
 import { daemonList } from "./daemon/client";
 import { activeModules, hiddenWidgets, hostModules, moduleEntryTypes, modulePiExtensions, type ExtSession, type HostIntegration, type HostIntegrationInstance } from "./integrations";
 
@@ -183,6 +183,7 @@ export interface ChatOptions {
   /** Wait to start Pi while the tile shows its default ACP chat. */
   deferStart?: boolean;
   sessionFile?: string;
+  cwd?: string;
   /** Show session tabs in the header, and keep them in workspace state under this key. */
   tabsKey?: string;
   /** Tabs to start with instead of the saved ones (a tab dragged out into a new tile). */
@@ -219,6 +220,8 @@ interface StartOptions {
   keepRunning?: boolean;
   /** Start a new session instead of resuming one. */
   fresh?: boolean;
+  /** Attach to this daemon session without starting or taking over a process. */
+  attachKey?: string;
 }
 
 /** Anything that can host the chat webview (sidebar view or editor panel). */
@@ -317,7 +320,7 @@ export class PiController implements vscode.Disposable {
   get isEditorChat(): boolean { return this.host.kind === "tab"; }
 
   get cwd(): string {
-    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+    return this.options.cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
   }
 
   private get pi(): PiProcess | undefined {
@@ -631,9 +634,9 @@ export class PiController implements vscode.Disposable {
 
     this.args = args;
     this.pendingKey = claim ?? (sessionId ? this.tabs.find((t) => t.id === sessionId)?.key : undefined);
-    this.active = this.spawn(command, args, env, true);
+    this.active = this.spawn(command, args, env, !opts.attachKey, opts.attachKey);
     this.active.claim = claim;
-    void this.adoptDetached(command, env);
+    if (!opts.attachKey) void this.adoptDetached(command, env);
     this.updateStatus();
     // After a preview of this file, "starting" would replace it with "Loading session".
     if (!(claim && this.previewFile === claim)) this.post({ type: "starting", fresh: !claim && !sessionId });
@@ -641,11 +644,11 @@ export class PiController implements vscode.Disposable {
   }
 
   /** `takeover`: the user opens this session here, so it comes to this window if another client of the daemon has it. */
-  private spawn(command: string, args: string[], env: NodeJS.ProcessEnv, takeover = false): Session {
+  private spawn(command: string, args: string[], env: NodeJS.ProcessEnv, takeover = false, attachKey?: string): Session {
     this.output.appendLine(`[pi] starting: ${command} --mode rpc ${args.join(" ")} (cwd ${this.cwd})`);
     // With the session daemon, the process runs there and outlives this window (setting `pi.keepSessionsAlive`).
-    const daemon = daemonOptions(this.context);
-    const pi = new PiProcess(command, args, this.cwd, env, daemon && { ...daemon, takeover });
+    const daemon = daemonOptions(this.context, !!attachKey);
+    const pi = new PiProcess(command, args, this.cwd, env, daemon && { ...daemon, takeover }, attachKey);
     const s = this.wrap(pi, command);
     pi.start();
     return s;
@@ -672,6 +675,16 @@ export class PiController implements vscode.Disposable {
     pi.on("event", (e: RpcRecord) => this.onPiEvent(s, e));
     pi.on("stderr", (t: string) => this.output.append(t));
     pi.on("attached", (info: any) => this.onAttached(s, info));
+    pi.on("reveal", () => {
+      if (this.active !== s && !this.background.has(s) && !this.warm.includes(s)) return;
+      revealSessionWindow(() => {
+        if (this.active === s) this.host.reveal();
+        else if (this.background.has(s) || this.warm.includes(s)) {
+          this.host.reveal();
+          void this.showProcess(s).catch((err) => this.output.appendLine(`[pi] reveal failed: ${err.message ?? err}`));
+        }
+      });
+    });
     pi.on("exit", (code: number | null, signal: string | null, err?: Error) => {
       this.output.appendLine(`[pi] exited code=${code} signal=${signal} ${err?.message ?? ""}`);
       const wasBusy = this.isBusy(s);
@@ -845,9 +858,10 @@ export class PiController implements vscode.Disposable {
   }
 
   /** The sessions that work in this window, for the status bar item and its list. */
-  static running(): { title: string; where: string; file?: string; show(): void }[] {
+  static running(): { title: string; cwd: string; where: string; file?: string; show(): void }[] {
     return PiController.working().map((b) => ({
       title: b.chat.titleOf(b.s),
+      cwd: b.s.pi.cwd,
       where: b.background ? `${b.chat.host.kind} · in the background` : b.chat.host.kind,
       file: PiController.fileOf(b.s),
       show: () => {

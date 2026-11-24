@@ -31,7 +31,7 @@ Details behind the features in the [README](../README.md).
 
 ## Native daemon
 
-- **Compatibility:** VS Code attaches to a running daemon that speaks protocol 3, 4, or 5. It never replaces a running daemon. Restart an older daemon when its sessions are done to get profile names on reattach and profile-aware recovery.
+- **Compatibility:** VS Code attaches to a running daemon that speaks protocol 3 through 6. It never replaces a running daemon. Restart an older daemon when its sessions are done to get new features such as revealing chats in other windows.
 - **Legacy daemon:** `pimuxd shutdown` stops a protocol 3 daemon after its sessions close. `--force` stops its agents now and discards its in-memory ACP history.
 - **ACP checkpoints** store recent messages (8 MiB at most) and omit images. After a crash, **Reopen Saved Chat** starts a new agent session. It can load the earlier agent context only when the agent supports `session/load` and the profile still uses the same executable and arguments. It never resends a prompt or an approval.
 - **Control:** one client controls a session. Other socket clients can observe it read-only. They cannot send prompts or answer permissions.

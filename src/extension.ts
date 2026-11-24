@@ -6,7 +6,7 @@ import * as vscode from "vscode";
 import { AcpChat } from "./acp/chat";
 import { acpProfiles, defaultAcpProfile, pickAcpProfile, pickDefaultBackend, type AcpProfile } from "./acp/config";
 import { PiController, type ChatHost, type Handover, type Tab } from "./controller";
-import { daemonOptions, initDaemonUi } from "./daemon/ui";
+import { daemonOptions, initDaemonUi, revealSessionWindow, type AcpSessionRow } from "./daemon/ui";
 import type { DaemonSession } from "./daemon/protocol";
 import { createPiTerminal } from "./piTerminal";
 import { SessionViewer } from "./sessionViewer";
@@ -15,7 +15,8 @@ import { defaultSessionDir } from "./sessions";
 
 let output: vscode.OutputChannel;
 const controllers = new Set<PiController>();
-const acpPanels = new Set<AcpChat>();
+const acpPanels = new Map<AcpChat, vscode.WebviewPanel>();
+let renderAgentSessions: (() => void) | undefined;
 let sidebar: PiController | undefined;
 let lastActive: PiController | undefined;
 let activeAcp: AcpChat | undefined;
@@ -56,6 +57,10 @@ function webviewOptions(extUri: vscode.Uri): vscode.WebviewOptions {
     enableScripts: true,
     localResourceRoots: [vscode.Uri.joinPath(extUri, "dist"), vscode.Uri.joinPath(extUri, "webview"), vscode.Uri.joinPath(extUri, "media")],
   };
+}
+
+function acpSessionRow(chat: AcpChat, where: string, show: () => void): AcpSessionRow {
+  return { title: chat.sessionTitle, cwd: chat.cwd, profile: chat.backendName, busy: chat.hasWork, key: chat.attachedDaemonKey, where, show };
 }
 
 // ------------------------------------------------------------------ sidebar tiles
@@ -100,6 +105,17 @@ class SidebarTiles implements vscode.Disposable {
   /** The chat of the first tile, for commands when no tile had focus yet. */
   get first(): PiController | undefined {
     return this.tiles.map((t) => this.chats.get(t.id)?.c).find((c) => !!c);
+  }
+
+  acpSessionRows(): AcpSessionRow[] {
+    return [...this.acpChats].map(([key, { c }]) => acpSessionRow(c, "sidebar", () => this.revealAcpTab(key)));
+  }
+
+  private revealAcpTab(key: string) {
+    const entry = this.acpChats.get(key);
+    if (!entry) return;
+    this.view.show();
+    this.selectLane(entry.tile, key);
   }
 
   /** `start`: tabs for a new tile (a tab dragged out of another tile) and the session to show. */
@@ -192,7 +208,8 @@ class SidebarTiles implements vscode.Disposable {
         if (entry) entry.title = title;
         this.sendLanes(tile);
         this.updateBadge();
-      }, daemonOptions(this.context), profile);
+        renderAgentSessions?.();
+      }, daemonOptions(this.context), profile, undefined, undefined, () => revealSessionWindow(() => this.revealAcpTab(key)));
       const replacedPi = emptyPi && !this.activeLanes.has(tile) && pi.c.emptySessionKey === emptyPi ? emptyPi : undefined;
       this.acpChats.set(key, { c, inbox, tile, title: "New session", replacedPi });
       this.selectLane(tile, key, !!replacedPi);
@@ -275,6 +292,7 @@ class SidebarTiles implements vscode.Disposable {
     if (stop) entry.c.close();
     else entry.c.dispose();
     entry.inbox.dispose();
+    renderAgentSessions?.();
   }
 
   private noteFocus(id: string) {
@@ -513,6 +531,10 @@ class SidebarProvider implements vscode.WebviewViewProvider, vscode.Disposable {
     return this.tiles?.newDefaultSession(profile);
   }
 
+  acpSessionRows(): AcpSessionRow[] {
+    return this.tiles?.acpSessionRows() ?? [];
+  }
+
   dispose() {
     this.tiles?.dispose();
     this.tiles = undefined;
@@ -540,6 +562,7 @@ interface PanelOptions {
   /** A panel that VS Code restored after a reload (see the serializer in `activate`). */
   panel?: vscode.WebviewPanel;
   preserveFocus?: boolean;
+  detached?: DaemonSession;
 }
 
 /**
@@ -568,7 +591,12 @@ function openPanel(context: vscode.ExtensionContext, sessionFile?: string, opts:
     openBeside: (file) => openPanel(context, file, { column: vscode.ViewColumn.Beside }),
     kind: "tab",
   };
-  const c = new PiController(context, host, output, { primary: false, sessionFile });
+  const c = new PiController(context, host, output, {
+    primary: false, sessionFile, cwd: opts.detached?.cwd, deferStart: !!opts.detached,
+  });
+  if (opts.detached) void c.start(sessionFile, undefined, { attachKey: opts.detached.key }).catch((err) => {
+    void vscode.window.showErrorMessage(`Pi: ${err.message ?? err}`);
+  });
   controllers.add(c);
   const noteFocus = () => {
     lastActive = c;
@@ -617,11 +645,14 @@ async function openAcpPanel(context: vscode.ExtensionContext, detached?: DaemonS
   panel.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "acp-logo.svg");
   const chat = new AcpChat(panel.webview, cwd, output, (title, busy) => {
     panel.title = `${busy ? "● " : ""}${title}`;
+    renderAgentSessions?.();
   }, detached ? { ...daemonOptions(context, true)!, key: detached.key } : daemonOptions(context), profile, detached?.acpBackend, (backend, name) => {
     if (backend === "pi") openPanel(context);
     else void openAcpPanel(context, undefined, name);
-  });
-  acpPanels.add(chat);
+  }, () => revealSessionWindow(() => {
+    if (acpPanels.has(chat)) panel.reveal();
+  }));
+  acpPanels.set(chat, panel);
   activeAcp = chat;
   panel.onDidChangeViewState(() => { if (panel.active) activeAcp = chat; });
   panel.onDidDispose(() => {
@@ -629,6 +660,7 @@ async function openAcpPanel(context: vscode.ExtensionContext, detached?: DaemonS
     acpPanels.delete(chat);
     // VS Code also disposes panels when its window closes. Stop daemon sessions from the session list.
     chat.dispose();
+    renderAgentSessions?.();
   });
   panel.webview.html = html(panel.webview, context.extensionUri, { acp: true });
 }
@@ -762,8 +794,15 @@ export function activate(context: vscode.ExtensionContext) {
   const daemonUi = initDaemonUi(context, {
     cwd: workspaceCwd,
     running: () => PiController.running(),
+    acpSessions: () => [
+      ...provider.acpSessionRows(),
+      ...[...acpPanels].map(([chat, panel]) => acpSessionRow(chat, "tab", () => {
+        if (acpPanels.has(chat)) panel.reveal();
+      })),
+    ],
     files: () => PiController.openFiles(),
     openAcp: (session) => void openAcpPanel(context, session),
+    reconnectPi: (session) => openPanel(context, session.file, { detached: session }),
     isAcpActive: () => !!activeAcp,
     log: (line) => output.appendLine(line),
     open: (file) => void target().then((c) => c ? c.open(file) : openPanel(context, file))
@@ -775,14 +814,14 @@ export function activate(context: vscode.ExtensionContext) {
     },
   });
 
-  PiController.onStatusChanged = () => daemonUi.render();
-  context.subscriptions.push({ dispose: () => (PiController.onStatusChanged = undefined) });
+  PiController.onStatusChanged = renderAgentSessions = daemonUi.render;
+  context.subscriptions.push({ dispose: () => { PiController.onStatusChanged = renderAgentSessions = undefined; } });
 
   output.appendLine(`[pi] extension activated (${path.basename(context.extensionPath)})`);
 }
 
 export function deactivate() {
-  for (const chat of acpPanels) chat.dispose();
+  for (const chat of acpPanels.keys()) chat.dispose();
   acpPanels.clear();
   for (const c of controllers) c.dispose();
   controllers.clear();

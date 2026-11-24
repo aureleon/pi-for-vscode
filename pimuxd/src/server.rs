@@ -10,13 +10,13 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fs, io,
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
-    path::PathBuf,
+    path::{Component, Path, PathBuf},
     process::Stdio,
     sync::{Arc, Mutex},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     io::{AsyncWriteExt, BufReader},
@@ -29,6 +29,7 @@ const MAX_CONNECTIONS: usize = 128;
 const QUEUE: usize = 256;
 const CHILD_QUEUE: usize = 8;
 const IDLE_MS: u64 = 15 * 60 * 1000;
+const RECONNECT_TTL: Duration = Duration::from_secs(60);
 
 type Tx = mpsc::Sender<Value>;
 type Shared = Arc<Mutex<Server>>;
@@ -49,6 +50,25 @@ fn args(v: &Value) -> Result<Vec<String>> {
         .iter()
         .map(|a| Ok(a.as_str().context("expected a string argument")?.to_owned()))
         .collect()
+}
+
+// Compare absolute paths without resolving symlinks or requiring the directory to exist.
+fn normalize_cwd(cwd: &str) -> Option<PathBuf> {
+    let path = Path::new(cwd);
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::CurDir => {}
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    Some(normalized)
 }
 
 // Store only the label and a fingerprint, not launch arguments or the environment.
@@ -76,13 +96,18 @@ struct Viewer {
     tx: Tx,
     _disconnect: oneshot::Sender<()>,
 }
+struct Controller {
+    id: u64,
+    can_reveal: bool,
+}
 struct Session {
     key: String,
     cwd: String,
     started: u64,
     detached: Option<u64>,
     last_activity: u64,
-    controller: Option<u64>,
+    controller: Option<Controller>,
+    reconnect_until: Option<Instant>,
     clients: HashMap<u64, Viewer>,
     child: Option<Child>,
     pi: Option<PiSession>,
@@ -107,6 +132,7 @@ impl Session {
             detached: None,
             last_activity: now(),
             controller: None,
+            reconnect_until: None,
             clients: HashMap::new(),
             child: None,
             pi,
@@ -139,8 +165,42 @@ impl Session {
             "file":p.and_then(PiSession::file),"id":p.and_then(PiSession::id),"backend":if p.is_some(){"pi"}else{"acp"},
             "busy":self.active(),"waiting":p.map_or(self.permissions.len(), PiSession::waiting),"failed":self.failed,
             "attached":self.controller.is_some(),"observers":self.clients.len().saturating_sub(usize::from(self.controller.is_some())),
+            "canReveal":self.reveal_target().is_some(),
             "detachedAt":self.detached,"startedAt":self.started,"acpBackend":self.acp_backend,
             "canRestoreContext": self.child.is_none() && self.can_restore_context() })
+    }
+    fn controller_id(&self) -> Option<u64> {
+        self.controller.as_ref().map(|c| c.id)
+    }
+    fn reveal_target(&self) -> Option<&Tx> {
+        let controller = self.controller.as_ref().filter(|c| c.can_reveal)?;
+        let tx = &self.clients.get(&controller.id)?.tx;
+        (!tx.is_closed()).then_some(tx)
+    }
+    fn reveal(&mut self, reconnect: bool) -> &'static str {
+        if !self.forgotten {
+            if let Some(tx) = self.reveal_target() {
+                if tx.try_send(json!({"type":"daemon_reveal"})).is_ok() {
+                    return "revealed";
+                }
+            } else if reconnect && self.controller.is_none() && self.detached.is_some() {
+                self.reconnect_until = Some(Instant::now() + RECONNECT_TTL);
+                return "queued";
+            }
+        }
+        "unavailable"
+    }
+    fn take_reconnect(&mut self, cwds: &HashSet<PathBuf>, now: Instant) -> Option<Value> {
+        if self.forgotten
+            || self.controller.is_some()
+            || self.detached.is_none()
+            || !self.reconnect_until.is_some_and(|until| now < until)
+            || !normalize_cwd(&self.cwd).is_some_and(|cwd| cwds.contains(&cwd))
+        {
+            return None;
+        }
+        self.reconnect_until = None;
+        Some(self.list())
     }
     fn can_restore_context(&self) -> bool {
         !self.journal_failed
@@ -154,14 +214,12 @@ impl Session {
             .is_some_and(|c| c.tx.try_send(m).is_ok())
     }
     fn publish(&mut self, m: Value, controller_only: bool) {
+        let controller = self.controller_id();
         self.clients.retain(|&id, viewer| {
-            (controller_only && Some(id) != self.controller)
+            (controller_only && Some(id) != controller)
                 || viewer.tx.try_send(m.clone()).is_ok()
         });
-        if self
-            .controller
-            .is_some_and(|id| !self.clients.contains_key(&id))
-        {
+        if controller.is_some_and(|id| !self.clients.contains_key(&id)) {
             self.controller = None;
             self.detached = Some(now());
             self.detached_work = self.active();
@@ -212,6 +270,7 @@ impl Server {
             s.forgotten = true;
             s.clients.clear();
             s.controller = None;
+            s.reconnect_until = None;
             if let Some(c) = &mut s.child {
                 let (dead, _) = oneshot::channel();
                 let _ = std::mem::replace(&mut c.kill, dead).send(());
@@ -451,7 +510,7 @@ fn attach(
         if op["takeover"] != true || s.pi.is_none() {
             bail!("session already has a controller");
         }
-        if let Some(old) = s.controller.take().and_then(|id| s.clients.remove(&id)) {
+        if let Some(old) = s.controller.take().and_then(|c| s.clients.remove(&c.id)) {
             let _ = old.tx.try_send(
                 json!({"type":"daemon_exit","error":"This session moved to another window."}),
             );
@@ -481,7 +540,13 @@ fn attach(
         }
     }
     if !observe {
-        s.controller = Some(id);
+        let can_reveal = op["canReveal"] == true;
+        // A restored VS Code tab can attach before the window claims the reconnect request.
+        if can_reveal && s.reconnect_until.is_some_and(|until| Instant::now() < until) {
+            tx.try_send(json!({"type":"daemon_reveal"}))?;
+        }
+        s.controller = Some(Controller { id, can_reveal });
+        s.reconnect_until = None;
         s.detached = None;
         s.held_work = false;
         s.detached_work = false;
@@ -558,7 +623,7 @@ async fn connection(shared: Shared, sock: UnixStream, id: u64) -> Result<()> {
         if state.shutdown
             && matches!(
                 kind,
-                "open" | "acp_open" | "acp_attach" | "acp_observe" | "observe"
+                "open" | "pi_attach" | "acp_open" | "acp_attach" | "acp_observe" | "observe"
             )
         {
             bail!("daemon is stopping");
@@ -568,6 +633,19 @@ async fn connection(shared: Shared, sock: UnixStream, id: u64) -> Result<()> {
                 let key = open(&shared, &mut state, &op)?;
                 attach(&mut state, id, &key, tx.clone(), disconnect, false, &op)?;
                 Ok(key)
+            }
+            "pi_attach" => {
+                let s = state.sessions.get(key)
+                    .filter(|s| s.pi.is_some())
+                    .context("Pi session not found")?;
+                if s.controller.is_some() {
+                    bail!("session already has a controller");
+                }
+                if s.detached.is_none() {
+                    bail!("Pi session is not detached");
+                }
+                attach(&mut state, id, key, tx.clone(), disconnect, false, &op)?;
+                Ok(key.to_owned())
             }
             "acp_attach" | "acp_observe" | "observe" => {
                 if kind != "observe" && !state.sessions.get(key).is_some_and(|s| s.pi.is_none()) {
@@ -587,8 +665,24 @@ async fn connection(shared: Shared, sock: UnixStream, id: u64) -> Result<()> {
             _ => {
                 let answer = match kind {
                     "list" | "hello" => {
-                        json!({"protocol":PROTOCOL,"minProtocol":PROTOCOL,"version":env!("CARGO_PKG_VERSION"),
-                        "pid":std::process::id(),"sessions":state.sessions.values().map(Session::list).collect::<Vec<_>>(),"finished":state.finished})
+                        let mut answer = json!({"protocol":PROTOCOL,"minProtocol":PROTOCOL,"version":env!("CARGO_PKG_VERSION"),
+                            "pid":std::process::id(),"sessions":state.sessions.values().map(Session::list).collect::<Vec<_>>(),
+                            "finished":state.finished,"canNavigate":true});
+                        if let ("list", Some(cwds)) = (kind, op["reconnectCwds"].as_array()) {
+                            let cwds = cwds.iter().filter_map(Value::as_str).filter_map(normalize_cwd).collect();
+                            let now = Instant::now();
+                            let reconnect: Vec<_> = state.sessions.values_mut()
+                                .filter_map(|s| s.take_reconnect(&cwds, now))
+                                .collect();
+                            if !reconnect.is_empty() {
+                                answer["reconnect"] = json!(reconnect);
+                            }
+                        }
+                        answer
+                    }
+                    "reveal" => {
+                        let status = state.sessions.get_mut(key).map_or("unavailable", |s| s.reveal(op["reconnect"] == true));
+                        json!({"status":status})
                     }
                     "inspect" => {
                         let s = state.sessions.get(key).context("session not found")?;
@@ -633,7 +727,7 @@ async fn connection(shared: Shared, sock: UnixStream, id: u64) -> Result<()> {
     let key = match result {
         Ok(key) => key,
         Err(e) => {
-            let msg = if kind == "open" {
+            let msg = if matches!(kind, "open" | "pi_attach") {
                 json!({"type":"daemon_exit","error":e.to_string()})
             } else if kind.starts_with("acp_") {
                 json!({"type":"acp_attachError","message":e.to_string()})
@@ -673,7 +767,7 @@ async fn connection(shared: Shared, sock: UnixStream, id: u64) -> Result<()> {
     let mut state = shared.lock().unwrap();
     if let Some(s) = state.sessions.get_mut(&key) {
         s.clients.remove(&id);
-        if s.controller == Some(id) {
+        if s.controller_id() == Some(id) {
             s.controller = None;
             s.detached = Some(now());
             s.detached_work = s.active();
@@ -696,7 +790,7 @@ fn input(shared: &Shared, key: &str, id: u64, m: &Value) -> bool {
     let Some(s) = state.sessions.get_mut(key) else {
         return false;
     };
-    if s.controller != Some(id) {
+    if s.controller_id() != Some(id) {
         return s.clients.contains_key(&id);
     }
     match string(m, "type") {
@@ -834,7 +928,11 @@ pub async fn serve(dir: PathBuf) -> Result<()> {
                 let mut s=shared.lock().unwrap();
                 if s.shutdown {break;}
                 s.finished.retain(|f|now().saturating_sub(f["finishedAt"].as_u64().unwrap_or(0))<259_200_000);
+                let instant = Instant::now();
                 for session in s.sessions.values_mut() {
+                    if session.reconnect_until.is_some_and(|until| instant >= until) {
+                        session.reconnect_until = None;
+                    }
                     if session.controller.is_none() && !session.busy && !session.operation && session.permissions.is_empty()
                         && !session.pi.as_ref().is_some_and(|p| p.busy() || p.waiting() > 0) && session.child.is_some() &&
                         session.detached.is_some_and(|t|now().saturating_sub(t.max(session.last_activity))>=if session.pi.is_some(){60_000}else{IDLE_MS}) {

@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { LEGACY_PROTOCOL, PREVIOUS_PROTOCOL, type DaemonFinished, type DaemonSession, type DialogPolicy } from "./protocol";
+import { LEGACY_PROTOCOL, PREVIOUS_PROTOCOL, type DaemonFinished, type DaemonRevealResult, type DaemonSession, type DialogPolicy } from "./protocol";
 import { daemonCall, daemonExecutable, daemonList, isCompatible, type DaemonOptions } from "./client";
 
 /**
@@ -29,6 +29,11 @@ export async function daemonFiles(context: vscode.ExtensionContext): Promise<Set
   return new Set((list?.sessions ?? []).filter((s) => s.file).map((s) => path.resolve(s.file!)));
 }
 
+/** Run the focus command in the owner window so it works for multi-root and empty windows too. */
+export function revealSessionWindow(reveal: () => void) {
+  void vscode.commands.executeCommand("workbench.action.focusWindow").then(reveal, reveal);
+}
+
 export function duration(ms: number): string {
   const min = Math.round(ms / 60_000);
   if (min < 1) return "less than a minute";
@@ -37,12 +42,27 @@ export function duration(ms: number): string {
   return min % 60 ? `${h} h ${min % 60} min` : `${h} h`;
 }
 
+interface LocalSessionRow {
+  title: string;
+  cwd: string;
+  where: string;
+  show(): void;
+}
+
+export interface AcpSessionRow extends LocalSessionRow {
+  profile?: string;
+  busy: boolean;
+  key?: string;
+}
+
 /** What the status bar needs from the chats. */
 export interface DaemonUiHost {
   cwd(): string;
   isAcpActive(): boolean;
-  /** The sessions that work in this window. */
-  running(): { title: string; where: string; file?: string; show(): void }[];
+  /** The Pi sessions that work in this window. */
+  running(): LocalSessionRow[];
+  /** Include idle ACP tabs so a stale daemon record cannot count them as busy. */
+  acpSessions(): AcpSessionRow[];
   /** The session files that the processes of this window have open. */
   files(): Set<string>;
   /** Write a line to the Pi output. */
@@ -51,6 +71,8 @@ export interface DaemonUiHost {
   open(file: string): void;
   /** Reattach to a live ACP process without opening a Pi session file. */
   openAcp(session: DaemonSession): void;
+  /** Attach only to a live Pi process. Do not start a second writer if it is gone. */
+  reconnectPi(session: DaemonSession): void;
   /** Show the chat that has the session file, if one has. */
   show(file: string): boolean;
 }
@@ -59,6 +81,7 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   item.command = "pi.daemonSessions";
   const here = (cwd: string) => path.resolve(cwd) === path.resolve(host.cwd());
+  const workspaceCwds = () => [...new Set([host.cwd(), ...(vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath)].map((cwd) => path.resolve(cwd)))];
   const title = (s: { name?: string; file?: string }) => s.name || (s.file ? path.basename(s.file, ".jsonl") : "Untitled session");
 
   /** Tell the user about sessions of this folder that finished without a window, once. */
@@ -81,7 +104,10 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
 
   /** Draw the item from the sessions of this window and the last list of the daemon. */
   const render = () => {
-    const working = host.running().length + known.filter((s) => s.backend === "acp" && s.attached && s.busy).length;
+    const acp = host.acpSessions();
+    const localKeys = new Set(acp.map((s) => s.key));
+    const working = host.running().length + acp.filter((s) => s.busy).length
+      + known.filter((s) => s.backend === "acp" && s.attached && s.busy && !localKeys.has(s.key)).length;
     const detached = known.filter((s) => !s.attached);
     const waiting = detached.filter((s) => s.waiting).length;
     const on = !!daemonOptions(context);
@@ -100,6 +126,35 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
     item.show();
   };
 
+  const openDetached = (s: DaemonSession, canNavigate?: boolean) => {
+    if (s.backend === "acp") {
+      const existing = host.acpSessions().find((row) => row.key === s.key);
+      if (existing) existing.show();
+      else host.openAcp(s);
+    } else if (!s.file || !host.show(s.file)) {
+      if (canNavigate) host.reconnectPi(s);
+      else if (s.file && daemonOptions(context)) host.open(s.file);
+      else void vscode.window.showInformationMessage("This daemon cannot reconnect to the Pi session. Update the daemon or enable Keep sessions alive.");
+    }
+  };
+
+  const navigate = async (s: DaemonSession, canNavigate?: boolean) => {
+    const reveal = (reconnect?: boolean) => daemonCall<DaemonRevealResult>({ op: "reveal", key: s.key, reconnect });
+    if (s.canReveal && (await reveal())?.status === "revealed") return;
+    const inWorkspace = workspaceCwds().includes(path.resolve(s.cwd));
+    if (!s.attached && inWorkspace) return openDetached(s, canNavigate);
+    const action = s.attached && inWorkspace ? "Switch Window" : "Open Workspace";
+    const message = s.attached ? `This session is open in another VS Code window (${s.cwd}).` : `This session belongs to ${s.cwd}.`;
+    if (await vscode.window.showInformationMessage(message, action) !== action) return;
+    if (canNavigate && (await reveal(true))?.status === "revealed") return;
+    if (action === "Switch Window") {
+      await vscode.commands.executeCommand("workbench.action.switchWindow");
+      void refresh();
+    } else {
+      await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(s.cwd), { forceNewWindow: true });
+    }
+  };
+
   let warned = false;
 
   let refreshing = false;
@@ -108,7 +163,8 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
     if (refreshing) return;
     refreshing = true;
     try {
-      const list = await daemonList();
+      const claim = vscode.window.state.focused && vscode.workspace.isTrusted;
+      const list = await daemonList(claim ? workspaceCwds() : undefined);
       if (list && !isCompatible(list) && daemonOptions(context) && !warned) {
         warned = true;
         const stop = "Stop Legacy Daemon";
@@ -125,18 +181,19 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
       }
       known = list?.sessions ?? [];
       render();
+      for (const s of list?.reconnect ?? []) openDetached(s, list?.canNavigate);
       if (list?.finished.length) await report(list.finished);
     } finally {
       refreshing = false;
     }
   };
 
-  const describe = (s: DaemonSession) => [
-    s.backend === "acp" ? s.acpBackend?.name || "ACP" : "Pi",
+  const backendLabel = (profile?: string) => profile ?? "Pi";
+  const describe = (s: DaemonSession, profile?: string) => [
+    backendLabel(profile),
     s.waiting ? "waits for your answer" : s.busy ? "working" : s.failed ? "agent stopped" : "idle",
     s.attached ? "in another VS Code window" : `detached for ${duration(Date.now() - (s.detachedAt ?? Date.now()))}`,
-    here(s.cwd) ? "" : s.cwd,
-  ].filter(Boolean).join(" · ");
+  ].join(" · ");
 
   /** The settings of the daemon, as rows of the list. */
   const SETTINGS = [
@@ -176,31 +233,56 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
     const list = await daemonList();
     known = list?.sessions ?? known;
     const running = host.running();
+    const localAcp = host.acpSessions();
+    const localKeys = new Set(localAcp.map((s) => s.key));
     const mine = host.files();
-    // From the daemon: the sessions without a window, and the ones of other clients (another window, or an
-    // extension host that stayed after a reload), also idle ones: they block the session here until they stop.
-    // This window's own sessions are in `running`, or idle (warm tabs) and not listed.
-    const sessions = known.filter((s) => s.backend === "acp" ? !s.attached
+    // Skip tabs already in this window and idle Pi processes that have not made a session file.
+    const sessions = known.filter((s) => s.backend === "acp" ? !localKeys.has(s.key) && (!s.attached || !!s.canReveal)
       : s.file ? !(s.attached && mine.has(path.resolve(s.file))) : !s.attached && (s.busy || !!s.waiting));
     type Item = vscode.QuickPickItem & { s?: DaemonSession; setting?: Setting; show?: () => void };
     const qp = vscode.window.createQuickPick<Item>();
     const stopButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon("debug-stop"), tooltip: "Stop this session" };
     const forgetButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon("trash"), tooltip: "Remove saved chat" };
-    const toItem = (s: DaemonSession): Item => ({
+    const toItem = (s: DaemonSession, profile?: string): Item => ({
       label: `${s.waiting ? "$(question)" : s.busy ? "$(loading~spin)" : "$(circle-outline)"} ${title(s)}`,
-      description: describe(s),
+      description: describe(s, profile),
       buttons: s.backend === "acp" && s.failed && (list?.protocol ?? 0) >= PREVIOUS_PROTOCOL ? [forgetButton] : [stopButton],
       s,
     });
     const separator = (label: string): Item => ({ label, kind: vscode.QuickPickItemKind.Separator });
+    const localItem = (r: LocalSessionRow, profile?: string): Item => ({
+      label: `$(loading~spin) ${r.title}`, description: `${backendLabel(profile)} · working · ${r.where}`, show: r.show,
+    });
+    const workspaces = new Map<string, { profile?: string; item: Item }[]>();
+    const add = (cwd: string, item: Item, profile?: string) => {
+      const folder = path.resolve(cwd);
+      let rows = workspaces.get(folder);
+      if (!rows) workspaces.set(folder, rows = []);
+      rows.push({ profile, item });
+    };
+    for (const row of running) add(row.cwd, localItem(row));
+    for (const row of localAcp) if (row.busy) {
+      const profile = row.profile || "ACP";
+      add(row.cwd, localItem(row, profile), profile);
+    }
+    // Detached sessions come before sessions in other windows for the same backend.
+    for (const s of sessions.sort((a, b) => Number(a.attached) - Number(b.attached))) {
+      const profile = s.backend === "acp" ? s.acpBackend?.name || "ACP" : undefined;
+      add(s.cwd, toItem(s, profile), profile);
+    }
+    const current = path.resolve(host.cwd());
+    const folders = [...workspaces].sort(([a], [b]) => Number(b === current) - Number(a === current) || a.localeCompare(b));
     const acpActive = host.isAcpActive();
     if (acpActive) qp.title = "Agent Sessions · ACP permissions always wait for approval";
+    qp.matchOnDescription = true;
     qp.items = [
-      separator("Sessions"),
-      ...running.map((r): Item => ({ label: `$(loading~spin) ${r.title}`, description: `working · ${r.where}`, show: r.show })),
-      // Detached sessions before the ones of other windows: they are the ones that need a look.
-      ...[...sessions].sort((a, b) => Number(a.attached) - Number(b.attached)).map(toItem),
-      ...(running.length || sessions.length ? [] : [{ label: "$(blank) No sessions to show" }]),
+      ...folders.flatMap(([folder, rows], index): Item[] => [
+        // VS Code puts a separator's label beside the first result. Give the path its own row.
+        ...(index ? [separator("")] : []),
+        ...(folder === current ? [] : [{ label: folder }]),
+        ...rows.sort((a, b) => (a.profile ?? "").localeCompare(b.profile ?? "")).map((row) => row.item),
+      ]),
+      ...(folders.length ? [] : [separator("Sessions"), { label: "$(blank) No sessions to show" }]),
       separator("Settings"),
       ...SETTINGS.filter((st) => !acpActive || st.key !== "detachedDialogs").map((st): Item => ({
         label: `$(gear) ${st.label}`,
@@ -209,6 +291,8 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
       })),
     ];
     qp.placeholder = "Select a session to show it, or a setting to change it";
+    const first = qp.items.find((row) => row.s || row.show || row.setting);
+    if (first) qp.activeItems = [first];
     qp.onDidTriggerItemButton(async (e) => {
       const s = e.item.s;
       if (!s) return;
@@ -222,19 +306,13 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
     });
     qp.onDidAccept(() => {
       const { s, setting, show } = qp.selectedItems[0] ?? {};
+      if (!s && !setting && !show) return;
       qp.hide();
       if (show) return show();
       if (setting) return void change(setting);
-      if (s?.backend === "acp") {
-        if (here(s.cwd) || vscode.workspace.workspaceFolders?.some((folder) => path.resolve(folder.uri.fsPath) === path.resolve(s.cwd))) host.openAcp(s);
-        else void vscode.window.showInformationMessage(`Pi: this session belongs to ${s.cwd}. Open that folder to reconnect.`);
-        return;
-      }
-      if (!s?.file) return;
-      // A session of this window is shown. Another one comes to this window (the daemon takes it from the client that has it).
-      if (host.show(s.file)) return;
-      if (here(s.cwd)) host.open(s.file);
-      else vscode.window.showInformationMessage(`Pi: this session belongs to ${s.cwd}. Open that folder to get it back.`);
+      if (s) void navigate(s, list?.canNavigate).catch((err) => {
+        void vscode.window.showErrorMessage(`Pi: ${err.message ?? err}`);
+      });
     });
     qp.onDidHide(() => qp.dispose());
     qp.show();
@@ -245,6 +323,8 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
     item,
     { dispose: () => clearInterval(timer) },
     vscode.commands.registerCommand("pi.daemonSessions", pick),
+    vscode.window.onDidChangeWindowState((state) => { if (state.focused) void refresh(); }),
+    vscode.workspace.onDidGrantWorkspaceTrust(() => void refresh()),
     vscode.workspace.onDidChangeConfiguration((e) => e.affectsConfiguration("pi.keepSessionsAlive") && refresh()),
   );
   void refresh();
