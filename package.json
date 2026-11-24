@@ -286,6 +286,18 @@
           "minimum": 1,
           "description": "Maximum number of top-level session trees to show per project. Child sessions do not count. The current and background sessions stay visible."
         },
+        "pi.experimental.nativeDaemon": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "description": "Start the experimental Rust daemon when no session daemon is running."
+        },
+        "pi.daemonPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Path to pimuxd on the extension host. Leave empty to use the bundled binary."
+        },
         "pi.keepSessionsAlive": {
           "type": "string",
           "enum": [

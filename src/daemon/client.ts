@@ -1,44 +1,42 @@
 import { spawn } from "node:child_process";
 import * as net from "node:net";
 import * as os from "node:os";
-import { BUILD, lineSplitter, PROTOCOL, socketPath, type DaemonList, type DaemonOp, type DialogPolicy } from "./protocol";
+import * as path from "node:path";
+import { LEGACY_PROTOCOL, lineSplitter, PREVIOUS_PROTOCOL, PROTOCOL, socketPath, type DaemonList, type DaemonOp, type DialogPolicy } from "./protocol";
 
-/** How a PiProcess reaches the session daemon (src/daemon/piDaemon.ts). */
 export interface DaemonOptions {
-  /** Path of the daemon's script (dist/pi-daemon.js). */
   script: string;
   policy: DialogPolicy;
-  /** Take the session from another client that has it (see `open` in protocol.ts). */
   takeover?: boolean;
+}
+
+/** Resolve on the extension host, so Remote-SSH uses the remote binary. */
+export function daemonExecutable(extensionPath: string, configured?: string, native = false): string {
+  return configured?.trim() || process.env.PIMUXD_PATH || path.join(extensionPath, "dist", native ? "pimuxd" : "pi-daemon.js");
 }
 
 function tryConnect(): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
     const sock = net.connect(socketPath());
     sock.once("connect", () => {
-      sock.removeAllListeners("error");
+      sock.removeListener("error", reject);
+      sock.on("error", () => {});
       resolve(sock);
     });
     sock.once("error", reject);
   });
 }
 
-/** One request to the daemon, if it runs: the first record is `op`, the answer is one record. */
+/** One request to a daemon that is already running. */
 export async function daemonCall<T = any>(op: DaemonOp): Promise<T | undefined> {
   let sock: net.Socket;
-  try {
-    sock = await tryConnect();
-  } catch {
-    return undefined;
-  }
+  try { sock = await tryConnect(); } catch { return undefined; }
   return new Promise<T | undefined>((resolve) => {
     let answer: T | undefined;
     sock.on("data", lineSplitter((line) => {
-      try {
-        answer ??= JSON.parse(line);
-      } catch {}
+      try { answer ??= JSON.parse(line); } catch {}
     }));
-    sock.on("error", () => {});
+    sock.setTimeout(5000, () => sock.destroy());
     sock.on("close", () => resolve(answer));
     sock.write(JSON.stringify(op) + "\n");
   });
@@ -48,109 +46,50 @@ export function daemonList(): Promise<DaemonList | undefined> {
   return daemonCall<DaemonList>({ op: "list" });
 }
 
+export function isCompatible(list: DaemonList): boolean {
+  return [LEGACY_PROTOCOL, PREVIOUS_PROTOCOL, PROTOCOL].includes(list.protocol);
+}
+
 let starting: Promise<void> | undefined;
 
-/**
- * Start the daemon as a process of its own: `detached` puts it in a new session, so it stays when
- * the extension host stops. The extension host's node runs it (Electron's, as node, on a local machine).
- */
-async function startDaemon(script: string) {
-  const child = spawn(process.execPath, [script], {
-    detached: true,
-    stdio: "ignore",
-    cwd: os.homedir(),
-    windowsHide: true,
+async function startDaemon(executable: string) {
+  let error: Error | undefined;
+  const legacy = path.basename(executable) === "pi-daemon.js";
+  const child = spawn(legacy ? process.execPath : executable, legacy ? [executable] : ["serve"], {
+    detached: true, stdio: "ignore", cwd: os.homedir(), windowsHide: true,
     env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
   });
-  child.on("error", () => {});
+  child.on("error", (e) => { error = e; });
   child.unref();
   for (let i = 0; i < 50; i++) {
     await new Promise((r) => setTimeout(r, 100));
-    try {
-      (await tryConnect()).destroy();
-      return;
-    } catch {}
+    if (await daemonList()) return;
+    if (error) throw new Error(`Could not start pimuxd: ${error.message}. Install pimuxd or set pi.daemonPath.`);
+    if (child.exitCode !== null) break;
   }
-  throw new Error("the pi session daemon did not start");
+  throw new Error("pimuxd did not start. Run pimuxd serve to see the error.");
 }
 
-/** Only a newer extension build may replace the daemon. A protocol mismatch alone can also mean a downgrade. */
-export function isStale(list: DaemonList): boolean {
-  return (list.build ?? 0) < BUILD;
-}
-
-/** ACP history lives in the daemon even when its agent is idle. */
-export function retainedIn(list: DaemonList): number {
-  return list.sessions.filter((s) => s.busy || s.waiting || s.backend === "acp").length;
-}
-
-const connectable = () => tryConnect().then((s) => (s.destroy(), true), () => false);
-
-/** Stop the daemon and all its sessions, and wait until it is gone. */
-async function endDaemon(list: DaemonList) {
-  const kill = () => {
-    try {
-      process.kill(list.pid, "SIGTERM");
-    } catch {}
-  };
-  // The first daemons know no `retire` (they sent no build).
-  if (list.build === undefined) kill();
-  else await daemonCall({ op: "retire" });
-  for (let i = 0; i < 60; i++) {
-    await new Promise((r) => setTimeout(r, 100));
-    if (!(await connectable())) return;
-    if (i === 30) kill();
-  }
-}
-
-let replacing: Promise<DaemonList | undefined> | undefined;
-
-/**
- * End a daemon of an older build, so that the next start gets a daemon of this build. A stale daemon
- * with work or ACP sessions stays unless `force` is set. Idle Pi sessions are on disk and
- * their chats can restart them after the daemon exits.
- */
-export function replaceStale(force = false): Promise<DaemonList | undefined> {
-  replacing ??= (async () => {
-    const list = await daemonList();
-    if (!list || !isStale(list)) return undefined;
-    if (!force && retainedIn(list)) return list;
-    await endDaemon(list);
-    return undefined;
-  })().finally(() => (replacing = undefined));
-  return replacing;
-}
-
-/** Check the protocol even when this extension cannot replace the daemon. */
-function checkProtocol(list: DaemonList) {
-  if (list.protocol === PROTOCOL) return;
-  if (isStale(list)) {
-    throw new Error("An older Pi session daemon still holds sessions. Use Stop and Replace Now, or wait for those sessions to end.");
-  }
-  throw new Error("The Pi session daemon uses a newer protocol. Update Pi for VS Code and reload this window, or turn off Keep Sessions Alive.");
-}
-
-/** A connection to the daemon. Starts the daemon if it does not run. */
-export async function connectDaemon(script: string): Promise<net.Socket> {
-  await replaceStale();
+/** Check compatibility on every attach. Do not stop or replace a running daemon. */
+export async function connectDaemon(executable: string): Promise<net.Socket> {
   let sock: net.Socket;
-  try {
-    sock = await tryConnect();
-  } catch {
-    starting ??= startDaemon(script).finally(() => (starting = undefined));
+  try { sock = await tryConnect(); }
+  catch {
+    starting ??= startDaemon(executable).finally(() => (starting = undefined));
     await starting;
     sock = await tryConnect();
   }
-  // Another window can replace the daemon between opens or win the race to start it.
-  // Hold the connection while checking so we do not reconnect after the version check.
-  sock.on("error", () => {});
   try {
     const list = await daemonList();
-    if (!list || sock.destroyed) throw new Error("Could not verify the Pi session daemon while opening the session. Try again.");
-    checkProtocol(list);
+    if (!list || sock.destroyed || !isCompatible(list)) {
+      const message = list && !isCompatible(list)
+        ? `The running daemon speaks protocol ${list.protocol}, but this client supports protocols ${LEGACY_PROTOCOL}–${PROTOCOL}. Stop it explicitly after its sessions finish.`
+        : "Could not verify the running session daemon.";
+      throw Object.assign(new Error(message), { code: "PI_DAEMON_IN_USE" });
+    }
     return sock;
-  } catch (err) {
+  } catch (e) {
     sock.destroy();
-    throw err;
+    throw e;
   }
 }

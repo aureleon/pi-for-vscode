@@ -69,6 +69,11 @@ export class PiProcess extends EventEmitter {
       },
       (err) => {
         if (!this.alive) return;
+        if (err.code === "PI_DAEMON_IN_USE") {
+          this.outbox = undefined;
+          this.onDaemonExit(null, null, err);
+          return;
+        }
         this.emit("stderr", `[pi] ${err.message ?? err}; pi starts without the daemon\n`);
         this.alive = false;
         this.daemon = undefined;

@@ -553,7 +553,7 @@ async function openAcpPanel(context: vscode.ExtensionContext, detached?: DaemonS
   panel.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "acp-logo.svg");
   const chat = new AcpChat(panel.webview, cwd, output, (title, busy) => {
     panel.title = `${busy ? "● " : ""}${title}`;
-  }, detached ? { script: path.join(context.extensionPath, "dist", "pi-daemon.js"), key: detached.key } : daemonOptions(context));
+  }, detached ? { ...daemonOptions(context, true)!, key: detached.key } : daemonOptions(context));
   acpPanels.add(chat);
   activeAcp = chat;
   panel.onDidChangeViewState(() => { if (panel.active) activeAcp = chat; });

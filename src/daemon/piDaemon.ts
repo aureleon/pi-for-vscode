@@ -14,7 +14,7 @@ import * as path from "node:path";
 import { AcpSession } from "../acp/session";
 import type { AcpInput, AcpOutput } from "../acp/sessionProtocol";
 import {
-  BUILD, daemonDir, lineSplitter, PROTOCOL, socketPath, type AutoAnswer, type DaemonAcpAttached,
+  BUILD, daemonDir, lineSplitter, LEGACY_PROTOCOL as PROTOCOL, socketPath, type AutoAnswer, type DaemonAcpAttached,
   type DaemonAcpAttachError, type DaemonAcpClose, type DaemonAttached, type DaemonFinished, type DaemonList,
   type DaemonOp, type DialogPolicy,
 } from "./protocol";

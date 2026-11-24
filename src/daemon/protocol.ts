@@ -2,12 +2,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 /** Version of the records between the extension and the daemon. A daemon with another version is not used. */
-export const PROTOCOL = 3;
+export const PROTOCOL = 5;
+export const PREVIOUS_PROTOCOL = 4;
+export const LEGACY_PROTOCOL = 3;
 
 declare const __PI_BUILD__: number | undefined;
 /**
- * When this code was built (set by esbuild.mjs; 0 without it). The daemon outlives the extension that
- * started it, so after an update an old daemon still runs. The extension of a newer build ends it.
+ * Build timestamp used by the legacy daemon. pimuxd checks the wire protocol, not this timestamp.
  */
 export const BUILD: number = typeof __PI_BUILD__ === "number" ? __PI_BUILD__ : 0;
 
@@ -15,7 +16,7 @@ export const BUILD: number = typeof __PI_BUILD__ === "number" ? __PI_BUILD__ : 0
 export type DialogPolicy = "wait" | "deny" | "acceptRecommended";
 
 export function daemonDir(): string {
-  return path.join(os.homedir(), ".pi", "vscode-daemon");
+  return process.env.PIMUXD_DIR || path.join(os.homedir(), ".pi", "vscode-daemon");
 }
 
 /** One daemon for each user: a unix socket in the user's pi directory, or a named pipe on Windows. */
@@ -34,7 +35,7 @@ export type DaemonOp =
   | { op: "acp_open"; key: string; command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv }
   | { op: "acp_attach"; key: string }
   | { op: "list" }
-  | { op: "kill"; key: string }
+  | { op: "kill" | "stop"; key: string }
   | { op: "ack"; files: string[] }
   | { op: "shutdown" }
   /** Stop all sessions and exit, so that a daemon of a newer build can start. */
@@ -50,7 +51,9 @@ export interface AutoAnswer {
 export interface DaemonSession {
   key: string;
   /** Pi sessions omit this field. */
-  backend?: "acp";
+  backend?: "pi" | "acp";
+  observers?: number;
+  canRestoreContext?: boolean;
   pid?: number;
   cwd: string;
   file?: string;

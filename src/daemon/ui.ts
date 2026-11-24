@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
-import type { DaemonFinished, DaemonList, DaemonSession, DialogPolicy } from "./protocol";
-import { daemonCall, daemonList, isStale, replaceStale, retainedIn, type DaemonOptions } from "./client";
+import { LEGACY_PROTOCOL, PREVIOUS_PROTOCOL, type DaemonFinished, type DaemonSession, type DialogPolicy } from "./protocol";
+import { daemonCall, daemonExecutable, daemonList, isCompatible, type DaemonOptions } from "./client";
 
 /**
  * The one Pi item in the status bar. It shows the sessions that work in this window and the
@@ -10,11 +10,12 @@ import { daemonCall, daemonList, isStale, replaceStale, retainedIn, type DaemonO
  */
 
 /** How pi processes reach the daemon, or undefined when the setting `pi.keepSessionsAlive` is off for this window. */
-export function daemonOptions(context: vscode.ExtensionContext): DaemonOptions | undefined {
+export function daemonOptions(context: vscode.ExtensionContext, attach = false): DaemonOptions | undefined {
   const cfg = vscode.workspace.getConfiguration("pi");
   const mode = cfg.get<string>("keepSessionsAlive", "off");
-  if (mode !== "always" && !(mode === "remote" && vscode.env.remoteName)) return undefined;
-  return { script: path.join(context.extensionPath, "dist", "pi-daemon.js"), policy: cfg.get<DialogPolicy>("detachedDialogs", "wait") };
+  if (!attach && mode !== "always" && !(mode === "remote" && vscode.env.remoteName)) return undefined;
+  return { script: daemonExecutable(context.extensionPath, cfg.get<string>("daemonPath"), cfg.get<boolean>("experimental.nativeDaemon", false)),
+    policy: cfg.get<DialogPolicy>("detachedDialogs", "wait") };
 }
 
 /**
@@ -54,7 +55,6 @@ export interface DaemonUiHost {
 }
 
 export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHost) {
-  const output = (line: string) => host.log(line);
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   item.command = "pi.daemonSessions";
   const here = (cwd: string) => path.resolve(cwd) === path.resolve(host.cwd());
@@ -100,30 +100,6 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
   };
 
   let warned = false;
-  /**
-   * A daemon of an older build runs (the extension was updated). End it when no session works in it,
-   * so that the daemon of this build starts. Until then, say so once and offer to end it now.
-   */
-  const replace = async (stale: DaemonList) => {
-    // The daemon does not see all work (child sessions, a compaction); this window sees its own.
-    const retained = Math.max(retainedIn(stale), host.running().length);
-    if (!retained) {
-      output(`[pi] replacing the session daemon of an older build (pid ${stale.pid})`);
-      await replaceStale();
-      return;
-    }
-    if (warned) return;
-    warned = true;
-    const now = "Stop and Replace Now";
-    const pick = await vscode.window.showInformationMessage(
-      `The session daemon from before the update still holds ${retained} session${retained === 1 ? "" : "s"}. Replacing it stops those sessions. ACP chat history in the daemon will be lost.`,
-      now,
-    );
-    if (pick !== now) return;
-    output(`[pi] replacing the session daemon of an older build (pid ${stale.pid}); its working sessions stop`);
-    await replaceStale(true);
-    void refresh();
-  };
 
   let refreshing = false;
   /** Ask the daemon for its sessions, then draw the item. */
@@ -131,10 +107,20 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
     if (refreshing) return;
     refreshing = true;
     try {
-      let list = await daemonList();
-      if (list && isStale(list) && daemonOptions(context)) {
-        await replace(list);
-        list = await daemonList();
+      const list = await daemonList();
+      if (list && !isCompatible(list) && daemonOptions(context) && !warned) {
+        warned = true;
+        const stop = "Stop Legacy Daemon";
+        const pick = await vscode.window.showWarningMessage(
+          "A daemon with another protocol is running. PiMux will not replace it while it has sessions.",
+          ...(list.protocol <= LEGACY_PROTOCOL ? [stop] : []),
+        );
+        if (pick === stop && await vscode.window.showWarningMessage(
+          "Stop the legacy daemon? Its running turns and in-memory ACP history will be lost.", { modal: true }, stop,
+        ) === stop) {
+          const latest = await daemonList();
+          if (latest?.pid === list.pid && latest.protocol === list.protocol) await daemonCall({ op: "retire" });
+        }
       }
       known = list?.sessions ?? [];
       render();
@@ -198,10 +184,11 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
     type Item = vscode.QuickPickItem & { s?: DaemonSession; setting?: Setting; show?: () => void };
     const qp = vscode.window.createQuickPick<Item>();
     const stopButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon("debug-stop"), tooltip: "Stop this session" };
+    const forgetButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon("trash"), tooltip: "Remove saved chat" };
     const toItem = (s: DaemonSession): Item => ({
       label: `${s.waiting ? "$(question)" : s.busy ? "$(loading~spin)" : "$(circle-outline)"} ${title(s)}`,
       description: describe(s),
-      buttons: [stopButton],
+      buttons: s.backend === "acp" && s.failed && (list?.protocol ?? 0) >= PREVIOUS_PROTOCOL ? [forgetButton] : [stopButton],
       s,
     });
     const separator = (label: string): Item => ({ label, kind: vscode.QuickPickItemKind.Separator });
@@ -222,9 +209,12 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
     qp.onDidTriggerItemButton(async (e) => {
       const s = e.item.s;
       if (!s) return;
-      const yes = await vscode.window.showWarningMessage(`Pi: stop "${title(s)}"?`, { modal: true }, "Stop");
-      if (yes !== "Stop") return;
-      await daemonCall({ op: "kill", key: s.key });
+      const forget = e.button === forgetButton;
+      const action = forget ? "Remove" : "Stop";
+      const yes = await vscode.window.showWarningMessage(`${action} "${title(s)}"?`, { modal: true }, action);
+      if (yes !== action) return;
+      await daemonCall({ op: !forget && (list?.protocol ?? 0) >= PREVIOUS_PROTOCOL ? "stop" : "kill", key: s.key });
+      qp.hide();
       void refresh();
     });
     qp.onDidAccept(() => {
