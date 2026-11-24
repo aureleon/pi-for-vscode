@@ -180,6 +180,8 @@ interface Session {
 export interface ChatOptions {
   /** The sidebar chat: it resumes the last session of the workspace. */
   primary: boolean;
+  /** Wait to start Pi while the tile shows its default ACP chat. */
+  deferStart?: boolean;
   sessionFile?: string;
   /** Show session tabs in the header, and keep them in workspace state under this key. */
   tabsKey?: string;
@@ -302,7 +304,7 @@ export class PiController implements vscode.Disposable {
     PiController.all.add(this);
     // Start pi now, not when the webview is ready: pi needs seconds to start, and the webview loads
     // in the meantime. A tile that gets a process handed over (adoptFirst, right after this) starts none.
-    queueMicrotask(() => {
+    if (!options.deferStart) queueMicrotask(() => {
       if (!this.active && !this.disposed && !this.terminal) this.start().catch((err) => this.output.appendLine(`[pi] start failed: ${err.message ?? err}`));
     });
   }
@@ -311,6 +313,8 @@ export class PiController implements vscode.Disposable {
   private hooks(s: Session): HostIntegrationInstance[] {
     return [...s.ext].map((id) => this.integrations.get(id)).filter((h): h is HostIntegrationInstance => !!h);
   }
+
+  get isEditorChat(): boolean { return this.host.kind === "tab"; }
 
   get cwd(): string {
     return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
@@ -523,6 +527,7 @@ export class PiController implements vscode.Disposable {
    * (open a tab, a new session) replaces it: the older start stops where it is (`openGen`).
    */
   async start(sessionFile?: string, sessionId?: string, opts: StartOptions = {}): Promise<void> {
+    this.options.deferStart = false;
     if (this.starting && !sessionFile && !sessionId && !opts.fresh) return this.starting;
     const gen = ++this.openGen;
     const p = this.doStart(gen, sessionFile, sessionId, opts).finally(() => {
@@ -1469,6 +1474,13 @@ export class PiController implements vscode.Disposable {
     this.host.webview.postMessage(msg);
   }
 
+  /** Start Pi when the user switches from the default ACP chat to the Pi tab. */
+  showDeferred() {
+    if (!this.options.deferStart) return;
+    this.options.deferStart = false;
+    if (this.webviewReady) void this.onReady().catch((err) => this.output.appendLine(`[pi] start failed: ${err.message ?? err}`));
+  }
+
   /** Called when the webview (re)loads its DOM. */
   private async onReady() {
     this.webviewReady = true;
@@ -1480,6 +1492,7 @@ export class PiController implements vscode.Disposable {
     }
     for (const s of [this.active, ...this.background, ...this.warm]) if (s) s.delivered = false;
     this.syncTabs();
+    if (this.options.deferStart) return;
     // While pi starts, show the session from its file: the transcript is there at once.
     // Start now if the chat has not started yet, so that the preview below shows while pi starts.
     if (!this.pi?.running && !this.starting) this.start().catch(() => {});
@@ -2046,6 +2059,7 @@ export class PiController implements vscode.Disposable {
   // ---------------------------------------------------------------- builtins
 
   async runBuiltin(name: string, arg: string) {
+    if (name === "new" && this.options.deferStart) return this.start(undefined, undefined, { fresh: true });
     // The TUI owns the session file while it is open in the terminal.
     if (name === "name" && this.terminal) throw new Error("This session is open in the terminal. Rename it there, or reattach first.");
     if (!this.pi?.running && name !== "restart") await this.start();

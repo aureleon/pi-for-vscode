@@ -35,7 +35,7 @@ export function mountTiles(vscode: ChatApi, logo: string) {
   document.body.appendChild(root);
   const tiles = new Map<string, Tile>();
   let focused: string | undefined;
-  let acpProfiles = { type: "acpProfiles", names: [] as string[] };
+  let acpProfiles: { type: "acpProfiles"; names: string[]; defaultProfile?: string } = { type: "acpProfiles", names: [] };
 
   /** A tile's share of the webview API: tagged messages and its own slot of the page state. */
   const apiFor = (id: string, lane?: string): ChatApi => ({
@@ -55,9 +55,15 @@ export function mountTiles(vscode: ChatApi, logo: string) {
   function backend(tile: string) {
     const send = (type: string, lane?: string) => vscode.postMessage({ type, tile, lane });
     return {
+      openDefault: () => {
+        if (!acpProfiles.defaultProfile) return false;
+        send("tiles:newDefault");
+        return true;
+      },
       pick: (backend: "pi" | "acp", replaceEmpty = false, profile?: string) => {
         vscode.postMessage({ type: "tiles:pickBackend", tile, backend, replaceEmpty, profile });
       },
+      pickDefault: () => send("tiles:pickDefaultBackend"),
       configure: () => send("tiles:configureAcpProfiles"),
       pickTab: (key: string) => {
         const t = tiles.get(tile);
@@ -468,7 +474,7 @@ export function mountTiles(vscode: ChatApi, logo: string) {
     const m = ev.data;
     if (m?.type === "tiles:layout") layout(m.tiles ?? []);
     else if (m?.type === "tiles:acpProfiles" && Array.isArray(m.names)) {
-      acpProfiles = { type: "acpProfiles", names: m.names };
+      acpProfiles = { type: "acpProfiles", names: m.names, defaultProfile: m.defaultProfile };
       for (const t of tiles.values()) {
         t.chat.receive(acpProfiles);
         for (const lane of t.lanes.values()) lane.chat.receive(acpProfiles);

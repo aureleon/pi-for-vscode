@@ -22,8 +22,8 @@
       "activitybar": [
         {
           "id": "pi-coding-agent",
-          "title": "Pi Coding Agent",
-          "icon": "media/pi-logo.svg"
+          "title": "PiMux",
+          "icon": "media/pimux-logo.svg"
         }
       ]
     },
@@ -32,8 +32,8 @@
         {
           "type": "webview",
           "id": "pi.chat",
-          "name": "Pi Coding Agent",
-          "icon": "media/pi-logo.svg"
+          "name": "PiMux",
+          "icon": "media/pimux-logo.svg"
         }
       ]
     },
@@ -237,6 +237,12 @@
           },
           "default": [],
           "description": "Extra CLI arguments passed to `pi --mode rpc` (e.g. [\"--model\", \"sonnet\"])."
+        },
+        "pi.acp.defaultProfile": {
+          "type": "string",
+          "scope": "machine",
+          "default": "",
+          "description": "ACP profile to start in the first sidebar tile and use for new chats. Use the exact profile name. Leave empty to keep Pi as the default."
         },
         "pi.acp.profiles": {
           "type": "object",

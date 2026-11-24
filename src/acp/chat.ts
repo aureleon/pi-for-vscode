@@ -5,7 +5,7 @@ import { connectDaemon } from "../daemon/client";
 import { lineSplitter, type DaemonOp } from "../daemon/protocol";
 import { openPath } from "../openPath";
 import { getShellEnv } from "../shellEnv";
-import { acpFingerprint, acpProfiles, pickAcpProfile, type AcpBackend, type AcpProfile } from "./config";
+import { acpFingerprint, acpProfiles, defaultAcpProfile, pickAcpProfile, pickDefaultBackend, type AcpBackend, type AcpProfile } from "./config";
 import type { DaemonAcpAttached } from "../daemon/protocol";
 import { AcpSession } from "./session";
 import { MAX_IMAGE_BYTES, MAX_IMAGE_TOTAL, type AcpComposer, type AcpInput, type AcpOutput, type PermissionRequest } from "./sessionProtocol";
@@ -56,6 +56,7 @@ export class AcpChat implements vscode.Disposable {
           this.sendProfiles();
         }
       }),
+      vscode.workspace.onDidGrantWorkspaceTrust(() => this.sendProfiles()),
     ];
   }
 
@@ -81,6 +82,9 @@ export class AcpChat implements vscode.Disposable {
         if (m.backend === "pi" || m.backend === "acp") {
           this.newChat?.(m.backend, typeof m.profile === "string" ? m.profile : undefined);
         }
+        break;
+      case "pickDefaultBackend":
+        if (this.newChat) await pickDefaultBackend();
         break;
       case "configureAcpProfiles":
         if (this.newChat) await vscode.commands.executeCommand("workbench.action.openSettings", "@id:pi.acp.profiles");
@@ -210,7 +214,7 @@ export class AcpChat implements vscode.Disposable {
   }
 
   private sendProfiles() {
-    if (this.newChat) this.post({ type: "acpProfiles", names: acpProfiles().map((p) => p.name) });
+    if (this.newChat) this.post({ type: "acpProfiles", names: acpProfiles().map((p) => p.name), defaultProfile: defaultAcpProfile()?.name });
   }
 
   private sendProfile() {

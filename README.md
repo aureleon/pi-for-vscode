@@ -61,6 +61,7 @@ Add your agents as profiles in VS Code settings:
 ```
 
 - Click the logo at the left of the composer toolbar and choose a profile. Each chat keeps its agent, so you can run several agents side by side.
+- Choose **Set Default Backend…** from the composer logo menu to make an ACP profile or Pi the default for new chats.
 - The profile name shows next to the logo. `accentColor` (optional) colors that profile's chat.
 - **Pi: New ACP Chat** opens an ACP chat in an editor tab.
 - With no profiles, the first ACP chat asks for an executable and its arguments.
@@ -102,6 +103,7 @@ pimuxd shutdown
 |---|---|---|
 | `pi.path` | `""` | Path to the `pi` executable. |
 | `pi.args` | `[]` | More CLI arguments for pi, for example `["--model", "sonnet"]`. |
+| `pi.acp.defaultProfile` | `""` | ACP profile for sidebar startup and new chats. Leave empty to keep Pi as the default. |
 | `pi.acp.profiles` | `{}` | Named ACP agents: `command`, `args`, and `accentColor`. |
 | `pi.acp.command`, `pi.acp.args` | `""`, `[]` | The ACP agent when no profiles are set. |
 | `pi.acp.accentColor` | `""` | Color for ACP chats without a profile color, for example `"#24a487"`. |

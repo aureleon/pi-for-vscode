@@ -33,6 +33,34 @@ export function acpProfiles(): AcpProfile[] {
   return command ? [{ name: command.split(/[\\/]/).at(-1) || "ACP", command, args: cfg.get<string[]>("acp.args", []) }] : [];
 }
 
+/** Only auto-start a configured agent on a trusted workspace. */
+export function defaultAcpProfile(): AcpProfile | undefined {
+  if (!vscode.workspace.isTrusted) return;
+  const name = vscode.workspace.getConfiguration("pi").get<string>("acp.defaultProfile", "").trim();
+  if (name) return acpProfiles().find((profile) => profile.name === name);
+}
+
+/** Change the default without opening or switching a chat. */
+export async function pickDefaultBackend(): Promise<void> {
+  const config = vscode.workspace.getConfiguration("pi");
+  const current = defaultAcpProfile()?.name ?? "";
+  const choices = [
+    { label: "Pi", profile: "", description: "Pi Coding Agent" },
+    ...(vscode.workspace.isTrusted ? acpProfiles() : []).map(({ name }) => ({ label: name, profile: name, description: "ACP" })),
+  ];
+  const picked = await vscode.window.showQuickPick(choices.map((choice) => ({
+    ...choice,
+    label: choice.profile === current ? `$(check) ${choice.label}` : choice.label,
+    description: choice.profile === current ? `${choice.description} · Current default` : choice.description,
+  })), { title: "Default Chat Backend", placeHolder: "Choose the backend for new chats" });
+  if (!picked || picked.profile === config.get<string>("acp.defaultProfile", "")) return;
+  if (picked.profile && (!vscode.workspace.isTrusted || !acpProfiles().some(({ name }) => name === picked.profile))) {
+    void vscode.window.showWarningMessage("This ACP profile is no longer available.");
+    return;
+  }
+  await config.update("acp.defaultProfile", picked.profile, vscode.ConfigurationTarget.Global);
+}
+
 let configuring: Promise<AcpProfile | undefined> | undefined;
 
 export async function pickAcpProfile(confirm = false): Promise<AcpProfile | undefined> {

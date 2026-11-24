@@ -40,6 +40,7 @@ export function duration(ms: number): string {
 /** What the status bar needs from the chats. */
 export interface DaemonUiHost {
   cwd(): string;
+  isAcpActive(): boolean;
   /** The sessions that work in this window. */
   running(): { title: string; where: string; file?: string; show(): void }[];
   /** The session files that the processes of this window have open. */
@@ -148,7 +149,7 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
       ],
     },
     {
-      key: "detachedDialogs", label: "Pi questions without a window", fallback: "wait",
+      key: "detachedDialogs", label: "Detached dialogs (Pi only)", fallback: "wait",
       values: [
         { value: "wait", label: "Wait", detail: "Hold the question until you reconnect" },
         { value: "deny", label: "Deny", detail: "Cancel the question and keep going" },
@@ -192,6 +193,8 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
       s,
     });
     const separator = (label: string): Item => ({ label, kind: vscode.QuickPickItemKind.Separator });
+    const acpActive = host.isAcpActive();
+    if (acpActive) qp.title = "Agent Sessions · ACP permissions always wait for approval";
     qp.items = [
       separator("Sessions"),
       ...running.map((r): Item => ({ label: `$(loading~spin) ${r.title}`, description: `working · ${r.where}`, show: r.show })),
@@ -199,7 +202,7 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
       ...[...sessions].sort((a, b) => Number(a.attached) - Number(b.attached)).map(toItem),
       ...(running.length || sessions.length ? [] : [{ label: "$(blank) No sessions to show" }]),
       separator("Settings"),
-      ...SETTINGS.map((st): Item => ({
+      ...SETTINGS.filter((st) => !acpActive || st.key !== "detachedDialogs").map((st): Item => ({
         label: `$(gear) ${st.label}`,
         description: st.values.find((v) => v.value === valueOf(st))?.label ?? valueOf(st),
         setting: st,

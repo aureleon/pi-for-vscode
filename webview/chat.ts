@@ -3,7 +3,7 @@ import { ACP_IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_IMAGE_TOTAL, type AcpComposer, ty
 import { ansiToHtml, escapeHtml, stripAnsi } from "./ansi";
 import { WEB_INTEGRATIONS, WEB_WORKAROUNDS, type PiCommand, type WebIntegration, type WebIntegrationInstance } from "./integrations";
 import { TreeMenu } from "./treeMenu";
-import { SPINNER } from "./spinner";
+import { ACP_SPINNER, SPINNER } from "./spinner";
 import { createFind } from "./find";
 import { createLazyImages } from "./images";
 import { highlightMarkdown } from "./mdHighlight";
@@ -71,7 +71,9 @@ export interface MountOptions {
   acp?: boolean;
   /** Mixed sidebar tiles keep a separate mounted chat for each backend. */
   backend?: {
+    openDefault?(): boolean;
     pick(kind: "pi" | "acp", replaceEmpty?: boolean, profile?: string): void;
+    pickDefault(): void;
     configure(): void;
     pickTab(key: string): void;
     closeTab(key: string): void;
@@ -188,12 +190,12 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       <div id="messages" class="messages"></div>
       <div id="queue" class="queue hidden"></div>
       <div id="empty" class="empty">
-        <div class="empty-loading">${SPINNER}<span>Loading session…</span></div>
+        <div class="empty-loading">${opts.acp ? ACP_SPINNER : SPINNER}<span>Loading session…</span></div>
         ${opts.acp ? `<div class="logo acp-logo" aria-hidden="true">${I.group}</div>` : '<img class="logo" id="empty-logo" alt="">'}
         <div class="empty-text">Ask Pi anything about your code.</div>
         <div class="hint">Type <kbd>/</kbd> for commands, <kbd>@</kbd> to mention files, <kbd>!</kbd> to run a shell command.</div>
       </div>
-      <div id="working" class="working hidden">${SPINNER}<span id="working-text">Working…</span></div>
+      <div id="working" class="working hidden">${opts.acp ? ACP_SPINNER : SPINNER}<span id="working-text">Working…</span></div>
     </main>
     <div id="dialogs"></div>
     <div class="bottom">
@@ -211,8 +213,9 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
           <div class="backend-picker-wrap hidden" id="backend-picker-wrap">
             <button type="button" class="icon-btn backend-picker" id="btn-backend" aria-haspopup="menu" aria-expanded="false"></button>
             <div class="tb-menu backend-menu hidden" id="backend-menu" role="menu" aria-label="New session backend">
-              <button type="button" role="menuitem" data-backend="pi">${I.pi}<span>New Pi Session</span></button>
+              <button type="button" role="menuitem" data-backend="pi">${I.pi}<span>New Pi Session</span><small class="backend-default">Default</small></button>
               <div id="backend-profiles" class="backend-profiles" role="presentation"></div>
+              <button type="button" role="menuitem" data-backend="default">Set Default Backend…</button>
               <button type="button" role="menuitem" data-backend="configure">Configure ACP Profiles…</button>
             </div>
           </div>
@@ -251,7 +254,9 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     if (restoreFocus) backendButton.focus();
     return true;
   }
-  function renderBackendProfiles(names: string[]) {
+  function renderBackendProfiles(names: string[], defaultProfile?: string) {
+    const piDefault = backendMenu.querySelector(".backend-default");
+    piDefault?.classList.toggle("hidden", !!defaultProfile && names.includes(defaultProfile));
     const focus = backendMenu.contains(document.activeElement);
     const namesOrSetup = names.length ? names : [undefined];
     $("backend-profiles").replaceChildren(...namesOrSetup.map((name) => {
@@ -265,6 +270,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       label.textContent = name === undefined ? "New ACP Session" : `New ${name} Chat`;
       button.title = label.textContent;
       button.append(label);
+      if (name !== undefined && name === defaultProfile) button.append(el("small", "backend-default", "Default"));
       return button;
     }));
     if (focus && !backendMenu.contains(document.activeElement)) {
@@ -298,7 +304,10 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       const item = (e.target as Element).closest<HTMLButtonElement>("button[data-backend]");
       if (!item) return;
       closeBackendMenu(true);
-      if (item.dataset.backend === "configure") {
+      if (item.dataset.backend === "default") {
+        if (opts.backend) opts.backend.pickDefault();
+        else post({ type: "pickDefaultBackend" });
+      } else if (item.dataset.backend === "configure") {
         if (opts.backend) opts.backend.configure();
         else post({ type: "configureAcpProfiles" });
       } else {
@@ -1536,7 +1545,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     // Ring gauge (r=6 → circumference ≈ 37.7) + percentage + hover-revealed action label.
     const C = 37.7;
     ctx.innerHTML = compacting
-      ? `${SPINNER}<span class="ctx-pct">Compacting…</span>`
+      ? `${ACP ? ACP_SPINNER : SPINNER}<span class="ctx-pct">Compacting…</span>`
       : `<svg class="ctx-ring" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" class="ctx-track"/><circle cx="8" cy="8" r="6" class="ctx-fill" stroke-dasharray="${(frac * C).toFixed(2)} ${C}" transform="rotate(-90 8 8)"/></svg><span class="ctx-pct">${pct}</span><span class="ctx-action">Compact</span>`;
     if (ACP) {
       const usage = percent === undefined ? "Context usage unavailable" : `Context usage: ${pct}`;
@@ -1722,6 +1731,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     $("tb-tree").addEventListener("click", () => post({ type: "builtin", name: "tree", arg: "" }));
     $("tb-history").addEventListener("click", () => post({ type: "builtin", name: "resume", arg: "" }));
     $("tb-new").addEventListener("click", () => {
+    if (opts.backend?.openDefault?.()) return;
     if (ACP) {
       openBackendMenu?.(1);
       return;
@@ -1801,7 +1811,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       e.stopPropagation();
       opts.backend?.closeTab(t.key);
     });
-    tab.append(el("span", "tab-mark", t.busy ? SPINNER : t.unread ? "●" : ""), close);
+    tab.append(el("span", "tab-mark", t.busy ? (backend === "ACP" ? ACP_SPINNER : SPINNER) : t.unread ? "●" : ""), close);
     tab.addEventListener("click", () => { if (!active) opts.backend?.pickTab(t.key); });
     tab.addEventListener("auxclick", (e) => { if (e.button === 1) opts.backend?.closeTab(t.key); });
     return tab;
@@ -3566,7 +3576,9 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         break;
       }
       case "acpProfiles":
-        if ((opts.backend || ACP) && Array.isArray(m.names)) renderBackendProfiles(m.names.filter((name: unknown) => typeof name === "string"));
+        if ((opts.backend || ACP) && Array.isArray(m.names)) {
+          renderBackendProfiles(m.names.filter((name: unknown) => typeof name === "string"), m.defaultProfile);
+        }
         break;
       case "acpProfile":
         if (ACP && typeof m.name === "string") {

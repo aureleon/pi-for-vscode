@@ -77,7 +77,7 @@ kbd {
   transition: box-shadow .12s;
 }
 #app.scrolled::before { box-shadow: 0 0 6px 1px var(--vscode-scrollbar-shadow, rgba(0, 0, 0, .5)); }
-/* Sidebar second row under the native "Pi Coding Agent" title: session name left,
+/* Sidebar second row under the native PiMux title: session name left,
    session actions right. It takes over the scroll shadow from #app::before. */
 .topbar {
   display: flex; align-items: center; gap: 6px; height: 28px; flex: none; position: relative; z-index: 11;
@@ -799,6 +799,7 @@ button.lm-twisty:hover { background: var(--vscode-toolbar-hoverBackground); colo
 .backend-profiles { display: flex; flex-direction: column; margin-block: 3px; padding-block: 3px; border-block: 1px solid var(--border); }
 .backend-menu button { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
 .backend-menu button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backend-default { margin-left: auto; font-size: 11px; opacity: .8; }
 .backend-menu svg { width: 16px; height: 16px; flex: none; }
 .chat-frame.acp .tb-menu button[aria-disabled="true"] {
   color: var(--vscode-disabledForeground, var(--muted)); cursor: default;
