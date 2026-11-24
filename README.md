@@ -1,4 +1,4 @@
-# Pi for VS Code
+# PiMux for VS Code
 
 Use the [Pi coding agent](https://pi.dev) in the VS Code sidebar, in a UI like Claude Code for VS Code.
 
@@ -101,7 +101,7 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - **New sessions without a message** have no file: pi writes it with the first message. Their tab keeps the session id and opens it again with `--session-id`.
 - **Startup:** the chat starts pi as soon as the sidebar opens, not when the webview is ready, and the login shell environment is read when the extension activates. Until pi answers, the chat shows the session from its file (the same reader as the session viewer). Tabs get their own processes only after all chats have started.
 - **Moving a tab** to another tile moves its pi process too, so nothing restarts and only one process has the file. A session that works moves with its turn, open dialogs, queued messages, widgets and the running child sessions; the other tile shows the turn from where it is. The same goes for merging tiles.
-- **The session daemon** (`src/daemon/piDaemon.ts`, `dist/pi-daemon.js`) is one process per user. The extension starts it on first use, apart from the extension host, and talks to it on a unix socket in `~/.pi/vscode-daemon/` (a named pipe on Windows). Each chat connection is the RPC stream of one pi process. When a connection closes, a session with a run or an open question continues; an idle one stops. A detached session stops 60 seconds after its work ends, and the daemon exits when it has no sessions. A start of a session file that a detached process has open gets that process, with its open questions and its unfinished output. `daemon.log` in the same directory lists what the daemon did, also the questions that it answered. If the daemon cannot start, pi runs as a child process as before.
+- **The session daemon** runs apart from the extension host. In a Remote-SSH workspace, it runs on the remote host. The client reuses the daemon on `~/.pi/vscode-daemon/daemon.sock` (a named pipe on Windows with the legacy daemon). It does not replace a running daemon just because the extension was updated. Pi keeps its own session files.
 - **The daemon and logout:** a host that stops all processes of a user at logout (systemd `KillUserProcesses=yes`) also stops the daemon. Run `loginctl enable-linger` on such a host.
 - **One chat per session:** a chat that would open a session that another chat has open (for example after a reload) starts a new session. A session that runs in a chat's background stays in that chat.
 - **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.
@@ -153,7 +153,30 @@ ACP chats support streamed replies, tool status, permission prompts, and Stop. T
 
 Set `pi.keepSessionsAlive` to `always` or `remote` to run new ACP chats in the daemon. After reconnecting to the workspace, click **Agent Sessions** in the status bar and select the detached chat. Its transcript, running turn, and pending permission requests come back. ACP permissions always wait for an answer. `pi.detachedDialogs` applies only to Pi.
 
-The daemon keeps ACP history in memory, including for idle sessions. Closing an ACP editor tab detaches it. Closing an ACP session tab or tile in the sidebar stops it, as does Stop in the session list. Restarting the daemon loses ACP history. Without keep-alive, closing the chat stops its process.
+Closing an ACP editor tab detaches it. Closing an ACP session tab or tile in the sidebar removes it. With the native daemon, Stop in Agent Sessions keeps the saved chat. Use Remove to delete it. Without keep-alive, closing the chat stops its process. The legacy daemon keeps ACP history in memory. The native daemon also saves recent messages on disk.
+
+## Native daemon preview
+
+`pimuxd` runs Pi and ACP sessions on macOS arm64 and Linux x86-64. The standalone archive contains one binary. The daemon talks directly to your installed Pi or ACP agent. The daemon itself does not need Node.js or VS Code.
+
+```sh
+./pimuxd start
+./pimuxd acp open -- kiro-cli acp --agent-engine v3
+./pimuxd sessions
+./pimuxd logs SESSION_ID
+./pimuxd inspect SESSION_ID
+./pimuxd stop SESSION_ID
+```
+
+`acp open` starts and detaches an agent in the current directory. It prints the session ID. Open the same directory in VS Code and select the session in **Agent Sessions** to chat.
+
+`logs` shows daemon lifecycle events. `inspect` shows saved ACP messages, which can contain private data. `stop` stops the agent and keeps its saved ACP history. `forget` removes that history. `shutdown` refuses while agents are running. `shutdown --force` interrupts them but preserves ACP checkpoints. Use `serve` instead of `start` to run the daemon in the foreground.
+
+To use it from VS Code, enable `pi.keepSessionsAlive`. VS Code attaches to a compatible daemon that is already running. Set `pi.experimental.nativeDaemon` to start the bundled native daemon when none is running, or set `pi.daemonPath` to use a standalone binary on the host. Existing protocol 3 and 4 daemons still work. Restart an older daemon when its sessions are done to keep profile names on reattach and enable profile-aware recovery. Run `pimuxd shutdown` to stop a protocol 3 daemon after its sessions close, then start `pimuxd` on the same socket. Use `--force` only if you want to stop the agents now and discard any unsaved legacy ACP history.
+
+ACP checkpoints store recent messages and omit images. If the daemon crashes during a turn, Agent Sessions can show the recovered chat with an interruption notice. **Reopen Saved Chat** starts a fresh agent session by default. It offers to load earlier agent context only when the saved session supports it. It never resends a prompt or approval. One client controls a session; read-only socket clients can observe it without sending prompts or answering permissions.
+
+Run `npm run package:native` on each target host to build a target-specific VSIX and a standalone `dist/pimuxd-<target>.tar.gz`. Linux release binaries must be built on a host with a glibc version no newer than the oldest supported host.
 
 ## Settings
 
@@ -161,7 +184,8 @@ The daemon keeps ACP history in memory, including for idle sessions. Closing an 
 |---|---|---|
 | `pi.path` | `""` | Path to the `pi` executable. |
 | `pi.args` | `[]` | More CLI arguments, for example `["--model", "sonnet"]`. |
-| `pi.acp.command` | `""` | Executable for new ACP chats. If empty, ask on first use. |
+| `pi.acp.profiles` | `{}` | Named ACP agents with a command and optional arguments. |
+| `pi.acp.command` | `""` | Executable for new ACP chats when no profiles are set. If empty, ask on first use. |
 | `pi.acp.args` | `[]` | CLI arguments for the ACP executable. |
 | `pi.acp.accentColor` | `""` | ACP highlight color, for example `"#24a487"`. Empty uses the VS Code theme. |
 | `pi.resumeLastSession` | `true` | Reopen the last session of the workspace. |
