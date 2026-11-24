@@ -203,7 +203,9 @@ export class AcpChat implements vscode.Disposable {
   }
 
   private sendAccent() {
-    const color = vscode.workspace.getConfiguration("pi").get<string>("acp.accentColor", "");
+    const name = this.backend?.name ?? this.profile?.name;
+    const profile = name ? acpProfiles().find((p) => p.name === name) : undefined;
+    const color = profile?.accentColor ?? vscode.workspace.getConfiguration("pi").get<string>("acp.accentColor", "");
     this.post({ type: "acpAccent", color });
   }
 

@@ -140,10 +140,12 @@ Set `pi.acp.profiles` to use several agents at once:
 
 ```json
 "pi.acp.profiles": {
-  "Kiro": { "command": "kiro-cli", "args": ["acp", "--agent-engine", "v3"] },
+  "Kiro": { "command": "kiro-cli", "args": ["acp", "--agent-engine", "v3"], "accentColor": "#8B5CF6" },
   "Antigravity": { "command": "agy", "args": ["acp"] }
 }
 ```
+
+Set `accentColor` to `#RGB` or `#RRGGBB` to color that profile’s chat. Profiles without a color use `pi.acp.accentColor` or the theme. High-contrast themes always use theme colors.
 
 Choose a profile directly from the composer logo menu. **New ACP Chat** in the Command Palette asks for a profile when more than one is configured. The name appears at the bottom left of the composer. Each chat keeps its selected agent. With no profiles, PiMux uses `pi.acp.command` and `pi.acp.args` as before. To restore agent context from a native daemon checkpoint, the profile must still use the same executable and arguments. Otherwise, you can choose an agent and start without earlier context.
 

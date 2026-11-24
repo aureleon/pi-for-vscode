@@ -3560,7 +3560,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       case "acpAccent": {
         if (!ACP) break;
         const color = typeof m.color === "string" ? m.color.trim() : "";
-        const style = (frame.closest<HTMLElement>(".tile") ?? frame).style;
+        const style = frame.style;
         if (/^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(color)) style.setProperty("--acp-custom-accent", color);
         else style.removeProperty("--acp-custom-accent");
         break;

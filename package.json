@@ -249,7 +249,12 @@
             "additionalProperties": false,
             "properties": {
               "command": { "type": "string", "minLength": 1 },
-              "args": { "type": "array", "items": { "type": "string" }, "default": [] }
+              "args": { "type": "array", "items": { "type": "string" }, "default": [] },
+              "accentColor": {
+                "type": "string",
+                "pattern": "^(?:#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}))?$",
+                "description": "Accent for this profile, as #RGB or #RRGGBB. Leave empty to use the default ACP accent."
+              }
             }
           }
         },
@@ -270,7 +275,7 @@
           "type": "string",
           "default": "",
           "pattern": "^(?:#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}))?$",
-          "description": "Highlight color for ACP chats, as #RGB or #RRGGBB. Leave empty to use the VS Code theme. High contrast themes always use theme colors."
+          "description": "Default highlight color for ACP chats without a profile accent, as #RGB or #RRGGBB. Leave empty to use the VS Code theme. High contrast themes always use theme colors."
         },
         "pi.resumeLastSession": {
           "type": "boolean",

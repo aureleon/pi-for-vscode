@@ -5,6 +5,7 @@ export interface AcpProfile {
   name: string;
   command: string;
   args: string[];
+  accentColor?: string;
 }
 
 export interface AcpBackend {
@@ -23,7 +24,9 @@ export function acpProfiles(): AcpProfile[] {
     if (!name.trim() || name.length > 80 || typeof value?.command !== "string" || !value.command.trim()) return [];
     const args = value.args ?? [];
     if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string")) return [];
-    return [{ name: name.trim(), command: value.command.trim(), args: [...args] }];
+    const color = typeof value.accentColor === "string" ? value.accentColor.trim() : "";
+    const accentColor = /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(color) ? color : undefined;
+    return [{ name: name.trim(), command: value.command.trim(), args: [...args], accentColor }];
   });
   if (profiles.length) return profiles;
   const command = cfg.get<string>("acp.command", "").trim();
