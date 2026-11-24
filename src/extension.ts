@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { AcpChat } from "./acp/chat";
-import { configureAcp } from "./acp/config";
+import { acpProfiles, pickAcpProfile, type AcpProfile } from "./acp/config";
 import { PiController, type ChatHost, type Handover, type Tab } from "./controller";
 import { daemonOptions, initDaemonUi } from "./daemon/ui";
 import type { DaemonSession } from "./daemon/protocol";
@@ -90,7 +90,8 @@ class SidebarTiles implements vscode.Disposable {
     this.tiles = saved.filter((t) => typeof t?.id === "string").slice(0, MAX_TILES);
     if (!this.tiles.length) this.tiles = [{ id: "t1", size: 1 }];
     for (const t of this.tiles) this.createChat(t.id);
-    this.subs.push(view.webview.onDidReceiveMessage((m) => this.onMessage(m)));
+    this.subs.push(view.webview.onDidReceiveMessage((m) => this.onMessage(m)),
+      vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration("pi.acp")) this.sendProfiles(); }));
   }
 
   /** The chat of the first tile, for commands when no tile had focus yet. */
@@ -150,14 +151,27 @@ class SidebarTiles implements vscode.Disposable {
     this.view.badge = count > 0 ? { value: count, tooltip: tooltip.filter(Boolean).join("\n") || String(count) } : undefined;
   }
 
-  private async addAcpTab(tile: string, replaceEmpty = false) {
+  private sendProfiles() {
+    void this.view.webview.postMessage({ type: "tiles:acpProfiles", names: acpProfiles().map((p) => p.name) });
+  }
+
+  private async addAcpTab(tile: string, replaceEmpty = false, name?: string) {
     const pi = this.chats.get(tile);
     if (!pi || this.openingLanes.has(tile)) return;
+    if (!vscode.workspace.isTrusted) {
+      void vscode.window.showWarningMessage("Trust this workspace before starting an ACP agent.");
+      return;
+    }
     this.openingLanes.add(tile);
     const previousLane = this.activeLanes.get(tile);
     const emptyPi = replaceEmpty && !previousLane ? pi.c.emptySessionKey : undefined;
     try {
-      if (!await configureAcp() || this.disposed || this.chats.get(tile) !== pi || this.activeLanes.get(tile) !== previousLane) return;
+      const profile = name === undefined ? await pickAcpProfile() : acpProfiles().find((p) => p.name === name);
+      if (!profile && name !== undefined) {
+        this.sendProfiles();
+        void vscode.window.showWarningMessage("This ACP profile is no longer configured.");
+      }
+      if (!profile || this.disposed || this.chats.get(tile) !== pi || this.activeLanes.get(tile) !== previousLane) return;
       const key = `acp-${++this.acpTabId}`;
       const inbox = new vscode.EventEmitter<any>();
       const c = new AcpChat({
@@ -168,7 +182,7 @@ class SidebarTiles implements vscode.Disposable {
         if (entry) entry.title = title;
         this.sendLanes(tile);
         this.updateBadge();
-      }, daemonOptions(this.context));
+      }, daemonOptions(this.context), profile);
       const replacedPi = emptyPi && !this.activeLanes.has(tile) && pi.c.emptySessionKey === emptyPi ? emptyPi : undefined;
       this.acpChats.set(key, { c, inbox, tile, title: "New session", replacedPi });
       this.selectLane(tile, key, !!replacedPi);
@@ -179,13 +193,13 @@ class SidebarTiles implements vscode.Disposable {
     }
   }
 
-  private async pickBackend(tile: string, backend: unknown, replaceEmpty: boolean) {
+  private async pickBackend(tile: string, backend: unknown, replaceEmpty: boolean, name?: string) {
     const entry = this.chats.get(tile);
     if (!entry) return;
     const lane = this.activeLanes.get(tile);
     if (backend === "acp") {
-      if (replaceEmpty && lane && this.acpChats.get(lane)?.c.isEmptySession) return this.focusTile(tile);
-      await this.addAcpTab(tile, replaceEmpty);
+      if (name === undefined && replaceEmpty && lane && this.acpChats.get(lane)?.c.isEmptySession) return this.focusTile(tile);
+      await this.addAcpTab(tile, replaceEmpty, name);
     } else if (backend === "pi") {
       if (replaceEmpty && !lane && entry.c.emptySessionKey) return this.focusTile(tile);
       if (replaceEmpty && lane && this.acpChats.get(lane)?.c.isEmptySession) {
@@ -287,6 +301,7 @@ class SidebarTiles implements vscode.Disposable {
     }
     switch (m?.type) {
       case "tiles:ready":
+        this.sendProfiles();
         this.sendLayout();
         for (const tile of this.tiles) if (this.hasAcpTabs(tile.id)) this.sendLanes(tile.id);
         if (this.activeTile) this.focusTile(this.activeTile);
@@ -295,7 +310,10 @@ class SidebarTiles implements vscode.Disposable {
         this.split(String(m.tile));
         break;
       case "tiles:pickBackend":
-        void this.pickBackend(String(m.tile), m.backend, m.replaceEmpty === true);
+        void this.pickBackend(String(m.tile), m.backend, m.replaceEmpty === true, typeof m.profile === "string" ? m.profile : undefined);
+        break;
+      case "tiles:configureAcpProfiles":
+        void vscode.commands.executeCommand("workbench.action.openSettings", "@id:pi.acp.profiles");
         break;
       case "tiles:pickLane":
         this.selectLane(String(m.tile), typeof m.lane === "string" ? m.lane : undefined);
@@ -534,13 +552,20 @@ function acpCwd() {
   return (uri && vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath) ?? workspaceCwd();
 }
 
-async function openAcpPanel(context: vscode.ExtensionContext, detached?: DaemonSession) {
+async function openAcpPanel(context: vscode.ExtensionContext, detached?: DaemonSession, name?: string) {
+  let profile: AcpProfile | undefined;
   try {
-    if (detached && !vscode.workspace.isTrusted) {
+    if (!vscode.workspace.isTrusted) {
       void vscode.window.showWarningMessage("Pi: trust this workspace before reconnecting to an ACP agent.");
       return;
     }
-    if (!detached && !await configureAcp()) return;
+    if (!detached) {
+      profile = name === undefined ? await pickAcpProfile() : acpProfiles().find((p) => p.name === name);
+      if (!profile) {
+        if (name !== undefined) void vscode.window.showWarningMessage("This ACP profile is no longer configured.");
+        return;
+      }
+    }
   } catch (e) {
     void vscode.window.showErrorMessage(`Pi: ${String((e as Error)?.message ?? e)}`);
     return;
@@ -553,7 +578,10 @@ async function openAcpPanel(context: vscode.ExtensionContext, detached?: DaemonS
   panel.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "acp-logo.svg");
   const chat = new AcpChat(panel.webview, cwd, output, (title, busy) => {
     panel.title = `${busy ? "● " : ""}${title}`;
-  }, detached ? { ...daemonOptions(context, true)!, key: detached.key } : daemonOptions(context));
+  }, detached ? { ...daemonOptions(context, true)!, key: detached.key } : daemonOptions(context), profile, detached?.acpBackend, (backend, name) => {
+    if (backend === "pi") openPanel(context);
+    else void openAcpPanel(context, undefined, name);
+  });
   acpPanels.add(chat);
   activeAcp = chat;
   panel.onDidChangeViewState(() => { if (panel.active) activeAcp = chat; });

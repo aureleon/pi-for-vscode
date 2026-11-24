@@ -70,7 +70,12 @@ export interface MountOptions {
   /** An ACP session uses the transcript and composer without Pi actions. */
   acp?: boolean;
   /** Mixed sidebar tiles keep a separate mounted chat for each backend. */
-  backend?: { pick(kind: "pi" | "acp", replaceEmpty?: boolean): void; pickTab(key: string): void; closeTab(key: string): void };
+  backend?: {
+    pick(kind: "pi" | "acp", replaceEmpty?: boolean, profile?: string): void;
+    configure(): void;
+    pickTab(key: string): void;
+    closeTab(key: string): void;
+  };
   autofocus?: boolean;
   logo?: string;
   /** The chat is a tile in the sidebar: the header can split it and close it. */
@@ -207,9 +212,11 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
             <button type="button" class="icon-btn backend-picker" id="btn-backend" aria-haspopup="menu" aria-expanded="false"></button>
             <div class="tb-menu backend-menu hidden" id="backend-menu" role="menu" aria-label="New session backend">
               <button type="button" role="menuitem" data-backend="pi">${I.pi}<span>New Pi Session</span></button>
-              <button type="button" role="menuitem" data-backend="acp">${I.group}<span>New ACP Session</span></button>
+              <div id="backend-profiles" class="backend-profiles" role="presentation"></div>
+              <button type="button" role="menuitem" data-backend="configure">Configure ACP Profiles…</button>
             </div>
           </div>
+          ${opts.acp ? '<span id="acp-profile" class="acp-profile" title="ACP profile">ACP</span>' : ""}
           <button class="icon-btn" id="btn-attach" title="Attach files">${I.attach}</button>
           <button class="icon-btn" id="btn-slash" title="Commands">${I.slash}</button>
           <button class="chip" id="btn-model" title="Select model and effort"><span id="model-name">…</span><span class="chip-level" id="thinking-level"></span></button>
@@ -244,9 +251,31 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     if (restoreFocus) backendButton.focus();
     return true;
   }
-  if (opts.backend) {
+  function renderBackendProfiles(names: string[]) {
+    const focus = backendMenu.contains(document.activeElement);
+    const namesOrSetup = names.length ? names : [undefined];
+    $("backend-profiles").replaceChildren(...namesOrSetup.map((name) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("role", "menuitem");
+      button.dataset.backend = "acp";
+      if (name !== undefined) button.dataset.profile = name;
+      button.innerHTML = I.group;
+      const label = document.createElement("span");
+      label.textContent = name === undefined ? "New ACP Session" : `New ${name} Chat`;
+      button.title = label.textContent;
+      button.append(label);
+      return button;
+    }));
+    if (focus && !backendMenu.contains(document.activeElement)) {
+      backendMenu.querySelector<HTMLButtonElement>('button[data-backend="acp"]')?.focus();
+    }
+  }
+  let openBackendMenu: ((index: number) => void) | undefined;
+  if (opts.backend || ACP) {
     const wrap = $("backend-picker-wrap");
-    const items = [...backendMenu.querySelectorAll<HTMLButtonElement>("button")];
+    const items = () => [...backendMenu.querySelectorAll<HTMLButtonElement>("button")];
+    renderBackendProfiles([]);
     const name = ACP ? "ACP" : "Pi";
     backendButton.innerHTML = ACP ? I.group : I.pi;
     backendButton.title = `Backend: ${name}. Choose a backend for a new session`;
@@ -256,26 +285,38 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
       closeOverlay();
       backendMenu.classList.remove("hidden");
       backendButton.setAttribute("aria-expanded", "true");
-      items[index].focus();
+      items()[index]?.focus();
     };
+    openBackendMenu = open;
     backendButton.addEventListener("click", () => { if (!closeBackendMenu(true)) open(ACP ? 1 : 0); });
     backendButton.addEventListener("keydown", (e) => {
       if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
       e.preventDefault();
-      open(e.key === "ArrowDown" ? 0 : items.length - 1);
+      open(e.key === "ArrowDown" ? 0 : items().length - 1);
     });
-    items.forEach((item) => item.addEventListener("click", () => {
+    backendMenu.addEventListener("click", (e) => {
+      const item = (e.target as Element).closest<HTMLButtonElement>("button[data-backend]");
+      if (!item) return;
       closeBackendMenu(true);
-      opts.backend?.pick(item.dataset.backend === "acp" ? "acp" : "pi", true);
-    }));
+      if (item.dataset.backend === "configure") {
+        if (opts.backend) opts.backend.configure();
+        else post({ type: "configureAcpProfiles" });
+      } else {
+        const backend = item.dataset.backend === "acp" ? "acp" : "pi";
+        const profile = item.dataset.profile;
+        if (opts.backend) opts.backend.pick(backend, true, profile);
+        else post({ type: "pickBackend", backend, profile });
+      }
+    });
     backendMenu.addEventListener("keydown", (e) => {
-      const i = items.indexOf(document.activeElement as HTMLButtonElement);
-      const next = e.key === "ArrowDown" ? (i + 1) % items.length
-        : e.key === "ArrowUp" ? (i + items.length - 1) % items.length
-          : e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : -1;
+      const buttons = items();
+      const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      const next = e.key === "ArrowDown" ? (i + 1) % buttons.length
+        : e.key === "ArrowUp" ? (i + buttons.length - 1) % buttons.length
+          : e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 : -1;
       if (next < 0) return;
       e.preventDefault();
-      items[next].focus();
+      buttons[next]?.focus();
     });
     wrap.addEventListener("focusout", (e) => { if (!wrap.contains(e.relatedTarget as Node | null)) closeBackendMenu(); });
     on(document, "pointerdown", (e) => { if (!wrap.contains(e.target as Node)) closeBackendMenu(); });
@@ -1682,7 +1723,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
     $("tb-history").addEventListener("click", () => post({ type: "builtin", name: "resume", arg: "" }));
     $("tb-new").addEventListener("click", () => {
     if (ACP) {
-      opts.backend?.pick("acp");
+      openBackendMenu?.(1);
       return;
     }
     // Show the new session now; the host sends it when it is ready (at once if a spare process waits).
@@ -3524,6 +3565,16 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
         else style.removeProperty("--acp-custom-accent");
         break;
       }
+      case "acpProfiles":
+        if ((opts.backend || ACP) && Array.isArray(m.names)) renderBackendProfiles(m.names.filter((name: unknown) => typeof name === "string"));
+        break;
+      case "acpProfile":
+        if (ACP && typeof m.name === "string") {
+          const label = $("acp-profile");
+          label.textContent = m.name;
+          label.title = `ACP profile: ${m.name}`;
+        }
+        break;
       case "acpComposer": {
         if (!ACP) break;
         const capabilities: AcpComposer = m.capabilities;
@@ -3576,7 +3627,7 @@ export function mountChat(frame: HTMLElement, vscode: ChatApi, opts: MountOption
           setRunning(false);
           setLoading(false);
           showBanner(`<b>ACP agent stopped</b><pre>${escapeHtml(m.error)}</pre>`, [
-            { label: "Restart", fn: () => post({ type: "restart" }) },
+            { label: m.recoverable ? "Reopen Saved Chat" : "Restart", fn: () => post({ type: "restart" }) },
           ]);
         }
         break;

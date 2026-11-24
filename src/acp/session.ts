@@ -222,7 +222,7 @@ export class AcpSession {
   private fail(e: unknown, command?: string) {
     this.ready = false;
     this.failure = (e as NodeJS.ErrnoException)?.code === "ENOENT" && command
-      ? `Cannot start ${command}. Install the agent or set pi.acp.command to its absolute path.`
+      ? `Cannot start ${command}. Install the agent or use its absolute path in the ACP settings.`
       : String((e as Error)?.message ?? e);
     if ((e as { code?: number })?.code === -32000 && command && /^agy(?:\.exe)?$/i.test(path.basename(command))) {
       this.failure += "\nSign in with agy acp --login, then restart this chat.";

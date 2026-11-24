@@ -238,6 +238,21 @@
           "default": [],
           "description": "Extra CLI arguments passed to `pi --mode rpc` (e.g. [\"--model\", \"sonnet\"])."
         },
+        "pi.acp.profiles": {
+          "type": "object",
+          "scope": "machine",
+          "default": {},
+          "description": "Named ACP agents. Each new ACP chat uses one profile.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["command"],
+            "additionalProperties": false,
+            "properties": {
+              "command": { "type": "string", "minLength": 1 },
+              "args": { "type": "array", "items": { "type": "string" }, "default": [] }
+            }
+          }
+        },
         "pi.acp.command": {
           "type": "string",
           "scope": "machine",

@@ -136,6 +136,17 @@ For Google Antigravity, install `agy`, sign in with `agy acp --login`, and enter
 
 Use **Pi: New ACP Chat** to open an editor tab instead.
 
+Set `pi.acp.profiles` to use several agents at once:
+
+```json
+"pi.acp.profiles": {
+  "Kiro": { "command": "kiro-cli", "args": ["acp", "--agent-engine", "v3"] },
+  "Antigravity": { "command": "agy", "args": ["acp"] }
+}
+```
+
+Choose a profile directly from the composer logo menu. **New ACP Chat** in the Command Palette asks for a profile when more than one is configured. The name appears at the bottom left of the composer. Each chat keeps its selected agent. With no profiles, PiMux uses `pi.acp.command` and `pi.acp.args` as before. To restore agent context from a native daemon checkpoint, the profile must still use the same executable and arguments. Otherwise, you can choose an agent and start without earlier context.
+
 ACP chats support streamed replies, tool status, permission prompts, and Stop. The composer enables image attachments, model and effort settings, slash commands, context usage, and compaction when the agent supports them. Kiro v3 reports context usage and supports manual compaction. `/title` generates a title in a separate ACP session using recent prompt text. ACP chats do not use Pi's session files or extensions.
 
 Set `pi.keepSessionsAlive` to `always` or `remote` to run new ACP chats in the daemon. After reconnecting to the workspace, click **Agent Sessions** in the status bar and select the detached chat. Its transcript, running turn, and pending permission requests come back. ACP permissions always wait for an answer. `pi.detachedDialogs` applies only to Pi.

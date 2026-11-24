@@ -35,6 +35,7 @@ export function mountTiles(vscode: ChatApi, logo: string) {
   document.body.appendChild(root);
   const tiles = new Map<string, Tile>();
   let focused: string | undefined;
+  let acpProfiles = { type: "acpProfiles", names: [] as string[] };
 
   /** A tile's share of the webview API: tagged messages and its own slot of the page state. */
   const apiFor = (id: string, lane?: string): ChatApi => ({
@@ -54,7 +55,10 @@ export function mountTiles(vscode: ChatApi, logo: string) {
   function backend(tile: string) {
     const send = (type: string, lane?: string) => vscode.postMessage({ type, tile, lane });
     return {
-      pick: (backend: "pi" | "acp", replaceEmpty = false) => vscode.postMessage({ type: "tiles:pickBackend", tile, backend, replaceEmpty }),
+      pick: (backend: "pi" | "acp", replaceEmpty = false, profile?: string) => {
+        vscode.postMessage({ type: "tiles:pickBackend", tile, backend, replaceEmpty, profile });
+      },
+      configure: () => send("tiles:configureAcpProfiles"),
       pickTab: (key: string) => {
         const t = tiles.get(tile);
         if (t?.lanes.has(key)) send("tiles:pickLane", key);
@@ -89,6 +93,7 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       backend: backend(t.id),
       tiles: tileActions(t.id),
     });
+    chat.receive(acpProfiles);
     const sash = document.createElement("div");
     sash.className = "tile-sash";
     el.appendChild(sash);
@@ -116,6 +121,7 @@ export function mountTiles(vscode: ChatApi, logo: string) {
       const chat = mountChat(frame, apiFor(t.id, tab.key), {
         header: true, acp: true, autofocus: false, logo, backend: backend(t.id), tiles: tileActions(t.id),
       });
+      chat.receive(acpProfiles);
       chat.setTileCount(tiles.size);
       t.lanes.set(tab.key, { frame, chat });
     }
@@ -461,7 +467,13 @@ export function mountTiles(vscode: ChatApi, logo: string) {
   window.addEventListener("message", (ev) => {
     const m = ev.data;
     if (m?.type === "tiles:layout") layout(m.tiles ?? []);
-    else if (m?.type === "tiles:lanes") {
+    else if (m?.type === "tiles:acpProfiles" && Array.isArray(m.names)) {
+      acpProfiles = { type: "acpProfiles", names: m.names };
+      for (const t of tiles.values()) {
+        t.chat.receive(acpProfiles);
+        for (const lane of t.lanes.values()) lane.chat.receive(acpProfiles);
+      }
+    } else if (m?.type === "tiles:lanes") {
       const t = tiles.get(m.tile);
       if (t) applyLanes(t, m.tabs ?? [], m.active, m.transferDraft === true);
     } else if (m?.type === "tiles:focus") {

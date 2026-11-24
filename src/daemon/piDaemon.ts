@@ -69,6 +69,7 @@ interface AcpEntry {
   key: string;
   cwd: string;
   session: AcpSession;
+  acpBackend?: DaemonAcpAttached["acpBackend"];
   client?: net.Socket;
   startedAt: number;
   detachedAt?: number;
@@ -347,7 +348,7 @@ function attachAcp(s: AcpEntry, sock: net.Socket): AcpEntry | undefined {
   s.client = sock;
   s.detachedAt = undefined;
   log(`acp attach ${s.key}`);
-  const rec: DaemonAcpAttached = { type: "acp_attached", key: s.key };
+  const rec: DaemonAcpAttached = { type: "acp_attached", key: s.key, acpBackend: s.acpBackend };
   sock.write(JSON.stringify(rec) + "\n");
   s.session.snapshot();
   return s;
@@ -364,7 +365,8 @@ function openAcp(op: Extract<DaemonOp, { op: "acp_open" }>, sock: net.Socket): A
   try {
     const post = (msg: AcpOutput) => { s?.client?.write(JSON.stringify(msg) + "\n"); };
     const session = new AcpSession({ cwd, post, log: sessionLog });
-    s = { key, cwd, session, startedAt: Date.now() };
+    const name = typeof op.acpBackend?.name === "string" ? op.acpBackend.name.trim().slice(0, 80) : "";
+    s = { key, cwd, session, startedAt: Date.now(), acpBackend: name ? { name } : undefined };
   } catch (err) {
     acpAttachError(sock, err instanceof Error ? err.message : String(err));
     return undefined;
@@ -421,7 +423,7 @@ function listing(): DaemonList {
         waiting: s.dialogs.size, attached: !!s.client, detachedAt: s.detachedAt, startedAt: s.startedAt,
       })),
       ...[...acpSessions.values()].map((s) => ({
-        key: s.key, backend: "acp" as const, cwd: s.cwd, name: s.session.title, busy: s.session.hasWork,
+        key: s.key, backend: "acp" as const, acpBackend: s.acpBackend, cwd: s.cwd, name: s.session.title, busy: s.session.hasWork,
         waiting: s.session.waiting, failed: s.session.failed, attached: !!s.client, detachedAt: s.detachedAt, startedAt: s.startedAt,
       })),
     ],

@@ -1,5 +1,6 @@
 import * as os from "node:os";
 import * as path from "node:path";
+import type { AcpBackend } from "../acp/config";
 
 /** Version of the records between the extension and the daemon. A daemon with another version is not used. */
 export const PROTOCOL = 5;
@@ -32,7 +33,7 @@ export type DaemonOp =
     /** Take the session from the client that has it (the user opened it here). Without it, such an open is refused. */
     takeover?: boolean;
   }
-  | { op: "acp_open"; key: string; command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv }
+  | { op: "acp_open"; key: string; command: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv; acpBackend?: AcpBackend }
   | { op: "acp_attach"; key: string }
   | { op: "list" }
   | { op: "kill" | "stop"; key: string }
@@ -52,6 +53,7 @@ export interface DaemonSession {
   key: string;
   /** Pi sessions omit this field. */
   backend?: "pi" | "acp";
+  acpBackend?: AcpBackend;
   observers?: number;
   canRestoreContext?: boolean;
   pid?: number;
@@ -105,6 +107,7 @@ export interface DaemonAttached {
 export interface DaemonAcpAttached {
   type: "acp_attached";
   key: string;
+  acpBackend?: AcpBackend;
 }
 
 export interface DaemonAcpAttachError {

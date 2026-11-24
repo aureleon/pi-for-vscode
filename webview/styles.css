@@ -451,6 +451,8 @@ img.tool-image:not([src]):not([height]) { width: calc(100% - 12px); height: 200p
 .input-hl .md-shell { color: var(--vscode-textPreformat-foreground, #d7ba7d); }
 #input::placeholder { color: var(--vscode-input-placeholderForeground); }
 .toolbar { display: flex; align-items: center; gap: 4px; padding: 4px 6px 6px; border-top: 1px solid var(--border); }
+.acp-profile { min-width: 0; max-width: 34%; margin-inline-end: 4px; color: var(--muted); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spacer { flex: 1; }
 .chip {
   display: inline-flex; align-items: center; gap: 4px; border: none; border-radius: 12px; padding: 2px 9px; cursor: pointer;
@@ -792,8 +794,11 @@ button.lm-twisty:hover { background: var(--vscode-toolbar-hoverBackground); colo
   outline: none; background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
   color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground));
 }
-.tb-menu.backend-menu { top: auto; right: auto; left: 0; bottom: calc(100% + 4px); min-width: max-content; }
-.backend-menu button { display: flex; align-items: center; gap: 8px; }
+.tb-menu.backend-menu { top: auto; right: auto; left: 0; bottom: calc(100% + 4px); width: max-content; min-width: 0;
+  max-width: min(240px, calc(100vw - 36px)); max-height: min(280px, 50vh); overflow-y: auto; }
+.backend-profiles { display: flex; flex-direction: column; margin-block: 3px; padding-block: 3px; border-block: 1px solid var(--border); }
+.backend-menu button { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
+.backend-menu button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .backend-menu svg { width: 16px; height: 16px; flex: none; }
 .chat-frame.acp .tb-menu button[aria-disabled="true"] {
   color: var(--vscode-disabledForeground, var(--muted)); cursor: default;

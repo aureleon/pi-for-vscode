@@ -5,6 +5,8 @@ import { connectDaemon } from "../daemon/client";
 import { lineSplitter, type DaemonOp } from "../daemon/protocol";
 import { openPath } from "../openPath";
 import { getShellEnv } from "../shellEnv";
+import { acpFingerprint, acpProfiles, pickAcpProfile, type AcpBackend, type AcpProfile } from "./config";
+import type { DaemonAcpAttached } from "../daemon/protocol";
 import { AcpSession } from "./session";
 import { MAX_IMAGE_BYTES, MAX_IMAGE_TOTAL, type AcpComposer, type AcpInput, type AcpOutput, type PermissionRequest } from "./sessionProtocol";
 
@@ -23,6 +25,7 @@ export class AcpChat implements vscode.Disposable {
   private disposed = false;
   private connecting = false;
   private connectionError?: string;
+  private recovery?: { canRestoreContext?: boolean };
   private title = "New session";
   private composer?: AcpComposer;
   private daemonKey?: string;
@@ -39,13 +42,19 @@ export class AcpChat implements vscode.Disposable {
     private readonly output: vscode.OutputChannel,
     private readonly setTitle: (title: string, busy: boolean, key?: string) => void,
     private readonly daemon?: { script: string; key?: string },
+    private profile?: AcpProfile,
+    private backend?: AcpBackend,
+    private readonly newChat?: (backend: "pi" | "acp", name?: string) => void,
   ) {
     this.listeners = [
       webview.onDidReceiveMessage((m) => {
         void this.onMessage(m).catch((e) => this.post({ type: "error", message: String(e?.message ?? e) }));
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration("pi.acp.accentColor")) this.sendAccent();
+        if (e.affectsConfiguration("pi.acp")) {
+          this.sendAccent();
+          this.sendProfiles();
+        }
       }),
     ];
   }
@@ -62,19 +71,42 @@ export class AcpChat implements vscode.Disposable {
   private async onMessage(m: any) {
     switch (m?.type) {
       case "ready":
-        this.sendAccent();
+        this.sendProfile();
+        this.sendProfiles();
         if (this.local || this.attached) this.send({ type: "ready" });
         else if (this.connectionError) this.post({ type: "acpStatus", ready: false, error: this.connectionError });
         else await this.start();
         break;
+      case "pickBackend":
+        if (m.backend === "pi" || m.backend === "acp") {
+          this.newChat?.(m.backend, typeof m.profile === "string" ? m.profile : undefined);
+        }
+        break;
+      case "configureAcpProfiles":
+        if (this.newChat) await vscode.commands.executeCommand("workbench.action.openSettings", "@id:pi.acp.profiles");
+        break;
       case "restart":
         if (this.connectionError) await this.start();
-        else if (this.local?.failed) {
-          const cfg = vscode.workspace.getConfiguration("pi");
-          const command = cfg.get<string>("acp.command", "").trim();
-          if (!command) throw new Error("Set pi.acp.command to the ACP executable, then restart this chat.");
-          const env = await getShellEnv(cfg.get<boolean>("useLoginShellEnv", true));
-          if (!this.disposed) await this.local.start(command, cfg.get<string[]>("acp.args", []), env);
+        else if (this.recovery && this.daemon) {
+          const fresh = "Start Without Earlier Context";
+          const restore = "Restore Agent Context";
+          if (!vscode.workspace.isTrusted) break;
+          const candidates = this.profile ? [this.profile, ...acpProfiles()] : acpProfiles();
+          const saved = candidates.find((p) => this.backend?.name === p.name && this.backend.fingerprint === acpFingerprint(p));
+          const canRestore = !!saved && this.recovery.canRestoreContext;
+          const choice = await vscode.window.showQuickPick(canRestore ? [fresh, restore] : [fresh], {
+            placeHolder: "Reopen the saved chat. No prompt will be resent.",
+          });
+          if (!choice) break;
+          const profile = saved ?? await pickAcpProfile(true);
+          if (!profile) break;
+          const launch = await this.agentConfig(profile);
+          if (this.attached) this.socket?.write(JSON.stringify({
+            type: "acp_relaunch", ...launch, restoreContext: choice === restore,
+          }) + "\n");
+        } else if (this.local?.failed) {
+          const { command, args, env } = await this.agentConfig();
+          if (!this.disposed) await this.local.start(command, args, env);
         } else this.send({ type: "restart" });
         break;
       case "rename":
@@ -175,6 +207,22 @@ export class AcpChat implements vscode.Disposable {
     this.post({ type: "acpAccent", color });
   }
 
+  private sendProfiles() {
+    if (this.newChat) this.post({ type: "acpProfiles", names: acpProfiles().map((p) => p.name) });
+  }
+
+  private sendProfile() {
+    this.post({ type: "acpProfile", name: this.backend?.name ?? this.profile?.name ?? "ACP" });
+    this.sendAccent();
+  }
+
+  private async agentConfig(profile = this.profile) {
+    if (!profile) throw new Error("Choose an ACP profile before starting the agent.");
+    const cfg = vscode.workspace.getConfiguration("pi");
+    const env = await getShellEnv(cfg.get<boolean>("useLoginShellEnv", true));
+    return { command: profile.command, args: profile.args, env, acpBackend: { name: profile.name } };
+  }
+
   private async start() {
     if (this.connecting || this.local || this.socket || this.disposed) return;
     this.connecting = true;
@@ -188,17 +236,13 @@ export class AcpChat implements vscode.Disposable {
         await this.connect(this.daemon.script, { op: "acp_attach", key: existingKey });
         return;
       }
-      const cfg = vscode.workspace.getConfiguration("pi");
-      const command = cfg.get<string>("acp.command", "").trim();
-      if (!command) throw new Error("Set pi.acp.command to the ACP executable, then restart this chat.");
-      const args = cfg.get<string[]>("acp.args", []);
-      const env = await getShellEnv(cfg.get<boolean>("useLoginShellEnv", true));
+      const launch = await this.agentConfig();
       if (this.disposed) return;
       if (this.daemon) {
-        await this.connect(this.daemon.script, { op: "acp_open", key: this.newKey, command, args, env, cwd: this.cwd });
+        await this.connect(this.daemon.script, { op: "acp_open", key: this.newKey, ...launch, cwd: this.cwd });
       } else {
         this.local = new AcpSession({ cwd: this.cwd, post: (msg) => this.receive(msg), log: (text) => this.output.appendLine(text) });
-        await this.local.start(command, args, env);
+        await this.local.start(launch.command, launch.args, launch.env);
       }
     } catch (e) {
       this.fail(String((e as Error)?.message ?? e));
@@ -224,13 +268,15 @@ export class AcpChat implements vscode.Disposable {
       if (!this.connectionError) this.fail("Disconnected from the ACP session daemon. Use Restart to reconnect.");
     });
     sock.on("data", lineSplitter((line) => {
-      let m: AcpOutput | { type: "acp_attached"; key: string } | { type: "acp_attachError"; message: string };
+      let m: AcpOutput | DaemonAcpAttached | { type: "acp_attachError"; message: string };
       try { m = JSON.parse(line); } catch { return; }
       if (this.disposed) return;
       if (m.type === "acp_attached") {
         clearTimeout(timeout);
         this.attached = true;
         this.daemonKey = m.key;
+        this.backend = m.acpBackend ?? this.backend;
+        this.sendProfile();
       } else if (m.type === "acp_attachError") {
         this.fail(m.message);
         sock.destroy();
@@ -252,6 +298,11 @@ export class AcpChat implements vscode.Disposable {
   private receive(m: AcpOutput) {
     if (this.disposed) return;
     switch (m.type) {
+      case "acpStatus":
+        this.recovery = m.recoverable ? m : undefined;
+        if (!m.ready && m.error) this.dismissPermissions();
+        this.post(m);
+        break;
       case "init":
         this.used ||= m.messages.length > 0;
         this.post(m);
@@ -259,6 +310,10 @@ export class AcpChat implements vscode.Disposable {
       case "acpOperation":
         this.operation = !!m.message;
         this.post(m);
+        break;
+      case "acpBackend":
+        this.backend = m.acpBackend;
+        this.sendProfile();
         break;
       case "acpComposer":
         this.composer = m.capabilities;

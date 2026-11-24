@@ -131,7 +131,7 @@ export function initDaemonUi(context: vscode.ExtensionContext, host: DaemonUiHos
   };
 
   const describe = (s: DaemonSession) => [
-    s.backend === "acp" ? "ACP" : "Pi",
+    s.backend === "acp" ? s.acpBackend?.name || "ACP" : "Pi",
     s.waiting ? "waits for your answer" : s.busy ? "working" : s.failed ? "agent stopped" : "idle",
     s.attached ? "in another VS Code window" : `detached for ${duration(Date.now() - (s.detachedAt ?? Date.now()))}`,
     here(s.cwd) ? "" : s.cwd,

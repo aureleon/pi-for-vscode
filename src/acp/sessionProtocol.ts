@@ -1,3 +1,5 @@
+import type { AcpBackend } from "./config";
+
 export interface AcpImage {
   type: "image";
   mimeType: string;
@@ -42,12 +44,13 @@ export interface PermissionRequest {
 }
 
 export type AcpOutput =
+  | { type: "acpBackend"; acpBackend: AcpBackend }
   | { type: "acpComposer"; capabilities: AcpComposer; choices: AcpConfigChoice[] }
   | { type: "acpOperation"; message: string }
   | { type: "permission"; id: string; request: PermissionRequest }
   | { type: "permissionClosed"; id: string }
   | { type: "acpTitle"; title: string; busy: boolean }
-  | { type: "acpStatus"; ready: boolean; error?: string }
+  | { type: "acpStatus"; ready: boolean; error?: string; recoverable?: boolean; canRestoreContext?: boolean }
   | { type: "starting" }
   | { type: "init"; cwd: string; messages: unknown[]; state: { sessionName: string; isStreaming: boolean } }
   | { type: "state"; state: { sessionName: string } }
