@@ -57,7 +57,7 @@ The UI looks like Claude Code for VS Code and uses the VS Code theme.
 
 ## Writing style (README, UI text, comments)
 
-Use plain, Simplified Technical English (see the `simple-english` skill if you have it): short sentences, active voice, simple tenses, one word for one meaning. The README has short sections with one-line items. Put implementation details in its **Notes** section.
+Use plain, Simplified Technical English (see the `simple-english` skill if you have it): short sentences, active voice, simple tenses, one word for one meaning. The README has short sections with one-line items. Put the full feature list in `docs/features.md` and implementation details in `docs/notes.md`.
 
 ## Commits
 

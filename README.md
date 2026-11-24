@@ -1,125 +1,48 @@
 # PiMux for VS Code
 
-Use the [Pi coding agent](https://pi.dev) in the VS Code sidebar, in a UI like Claude Code for VS Code.
-
-The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the workspace folder. Your Pi setup applies without changes: settings, models, auth, **extensions**, skills, prompt templates, MCP adapters, and sessions.
+Use the [Pi coding agent](https://pi.dev) and ACP agents (Kiro, Antigravity, and others) in the VS Code sidebar. Sessions can keep running when VS Code closes or Remote-SSH disconnects.
 
 <p align="center"><img src="media/screenshots/chat.png" width="440" alt="A chat in the sidebar: session tabs, tool cards with a diff, and the composer"></p>
+
+## Requirements
+
+- VS Code 1.90 or later.
+- For Pi chats: `pi` installed (`npm i -g @earendil-works/pi-coding-agent`) and set up. Run `pi` once and log in.
+- For ACP chats: an ACP agent installed and signed in, for example `kiro-cli` or `agy`.
+
+The extension starts your installed `pi` in RPC mode. Your Pi settings, models, auth, extensions, skills, prompt templates, and sessions apply without changes.
 
 ## Features
 
 ### Chat
-- Replies, thinking and tool calls stream in as a timeline. Tool cards show input and output, and edits show a diff.
-- Hover over a message or tool call to see its time. Tool calls also show how long they ran.
-- Tool calls that a tool makes (for example from codemode or a subagent tool) show under that tool's card.
-- Cards of extension tools also show the tool's `details` (DATA), including partial results while the tool runs.
-- Markdown renders in replies and in your sent prompts. It is also styled live as you type.
-- When the composer is empty and the last message is from the model, the send button changes to Continue. It sends `pi.continuePrompt`.
+- Replies, thinking, and tool calls stream in as a timeline. Tool cards show input, output, and diffs.
 - While Pi works: <kbd>Enter</kbd> steers, <kbd>⌥ Enter</kbd> queues a follow-up, <kbd>Esc</kbd> stops.
-- Queued messages show at the end of the chat. Drag to reorder them, or remove or send one now.
-- `/` for commands, `@` for file paths, `!cmd` for shell commands. Paste, drop or attach files. Images go to the model as images; other files go as `@path` references.
-- <kbd>⌘F</kbd> (<kbd>Ctrl+F</kbd>) finds text in the chat. <kbd>Enter</kbd> and <kbd>⇧ Enter</kbd> go to the next and the previous match. A match in collapsed text (thinking, a long prompt, a tool output) opens it. Also in the ⋯ menu and as **Pi: Find in Chat**.
+- `/` for commands, `@` for file paths, `!cmd` for shell commands. Paste, drop, or attach files and images.
+- <kbd>⌘F</kbd> (<kbd>Ctrl+F</kbd>) finds text in the chat.
 - The context pill shows how full the context is. Click it to compact.
-- A π with a count shows next to the context pill while sessions run inside the chat (for example subagents or workflow agents). Click it to see them.
-
-### Models
-- The model menu lists the models in Pi's `enabledModels`, or all models if the setting is empty.
-- The effort (thinking level) slider is at the bottom of the same menu.
-
-<img src="media/screenshots/models.png" width="440" alt="The model menu with the effort slider">
+- The model menu lists your enabled models and has the effort slider.
+- <kbd>⌘⌥L</kbd> adds the editor selection to the chat. Click a file path in the chat to open it.
 
 ### Sessions
-- Resume or fork from a searchable list. Archive a session to hide it from the list.
-- Rename the current session: double-click its name in the sidebar header, or use *Rename Session…* (in the sidebar's *More Actions* menu, the tab's overflow menu, or the command palette). `/name <name>` also works.
-- Rename any session in the session list with the pencil button or F2.
-- Short session titles: turn on `pi.autoTitle`, and a small model names each new session from its first prompt (for example `Fix flaky tab titles`).
-- Give a session that you have open a new title from its prompts: *Generate Session Title* (in the same menus as *Rename Session…*) or `/title`. It works without `pi.autoTitle` and replaces the name.
-- Forks and sessions that extensions start (for example subagents) are nested under the session they came from. They are collapsed until you expand them.
-- Sessions run in parallel. If you start a new session or open another one while Pi works, the busy session continues in the background. It shows below the current session in the session list, and a notification tells you when it finishes or needs an answer.
-- The session daemon can keep Pi and ACP sessions running on the host when VS Code closes or Remote-SSH disconnects (`pi.keepSessionsAlive`). Pi tabs restore as before. Reconnect to ACP sessions from **Agent Sessions** in the status bar.
-- **Agent Sessions** lists detached sessions. Select one to reconnect, or use its Stop button to end it.
-- `pi.detachedDialogs` sets what happens when a detached session asks a question: it waits for you (default), the question is cancelled, or the recommended option is accepted.
-- The session list shows the current session first, then the sessions that run in the background, then the other sessions by date. Nested sessions stay under their parent session in each group.
-- *View* (the eye button in the session list, or *Pi: View Session File*) opens a session read-only in a new tab. It starts no pi process and shows new messages as pi writes them. Use it to follow a session that an extension runs, for example a subagent.
-- `/tree` moves between branches of a session. It can summarize the branch you leave and label entries.
-- `/tree` can also start a new session from an entry ("New", Ctrl+Enter). The current session does not change.
-- The last session reopens automatically. *Open in New Tab* starts another chat.
-- The sidebar header shows a tab for each session that is open in the sidebar. + starts a session in a new tab, and a session that you open from the session list gets a tab too. A working tab shows the π spinner; a tab that finished in the background shows a dot. Close a tab with its × or a middle click. The tabs come back when VS Code starts again.
-- Drag a tab to reorder it. A tab is as wide as its title and gets narrower only when the tabs do not fit.
-- Tabs that you used last switch at once: they keep their pi process (`pi.warmTabs`, 3 by default). + also shows a new session at once. Its tab stays when you go back to another tab, also before you send a message.
-- When VS Code starts, each tab shows its session from the session file at once, while pi starts.
-- A session is open in one chat only. If you open a session that another chat has open, that chat comes to the front. The session list shows such sessions as "other chat".
+- Resume, fork, rename, or archive sessions from a searchable list.
+- Sessions run in parallel. A busy session continues in the background and notifies you when it finishes.
+- Each open session has a tab in the sidebar header. Drag tabs to reorder them. Tabs come back when VS Code restarts.
+- `/tree` moves between branches of a session.
+- `pi.autoTitle` names new sessions from the first prompt. `/title` does it on request.
+- *View* opens a session file read-only, for example to follow a subagent.
+- *Continue Session in Terminal* moves the session into the pi TUI and back.
 
-### Tiles
+### Tiles and tabs
 
 ![Two tiles side by side: a finished session and a session that works, with a queued message and a todo widget](media/screenshots/tiles.png)
 
-- Split the sidebar into up to 4 chats with the split button in the header. Each tile has its own session tabs and runs its own sessions. The new tile shows a new session at once: it takes the tile's spare process.
-- Tiles stack top to bottom, or sit side by side when the sidebar is wide enough. All tiles have the same size after a split or a close. Drag the line between two tiles to resize them; double-click it to make all tiles the same size again.
-- Drag a tab out of its tabs into the chat to open it in a new tile, on the half where you drop it. Drag it to another tile's tabs or middle to move it there, or to that tile's edge for a new tile next to it. The label at the pointer says what the drop does.
-- Drag a tile by the empty part of its header: to the middle of another tile to merge the two into tabs, or to its edge to move the tile.
-- Close a tile with *Close Tile* in its More Actions menu, or by closing its last tab, or by dragging its last tab away.
-- A tab that is still loading can be closed or moved. A close stops the load; a move takes the loading session along.
-- The tiles, their tabs and their sizes come back when VS Code starts again.
-
-### Chat tabs
-- *Open in New Tab* opens a chat in the editor area. In the session list, the split button, <kbd>⌥</kbd>-click or <kbd>⌥↵</kbd> opens a session in a new chat tab to the side.
-- Chat tabs and their sessions come back after a window reload.
-- A chat tab whose session works shows ● before its title. The Pi item in the status bar counts the working sessions in all chats. Click it to go to one.
-- Narrow chats use a compact layout.
+- Split the sidebar into up to 4 chats. Each tile has its own session tabs.
+- Drag a tab into the chat to open it in a new tile. Drag a tile onto another tile to merge them.
+- *Open in New Tab* opens a chat in the editor area.
 
 ### Pi extensions
-- Extension commands, dialogs, notifications, status text and widgets work in the chat. Minimize a widget to its first line with its chevron button.
-- The core uses only pi's RPC protocol. Support for one pi extension is a separate integration in `integrations/`.
-- **pi-btw:** `/btw` and the other pi-btw commands open a side panel next to the chat. The panel shows the side thread, restores it from the session, and has Inject, Summarize and Clear buttons. A toggle button shows when the session loads pi-btw. See [integrations/pi-btw](integrations/pi-btw/README.md).
-
-### Terminal
-- *Pi: Open in Terminal* starts a new pi TUI session.
-- *Continue Session in Terminal* moves the current session into the TUI. The chat pauses and picks the session back up when you close the terminal.
-
-### Editor
-- <kbd>⌘⌥L</kbd> adds the selection to the chat. The Explorer context menu adds a file.
-- Click a file path in the chat to open it.
-
-## Notes
-
-- **Nested sessions** use the `parentSession` field of the session header, the same as pi's `/resume`. A session whose parent is not in the list shows at the top level.
-- **Times** come from the `timestamp` of each message. pi does not save when a tool starts, so after a reload a tool call shows when it finished, and no run time.
-- **Nested tool calls** come from `parentToolCallId` on `tool_execution_*` events. After a reload, pi keeps only a record of them (`nestedCalls`: names, arguments, status, errors), so their outputs are not shown.
-- **The session viewer** reads the session file and checks it for changes every second. It shows the branch of the last entry in the file.
-- **Renaming from the session list** goes through the pi process that has the session open, in any chat. If no process has it open, the extension adds the name to the session file, the same as a rename in the pi TUI's `/resume` list. A session that is open in the terminal or runs as a subagent can't be renamed until it is free.
-- **Archived sessions** stay on disk. Only the list in VS Code hides them, so the pi TUI can still resume them.
-- **`/tree`** needs a command that RPC mode does not have. The extension adds it by loading a small bridge extension into pi (`dist/pi-bridge.mjs`).
-- **Queue edits** take the whole queue out of pi and queue it again, because RPC mode can only add to the queue or clear it. Images in queued messages are not kept. **Send now** stops the run and sends the message as the next run.
-- **Factory widgets** (for example todo lists and agent bars) are dropped by RPC mode. A workaround renders them to text lines at the width of the chat view and sends them again when they change (at most 4 times a second).
-- **Running child sessions** are not in RPC events. A workaround counts the prompts that run on other agent sessions in the process and reports them, with their session files, in a hidden status. The titles come from the session files. Sessions that an extension keeps only in memory have no title. pi-btw side threads also count while they answer.
-- **Tiles** are chats in one webview: `mountChat` (webview/chat.ts) builds each one in its own element. They are not iframes, because VS Code ignores keys from nested frames, so its shortcuts would not work in a tile.
-- **Session tabs** keep the pi process of up to `pi.warmTabs` idle tabs per tile. A few seconds after a tab opens, the tile starts processes for the tabs next to it, one at a time. Other idle tabs have no process; opening one switches the tile's process to its file (about a second). A busy tab that you leave keeps its process, the same as a background session. A new session that you leave before its first message has no file, so its tab closes.
-- **Kept views:** the chat keeps the transcripts of the last 8 tabs that you left in the page (hidden). A click on such a tab shows it at once, at the same scroll position. pi's snapshot follows; if it has the same messages, nothing is drawn again. A session that works is drawn again from pi when you come back.
-- **Session titles** (`pi.autoTitle`) come from the bridge extension. It sends the first prompt (4000 characters at most) to the title model and saves the answer as the session name, so the pi TUI shows it too. It does not replace a name that the session has. The setting applies to pi processes that start after you change it.
-- **A spare process** with a new, empty session waits in each tile while `pi.warmTabs` is more than 0, so + needs no wait. If you close the tab of a new session before its first message, its process becomes the spare again.
-- **New sessions without a message** have no file: pi writes it with the first message. Their tab keeps the session id and opens it again with `--session-id`.
-- **Startup:** the chat starts pi as soon as the sidebar opens, not when the webview is ready, and the login shell environment is read when the extension activates. Until pi answers, the chat shows the session from its file (the same reader as the session viewer). Tabs get their own processes only after all chats have started.
-- **Moving a tab** to another tile moves its pi process too, so nothing restarts and only one process has the file. A session that works moves with its turn, open dialogs, queued messages, widgets and the running child sessions; the other tile shows the turn from where it is. The same goes for merging tiles.
-- **The session daemon** runs apart from the extension host. In a Remote-SSH workspace, it runs on the remote host. The client reuses the daemon on `~/.pi/vscode-daemon/daemon.sock` (a named pipe on Windows with the legacy daemon). It does not replace a running daemon just because the extension was updated. Pi keeps its own session files.
-- **The daemon and logout:** a host that stops all processes of a user at logout (systemd `KillUserProcesses=yes`) also stops the daemon. Run `loginctl enable-linger` on such a host.
-- **One chat per session:** a chat that would open a session that another chat has open (for example after a reload) starts a new session. A session that runs in a chat's background stays in that chat.
-- **Terminal hand-off** stops the chat's pi process while the terminal has the session, so that two processes never write to the same file.
-- **Integrations** add support for one pi extension beyond pi's RPC protocol. Each one is in `integrations/<name>/`, and `integrations/host.ts` and `integrations/web.ts` list them. An integration is active only in sessions that load its pi extension. It can also load a small pi extension of its own (`integrations/<name>/pi.ts`), for example the pi-btw workaround for notes that arrive during a run. See [integrations/README.md](integrations/README.md).
-- **Workarounds** fill gaps in pi's RPC mode for every extension, for example factory widgets and running child sessions. Each one is in `workarounds/<name>/` and loads its own small pi extension. The child-runs workaround uses pi internals; if a pi update breaks one, turn it off with `pi.workarounds`. See [workarounds/README.md](workarounds/README.md).
-
-## Built-in slash commands
-
-These commands come from the pi TUI. The extension does them itself, because RPC mode does not have them. `/new`, `/resume`, `/model`, `/thinking`, `/compact [instructions]`, `/name <name>`, `/title`, `/fork`, `/clone`, `/session`, `/copy`, `/export [path]`, `/restart` (restarts pi and reloads extensions).
-
-If an extension registers a command with the same name, the extension command runs.
-
-## Requirements
-
-- `pi` installed (`npm i -g @earendil-works/pi-coding-agent`) and set up (you ran `pi` once and logged in).
-- VS Code 1.90 or later.
-
-VS Code apps opened from the Dock often do not get your shell `PATH`. For this reason, the extension reads the environment of your login shell (mise, nvm, Homebrew, and exported API keys) before it starts pi. To turn this off, use `pi.useLoginShellEnv`, or set `pi.path` to the full path of `pi`.
+- Extension commands, dialogs, notifications, status text, and widgets work in the chat.
+- `/btw` and the other pi-btw commands open a side panel. See [integrations/pi-btw](integrations/pi-btw/README.md).
 
 ## ACP chats
 
@@ -128,15 +51,7 @@ VS Code apps opened from the Dock often do not get your shell `PATH`. For this r
   <img src="media/screenshots/acp-models.png" width="380" alt="The inline ACP picker with Model and Mode tabs and an effort slider">
 </p>
 
-Click the Pi logo or group icon at the far left of the sidebar composer toolbar to choose a backend. If the session is empty, the tab switches backends and keeps your draft. Otherwise, the picker opens a new tab. Use **+** in the header to start another session with the same backend. Click a session tab to switch back to it. ACP tabs have a colored dot. Sessions keep working when you switch away. Double-click the active tab title to rename it, or use **Pi: Rename Session…**.
-
-The first time you choose ACP, enter an executable and its arguments. Pi saves them in VS Code settings. Change `pi.acp.command` and `pi.acp.args` later to use a different agent for new sessions.
-
-For Google Antigravity, install `agy`, sign in with `agy acp --login`, and enter `agy` and `["acp"]` in setup. If VS Code cannot find the executable, use its absolute path. For Remote-SSH, install the agent on the remote host. ACP chats need a trusted workspace.
-
-Use **Pi: New ACP Chat** to open an editor tab instead.
-
-Set `pi.acp.profiles` to use several agents at once:
+Add your agents as profiles in VS Code settings:
 
 ```json
 "pi.acp.profiles": {
@@ -145,74 +60,80 @@ Set `pi.acp.profiles` to use several agents at once:
 }
 ```
 
-Set `accentColor` to `#RGB` or `#RRGGBB` to color that profile’s chat. Profiles without a color use `pi.acp.accentColor` or the theme. High-contrast themes always use theme colors.
+- Click the logo at the left of the composer toolbar and choose a profile. Each chat keeps its agent, so you can run several agents side by side.
+- The profile name shows next to the logo. `accentColor` (optional) colors that profile's chat.
+- **Pi: New ACP Chat** opens an ACP chat in an editor tab.
+- With no profiles, the first ACP chat asks for an executable and its arguments.
+- ACP chats support streamed replies, tool status, permission prompts, and Stop. Images, model and effort settings, slash commands, context usage, and compaction work when the agent supports them.
+- ACP chats need a trusted workspace. For Remote-SSH, install the agent on the remote host.
+- ACP chats do not use Pi's session files or extensions.
 
-Choose a profile directly from the composer logo menu. **New ACP Chat** in the Command Palette asks for a profile when more than one is configured. The name appears at the bottom left of the composer. Each chat keeps its selected agent. With no profiles, PiMux uses `pi.acp.command` and `pi.acp.args` as before. To restore agent context from a native daemon checkpoint, the profile must still use the same executable and arguments. Otherwise, you can choose an agent and start without earlier context.
+## Keep sessions alive
 
-ACP chats support streamed replies, tool status, permission prompts, and Stop. The composer enables image attachments, model and effort settings, slash commands, context usage, and compaction when the agent supports them. Kiro v3 reports context usage and supports manual compaction. `/title` generates a title in a separate ACP session using recent prompt text. ACP chats do not use Pi's session files or extensions.
+Set `pi.keepSessionsAlive` to `always` or `remote`. Sessions then run in a daemon apart from VS Code.
 
-Set `pi.keepSessionsAlive` to `always` or `remote` to run new ACP chats in the daemon. After reconnecting to the workspace, click **Agent Sessions** in the status bar and select the detached chat. Its transcript, running turn, and pending permission requests come back. ACP permissions always wait for an answer. `pi.detachedDialogs` applies only to Pi.
+- Pi tabs restore as before. A busy Pi session finishes its run without a window.
+- Click **Agent Sessions** in the status bar to reconnect to a detached session or to stop it.
+- An ACP chat comes back with its transcript, its running turn, and its pending permission requests. ACP permissions always wait for your answer.
+- `pi.detachedDialogs` sets what a detached Pi session does with a question: wait, cancel it, or accept the recommended option.
 
-Closing an ACP editor tab detaches it. Closing an ACP session tab or tile in the sidebar removes it. With the native daemon, Stop in Agent Sessions keeps the saved chat. Use Remove to delete it. Without keep-alive, closing the chat stops its process. The legacy daemon keeps ACP history in memory. The native daemon also saves recent messages on disk.
+## pimuxd (preview)
 
-## Native daemon preview
-
-`pimuxd` runs Pi and ACP sessions on macOS arm64 and Linux x86-64. The standalone archive contains one binary. The daemon talks directly to your installed Pi or ACP agent. The daemon itself does not need Node.js or VS Code.
+`pimuxd` is the native session daemon, for macOS arm64 and Linux x86-64. It is one binary and needs neither Node.js nor VS Code. Start sessions over SSH, then attach from VS Code.
 
 ```sh
-./pimuxd start
-./pimuxd acp open -- kiro-cli acp --agent-engine v3
-./pimuxd sessions
-./pimuxd logs SESSION_ID
-./pimuxd inspect SESSION_ID
-./pimuxd stop SESSION_ID
+pimuxd start                                        # or `serve` for the foreground
+pimuxd acp open -- kiro-cli acp --agent-engine v3   # start an agent in this directory
+pimuxd sessions
+pimuxd logs SESSION_ID
+pimuxd stop SESSION_ID                              # keeps the saved chat
+pimuxd forget SESSION_ID                            # deletes the saved chat
+pimuxd shutdown
 ```
 
-`acp open` starts and detaches an agent in the current directory. It prints the session ID. Open the same directory in VS Code and select the session in **Agent Sessions** to chat.
-
-`logs` shows daemon lifecycle events. `inspect` shows saved ACP messages, which can contain private data. `stop` stops the agent and keeps its saved ACP history. `forget` removes that history. `shutdown` refuses while agents are running. `shutdown --force` interrupts them but preserves ACP checkpoints. Use `serve` instead of `start` to run the daemon in the foreground.
-
-To use it from VS Code, enable `pi.keepSessionsAlive`. VS Code attaches to a compatible daemon that is already running. Set `pi.experimental.nativeDaemon` to start the bundled native daemon when none is running, or set `pi.daemonPath` to use a standalone binary on the host. Existing protocol 3 and 4 daemons still work. Restart an older daemon when its sessions are done to keep profile names on reattach and enable profile-aware recovery. Run `pimuxd shutdown` to stop a protocol 3 daemon after its sessions close, then start `pimuxd` on the same socket. Use `--force` only if you want to stop the agents now and discard any unsaved legacy ACP history.
-
-ACP checkpoints store recent messages and omit images. If the daemon crashes during a turn, Agent Sessions can show the recovered chat with an interruption notice. **Reopen Saved Chat** starts a fresh agent session by default. It offers to load earlier agent context only when the saved session supports it. It never resends a prompt or approval. One client controls a session; read-only socket clients can observe it without sending prompts or answering permissions.
-
-Run `npm run package:native` on each target host to build a target-specific VSIX and a standalone `dist/pimuxd-<target>.tar.gz`. Linux release binaries must be built on a host with a glibc version no newer than the oldest supported host.
+- To chat with a session, open the same directory in VS Code and select it in **Agent Sessions**.
+- VS Code attaches to a daemon that is already running. Set `pi.experimental.nativeDaemon` to make VS Code start the bundled `pimuxd` when no daemon runs. Without it, VS Code starts the older Node.js daemon.
+- `pimuxd` saves recent ACP messages on disk. After a crash, the chat comes back and shows where it stopped. It never resends a prompt or an approval.
+- One client controls a session. Other clients can only observe it.
 
 ## Settings
 
 | Setting | Default | Description |
 |---|---|---|
 | `pi.path` | `""` | Path to the `pi` executable. |
-| `pi.args` | `[]` | More CLI arguments, for example `["--model", "sonnet"]`. |
-| `pi.acp.profiles` | `{}` | Named ACP agents with a command and optional arguments. |
-| `pi.acp.command` | `""` | Executable for new ACP chats when no profiles are set. If empty, ask on first use. |
-| `pi.acp.args` | `[]` | CLI arguments for the ACP executable. |
-| `pi.acp.accentColor` | `""` | ACP highlight color, for example `"#24a487"`. Empty uses the VS Code theme. |
+| `pi.args` | `[]` | More CLI arguments for pi, for example `["--model", "sonnet"]`. |
+| `pi.acp.profiles` | `{}` | Named ACP agents: `command`, `args`, and `accentColor`. |
+| `pi.acp.command`, `pi.acp.args` | `""`, `[]` | The ACP agent when no profiles are set. |
+| `pi.acp.accentColor` | `""` | Color for ACP chats without a profile color, for example `"#24a487"`. |
+| `pi.keepSessionsAlive` | `off` | Run sessions in a daemon: `off`, `remote` (only in remote windows), or `always`. |
+| `pi.detachedDialogs` | `wait` | A question from a detached Pi session: `wait`, `deny`, or `acceptRecommended`. |
+| `pi.experimental.nativeDaemon` | `false` | Start the bundled `pimuxd` when no daemon runs. |
+| `pi.daemonPath` | `""` | Path to `pimuxd` on the extension host. |
 | `pi.resumeLastSession` | `true` | Reopen the last session of the workspace. |
-| `pi.useLoginShellEnv` | `true` | Load the environment of your login shell. |
-| `pi.terminalLocation` | `"editor"` | Where terminals open: as an editor tab or in the terminal panel. |
-| `pi.keepSessionsAlive` | `off` | Run sessions in a daemon apart from VS Code, so that they keep working when the window closes or disconnects: `off`, `remote` (only in remote windows) or `always`. |
-| `pi.detachedDialogs` | `wait` | A question from a session that no window has: `wait` for you, `deny` (cancel it) or `acceptRecommended` (confirm; select the option marked "(Recommended)", else the first). A question for free text always waits. |
-| `pi.warmTabs` | `3` | Idle session tabs per tile that keep their pi process, so that switching to them is quick. Each process uses about 200 MB. |
-| `pi.autoTitle` | `false` | Give each new session a short title, written by a small model from the first prompt. |
-| `pi.titleModel` | `""` | Model for the titles, as `provider/id`. Empty: a Haiku model of the session's provider, else the session's model. |
+| `pi.useLoginShellEnv` | `true` | Load the environment of your login shell (PATH, API keys). |
+| `pi.terminalLocation` | `"editor"` | Where terminals open: an editor tab or the terminal panel. |
+| `pi.sessionPickerLimit` | `300` | Maximum number of session trees in the session list. |
+| `pi.warmTabs` | `3` | Idle tabs per tile that keep their pi process (~200 MB each). |
+| `pi.autoTitle` | `false` | Give each new session a short title from its first prompt. |
+| `pi.titleModel` | `""` | Model for the titles, as `provider/id`. |
 | `pi.continuePrompt` | `"Continue as you left off."` | The prompt that the Continue button sends. |
-| `pi.workarounds` | `{}` | Turn off a workaround for a gap in RPC mode, for example `{ "child-runs": false }`. All are on by default. |
+| `pi.workarounds` | `{}` | Turn off a workaround, for example `{ "child-runs": false }`. |
 
-Extensions can check `process.env.PI_VSCODE === "1"` to know that they run inside VS Code.
+## Limitations
 
-## Limitations (from RPC mode)
-
-TUI-only extension APIs do not work in RPC mode. These are `ctx.ui.custom()`, custom editors, footers and headers, and `onTerminalInput`. Commands that open a composer or overlay in the TUI show their notice instead. See Pi's [RPC Extension UI docs](https://pi.dev) for more information. `/tree` works through the bridge extension, and factory widgets through a workaround. Widgets are read-only, but you can minimize them. The pi-subagents integration hides its fleet list (the agent picker below the editor), because its keys do nothing here. The agents widget shows the top-level agents, and the running-sessions count in the composer includes workflow agents. For everything else, open the session in the terminal.
+- The extension handles these pi TUI commands itself: `/new`, `/resume`, `/model`, `/thinking`, `/compact`, `/name`, `/title`, `/fork`, `/clone`, `/session`, `/copy`, `/export`, and `/restart`.
+- TUI-only extension APIs do not work in RPC mode: `ctx.ui.custom()`, custom editors, footers, headers, and `onTerminalInput`. For these, open the session in the terminal.
+- A host that stops all user processes at logout also stops the daemon. Run `loginctl enable-linger` on such a host.
 
 ## Development
 
 ```bash
 npm install
-npm run build        # or: npm run watch
+npm run build            # or: npm run watch
 npm run typecheck
-npm run package      # creates pi-for-vscode-<version>.vsix
-code --install-extension pi-for-vscode-0.3.3.vsix
+npm run package:native   # VSIX with pimuxd, and dist/pimuxd-<target>.tar.gz
 ```
 
-To debug, press <kbd>F5</kbd> with `.vscode/launch.json` ("Run Extension"). Logs from pi's stderr go to the **Pi** output channel.
+Press <kbd>F5</kbd> ("Run Extension") to debug. Logs from pi's stderr go to the **Pi** output channel.
+
+See [docs/features.md](docs/features.md) for the full feature list and [docs/notes.md](docs/notes.md) for implementation details.
