@@ -36,8 +36,8 @@ The extension starts your installed `pi` in RPC mode (`pi --mode rpc`) in the wo
 - Give a session that you have open a new title from its prompts: *Generate Session Title* (in the same menus as *Rename Session…*) or `/title`. It works without `pi.autoTitle` and replaces the name.
 - Forks and sessions that extensions start (for example subagents) are nested under the session they came from. They are collapsed until you expand them.
 - Sessions run in parallel. If you start a new session or open another one while Pi works, the busy session continues in the background. It shows below the current session in the session list, and a notification tells you when it finishes or needs an answer.
-- Sessions can keep working without VS Code (`pi.keepSessionsAlive`). A session daemon then runs the pi processes. If the window closes or a Remote-SSH connection drops, a session that works continues on the host. When you open the folder again, the session comes back with its tab. A notification tells you which sessions finished in the meantime.
-- The status bar has one **Pi** item. It spins while a session works, and shows the number of sessions that run without a window ("detached"). Click it to list the sessions, show one or stop a detached one, and to change the two daemon settings.
+- The session daemon can keep Pi and ACP sessions running on the host when VS Code closes or Remote-SSH disconnects (`pi.keepSessionsAlive`). Pi tabs restore as before. Reconnect to ACP sessions from **Agent Sessions** in the status bar.
+- **Agent Sessions** lists detached sessions. Select one to reconnect, or use its Stop button to end it.
 - `pi.detachedDialogs` sets what happens when a detached session asks a question: it waits for you (default), the question is cancelled, or the recommended option is accepted.
 - The session list shows the current session first, then the sessions that run in the background, then the other sessions by date. Nested sessions stay under their parent session in each group.
 - *View* (the eye button in the session list, or *Pi: View Session File*) opens a session read-only in a new tab. It starts no pi process and shows new messages as pi writes them. Use it to follow a session that an extension runs, for example a subagent.
@@ -121,12 +121,36 @@ If an extension registers a command with the same name, the extension command ru
 
 VS Code apps opened from the Dock often do not get your shell `PATH`. For this reason, the extension reads the environment of your login shell (mise, nvm, Homebrew, and exported API keys) before it starts pi. To turn this off, use `pi.useLoginShellEnv`, or set `pi.path` to the full path of `pi`.
 
+## ACP chats
+
+<p align="center">
+  <img src="media/screenshots/acp-chat.png" width="380" alt="An ACP chat alongside a Pi tab, with tool results and a context meter">
+  <img src="media/screenshots/acp-models.png" width="380" alt="The inline ACP picker with Model and Mode tabs and an effort slider">
+</p>
+
+Click the Pi logo or group icon at the far left of the sidebar composer toolbar to choose a backend. If the session is empty, the tab switches backends and keeps your draft. Otherwise, the picker opens a new tab. Use **+** in the header to start another session with the same backend. Click a session tab to switch back to it. ACP tabs have a colored dot. Sessions keep working when you switch away. Double-click the active tab title to rename it, or use **Pi: Rename Session…**.
+
+The first time you choose ACP, enter an executable and its arguments. Pi saves them in VS Code settings. Change `pi.acp.command` and `pi.acp.args` later to use a different agent for new sessions.
+
+For Google Antigravity, install `agy`, sign in with `agy acp --login`, and enter `agy` and `["acp"]` in setup. If VS Code cannot find the executable, use its absolute path. For Remote-SSH, install the agent on the remote host. ACP chats need a trusted workspace.
+
+Use **Pi: New ACP Chat** to open an editor tab instead.
+
+ACP chats support streamed replies, tool status, permission prompts, and Stop. The composer enables image attachments, model and effort settings, slash commands, context usage, and compaction when the agent supports them. Kiro v3 reports context usage and supports manual compaction. `/title` generates a title in a separate ACP session using recent prompt text. ACP chats do not use Pi's session files or extensions.
+
+Set `pi.keepSessionsAlive` to `always` or `remote` to run new ACP chats in the daemon. After reconnecting to the workspace, click **Agent Sessions** in the status bar and select the detached chat. Its transcript, running turn, and pending permission requests come back. ACP permissions always wait for an answer. `pi.detachedDialogs` applies only to Pi.
+
+The daemon keeps ACP history in memory, including for idle sessions. Closing an ACP editor tab detaches it. Closing an ACP session tab or tile in the sidebar stops it, as does Stop in the session list. Restarting the daemon loses ACP history. Without keep-alive, closing the chat stops its process.
+
 ## Settings
 
 | Setting | Default | Description |
 |---|---|---|
 | `pi.path` | `""` | Path to the `pi` executable. |
 | `pi.args` | `[]` | More CLI arguments, for example `["--model", "sonnet"]`. |
+| `pi.acp.command` | `""` | Executable for new ACP chats. If empty, ask on first use. |
+| `pi.acp.args` | `[]` | CLI arguments for the ACP executable. |
+| `pi.acp.accentColor` | `""` | ACP highlight color, for example `"#24a487"`. Empty uses the VS Code theme. |
 | `pi.resumeLastSession` | `true` | Reopen the last session of the workspace. |
 | `pi.useLoginShellEnv` | `true` | Load the environment of your login shell. |
 | `pi.terminalLocation` | `"editor"` | Where terminals open: as an editor tab or in the terminal panel. |
